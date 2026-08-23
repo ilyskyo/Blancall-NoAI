@@ -51,10 +51,12 @@ fun AppNavigation() {
 
     // 底部导航栏仅在三个根页面显示（子页面如阅读/练习不显示）
     val rootRoutes = listOf("home", "list", "overview")
-    val currentTab = when (currentRoute) {
-        "home" -> 0
-        "list" -> 1
-        "overview" -> 2
+    // 按「根 tab 归属」匹配，覆盖各根页面的直接子路由（如 statistics/xxx），
+    // 保证进入子页面时底部导航栏仍可见且高亮正确，用户可随时点其它 tab 跳出。
+    val currentTab = when {
+        currentRoute == "home" || currentRoute?.startsWith("home/") == true -> 0
+        currentRoute == "list" || currentRoute?.startsWith("list/") == true -> 1
+        currentRoute == "overview" || currentRoute?.startsWith("statistics/") == true -> 2
         else -> -1
     }
     // 首页在底部导航模式下不再显示左下角入口按钮（入口已迁移到导航栏）。
@@ -65,15 +67,17 @@ fun AppNavigation() {
     fun selectTab(index: Int) {
         val route = rootRoutes[index]
         if (route == currentRoute) return
-        // 关键修复：使用导航图起始目的地 id 做 popUpTo，可兼容「从子页面/统计页等任意深度返回根 tab」，
-        // 并避免 restoreState + launchSingleTop 在回到 startDestination 时偶发不切换页面的问题。
+        // 用目标 route 自身做 popUpTo（而非 startDestinationId）：
+        // 1) 兼容「从子页面/统计页等任意深度返回根 tab」——把目标 tab 之上的所有页面弹出；
+        // 2) 关键：去掉 restoreState，避免回到 startDestination(home) 时状态被恢复、
+        //    NavHost 不再重组该 destination 导致的「点了首页无反应」问题。
         navController.navigate(route) {
-            popUpTo(navController.graph.startDestinationId) {
+            popUpTo(route) {
                 saveState = true
                 inclusive = false
             }
             launchSingleTop = true
-            restoreState = true
+            restoreState = false
         }
     }
 
