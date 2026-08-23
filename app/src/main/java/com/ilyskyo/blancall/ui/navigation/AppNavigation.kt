@@ -40,6 +40,8 @@ import com.ilyskyo.blancall.ui.settings.SettingsScreen
 import com.ilyskyo.blancall.ui.settings.HelpScreen
 import com.ilyskyo.blancall.ui.statistics.OverviewScreen
 import com.ilyskyo.blancall.ui.statistics.StatisticsScreen
+import com.ilyskyo.blancall.ui.western.WesternThoughtScreen
+import com.ilyskyo.blancall.ui.western.LibraryContentPage
 import com.ilyskyo.blancall.ui.theme.AppPrefs
 import com.ilyskyo.blancall.ui.viewmodel.BlancallMode
 import com.ilyskyo.blancall.ui.viewmodel.SectionMode
@@ -48,6 +50,8 @@ import com.ilyskyo.blancall.ui.viewmodel.SectionMode
 fun AppNavigation() {
     val navController = rememberNavController()
     val predictiveBack by AppPrefs.predictiveBackFlow.collectAsState()
+    // 内置素材库：启用任一库后底部导航栏追加「素材库」入口（支持多库扩展）
+    val enabledLibraries by AppPrefs.builtInLibraryKeysFlow.collectAsState()
     // 底部导航栏开关（设置中可开：底部显示 首页/我的文章/数据）
 
     // 当前路由（用于底部导航栏高亮）
@@ -65,13 +69,15 @@ fun AppNavigation() {
     }
 
     // 底部导航栏仅在三个根页面显示（子页面如阅读/练习不显示）
-    val rootRoutes = listOf("home", "list", "overview")
+    val rootRoutes = listOf("home", "list", "overview") +
+        if (enabledLibraries.isNotEmpty()) listOf("philo") else emptyList()
     // 按「根 tab 归属」匹配，覆盖各根页面的直接子路由（如 statistics/xxx），
     // 保证进入子页面时底部导航栏仍可见且高亮正确，用户可随时点其它 tab 跳出。
     val currentTab = when {
         currentRoute == "home" || currentRoute?.startsWith("home/") == true -> 0
         currentRoute == "list" || currentRoute?.startsWith("list/") == true -> 1
         currentRoute == "overview" || currentRoute?.startsWith("statistics/") == true -> 2
+        currentRoute == "philo" || currentRoute?.startsWith("philo_content/") == true -> 3
         else -> -1
     }
     // 首页在底部导航模式下不再显示左下角入口按钮（入口已迁移到导航栏）。
@@ -327,6 +333,30 @@ fun AppNavigation() {
             val articleId = backStackEntry.arguments?.getLong("articleId") ?: 0L
             StatisticsScreen(navController, articleId)
         }
+
+        // 内置素材库卡片页（底部「素材库」tab 进入，同级根页面，无返回键）
+        composable(
+            "philo",
+            enterTransition = noneTransition,
+            exitTransition = noneExitTransition,
+            popExitTransition = noneExitTransition,
+            popEnterTransition = noneTransition
+        ) {
+            WesternThoughtScreen(navController)
+        }
+
+        // 素材库内容页（点卡片进入对应库 WebView）
+        composable(
+            route = "philo_content/{libraryId}",
+            arguments = listOf(navArgument("libraryId") { type = NavType.StringType }),
+            enterTransition = enterSlide,
+            exitTransition = exitSlide,
+            popExitTransition = popExitSlide,
+            popEnterTransition = popEnterSlide
+        ) { backStackEntry ->
+            val libraryId = backStackEntry.arguments?.getString("libraryId") ?: "western"
+            LibraryContentPage(navController, libraryId)
+        }
     }
         } // close weight Box
 
@@ -334,7 +364,8 @@ fun AppNavigation() {
         if (currentTab >= 0) {
             BottomNavBar(
                 currentTab = currentTab,
-                onSelect = { selectTab(it) }
+                onSelect = { selectTab(it) },
+                showLibraryTab = enabledLibraries.isNotEmpty()
             )
         }
     } // close Column
