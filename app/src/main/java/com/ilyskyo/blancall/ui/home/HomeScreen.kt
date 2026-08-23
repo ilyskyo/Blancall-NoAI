@@ -9,7 +9,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.*
@@ -19,7 +18,8 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -35,7 +35,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -50,7 +49,6 @@ import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
-import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.semantics.contentDescription
@@ -78,12 +76,6 @@ import com.ilyskyo.blancall.ui.common.appIconKindFromKey
 import com.ilyskyo.blancall.ui.common.iconKeyFromKind
 import com.ilyskyo.blancall.ui.common.listItemEnter
 import com.ilyskyo.blancall.ui.common.rememberHaptic
-import com.ilyskyo.blancall.ui.common.RevealPhase
-import com.ilyskyo.blancall.ui.common.TouchRevealHost
-import com.ilyskyo.blancall.ui.common.rememberTouchRevealState
-import com.ilyskyo.blancall.ui.common.toTouchAnchor
-import com.ilyskyo.blancall.ui.list.ListScreen
-import com.ilyskyo.blancall.ui.statistics.OverviewScreen
 import com.ilyskyo.blancall.ui.theme.AppPrefs
 import com.ilyskyo.blancall.ui.practice.AdaptiveModePicker
 import com.ilyskyo.blancall.ui.viewmodel.ArticleViewModel
@@ -108,8 +100,6 @@ data class ResumableItem(
 @Composable
 fun HomeScreen(
     navController: NavController,
-    // 底部导航模式：隐藏左下角三个入口按钮（入口已迁移到底部导航栏）
-    hideEntryButtons: Boolean = false
 ) {
     val articleViewModel: ArticleViewModel = viewModel()
     val articles by articleViewModel.articles.collectAsState()
@@ -118,44 +108,55 @@ fun HomeScreen(
     val allRecords by recordRepo.records.collectAsState()
     val dateFormat = remember { SimpleDateFormat("MM-dd HH:mm", Locale.getDefault()) }
 
+    // 搜索栏右侧「添加」按钮实测宽度；供品牌栏「设置」按钮等宽对齐
+    var addButtonWidth by remember { mutableStateOf(0.dp) }
+
     // ── 首页顶部品牌头部：默认收起（仅搜索框），下拉(滚到顶再拉)时展开 ──
     val homeScrollState = rememberScrollState()
     // 展开比例 0..1（0=收起，仅显示搜索框；1=全开，显示 logo+导入+设置）
     val brandProgress = remember { Animatable(0f) }
-    // 品牌行(logo+添加/设置)全展开高度，与下方搜索栏共同构成可下拉释放的头部
+    // 品牌栏(logo+设置)全展开高度；搜索栏常驻不折叠，故无需计入头部展开预算
     val brandHeight = 72.dp
-    val searchBarHeight = 46.dp
-    // 头部总展开高度（搜索栏 + 品牌行）：随下拉进度 0→1 逐步露出
-    val headerFullHeight = brandHeight + searchBarHeight
     val headerScope = rememberCoroutineScope()
-    val topBarConnection = remember(homeScrollState, brandProgress, headerScope) {
+    // 品牌栏开合用带回弹的弹簧动画（略 overshoot，收尾更有弹性）
+    val bounceSpring = spring<Float>(
+        dampingRatio = Spring.DampingRatioMediumBouncy,
+        stiffness = Spring.StiffnessMediumLow
+    )
+    val topBarConnection = remember(homeScrollState, brandProgress, headerScope, bounceSpring) {
         object : NestedScrollConnection {
             override fun onPreScroll(available: Offset, source: NestedScrollSource): Offset {
                 val dy = available.y
-                // 滚到顶再继续下拉：把 over-scroll 转为头部展开
-                if (dy > 0f && homeScrollState.value <= 0f && brandProgress.value < 1f) {
-                    headerScope.launch {
-                        brandProgress.snapTo((brandProgress.value + dy / 300f).coerceIn(0f, 1f))
+                // 滚到顶再继续下拉：
+                //  - 未展开：over-scroll 实时转为头部展开（手指拖动跟随）
+                //  - 已拉满：再次下拉 → 回弹收起（toggle）
+                if (dy > 0f && homeScrollState.value <= 0f) {
+                    if (brandProgress.value >= 0.98f) {
+                        headerScope.launch { brandProgress.animateTo(0f, bounceSpring) }
+                    } else {
+                        headerScope.launch {
+                            brandProgress.snapTo((brandProgress.value + dy / 300f).coerceIn(0f, 1f))
+                        }
                     }
                     return Offset(0f, dy)
                 }
                 return Offset.Zero
             }
             override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset {
-                // 向下滚动内容时若头部开着则收起
+                // 向下滚动内容时若头部开着则回弹收起
                 if (homeScrollState.value > 0f && brandProgress.value > 0f) {
-                    headerScope.launch { brandProgress.snapTo(0f) }
+                    headerScope.launch { brandProgress.animateTo(0f, bounceSpring) }
                 }
                 return Offset.Zero
             }
             override suspend fun onPreFling(available: Velocity): Velocity {
                 if (homeScrollState.value <= 0f && brandProgress.value > 0f) {
                     headerScope.launch {
-                        // 拉满则保持展开（便于点导入/设置），否则松手回弹到默认(仅搜索框)
+                        // 拉满则回弹到完全展开（便于点设置），否则松手回弹收起
                         if (brandProgress.value >= 0.98f) {
-                            brandProgress.animateTo(1f, tween(160))
+                            brandProgress.animateTo(1f, bounceSpring)
                         } else {
-                            brandProgress.animateTo(0f, tween(220))
+                            brandProgress.animateTo(0f, bounceSpring)
                         }
                     }
                     return available
@@ -223,33 +224,6 @@ fun HomeScreen(
     var showModePicker by remember { mutableStateOf(false) }
     var pendingPracticeArticleId by remember { mutableStateOf(0L) }
     var practiceButtonRect by remember { mutableStateOf(Rect.Zero) }
-    // 触点展开转场：左下角圆形按钮 → 目标页面（触点为源的反向展开动画）
-    val revealState = rememberTouchRevealState()
-    // 展开状态跨导航保存：进入练习/阅读页返回后仍保持目标页展开（回全局统计/我的文章）
-    var revealTarget by rememberSaveable { mutableStateOf<String?>(null) }
-    var savedRevealPhase by rememberSaveable { mutableStateOf("Idle") }
-    var savedRevealAx by rememberSaveable { mutableStateOf(0f) }
-    var savedRevealAy by rememberSaveable { mutableStateOf(0f) }
-
-    // 返回恢复 + 同步展开状态（合并为单一 effect，恢复先于同步执行，
-    // 避免 savedRevealPhase 被当前 Idle 状态覆盖导致恢复失效；
-    // restore 修改 phase 会重新触发本 effect，二次执行时 phase 已非 Idle，不会重复恢复）
-    // 底部导航模式：不恢复触点展开状态（入口按钮已隐藏，无触点可用，恢复会导致首页被目标页覆盖“卡没”）
-    LaunchedEffect(revealState.phase, revealState.anchor) {
-        if (!hideEntryButtons &&
-            revealState.phase == RevealPhase.Idle &&
-            savedRevealPhase == RevealPhase.Expanded.name && revealTarget != null
-        ) {
-            revealState.restore(RevealPhase.Expanded, savedRevealAx, savedRevealAy)
-        }
-        savedRevealPhase = revealState.phase.name
-        revealState.anchor?.let {
-            savedRevealAx = it.centerX
-            savedRevealAy = it.centerY
-        }
-    }
-    var listFabRect by remember { mutableStateOf(Rect.Zero) }
-    var statsFabRect by remember { mutableStateOf(Rect.Zero) }
     // 长按文章卡片 → "从首页删除"选项卡
     var hideFromHomeTarget by remember { mutableStateOf<Article?>(null) }
     val savedStateHandle = navController.currentBackStackEntry?.savedStateHandle
@@ -468,7 +442,7 @@ fun HomeScreen(
     ) {
         // 毛玻璃氛围背景（背景色之上、内容之下）
         AmbientBackground()
-        // 内层：首页内容（带安全区 padding），TouchRevealHost 在外层全屏以避免与目标页 statusBarsPadding 双重叠加
+        // 内层：首页内容（带安全区 padding），外层全屏 Box 承载 AmbientBackground 氛围背景
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -490,19 +464,14 @@ fun HomeScreen(
             ) {
             Spacer(Modifier.height(16.dp))
 
-            // ── 品牌头部：默认完全收起（首页只显示模块）；下拉(滚到顶再拉)时
-            //    内容底对齐、高度随进度增长 ⇒ 先露出搜索栏，继续下拉再露出 logo+添加+设置 ──
+            // ── 品牌栏：logo + 设置，默认收起；下拉(滚到顶再拉)时滑出。
+            //    此处不再放「添加」按钮（搜索栏右侧已有），避免重复 ──
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(headerFullHeight * brandProgress.value)
+                    .height(brandHeight * brandProgress.value)
                     .clipToBounds()
             ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .align(Alignment.BottomCenter)
-                ) {
                 Row(
                     modifier = Modifier.fillMaxWidth().height(brandHeight),
                     verticalAlignment = Alignment.CenterVertically
@@ -560,31 +529,25 @@ fun HomeScreen(
                             )
                         }
                     }
-
-                    GlassButton(
-                        onClick = { navController.navigate("import") },
-                        modifier = Modifier.height(40.dp)
-                    ) {
-                        Text("添加", style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.onSurface)
-                    }
-                    Spacer(Modifier.width(8.dp))
                     GlassButton(
                         onClick = { navController.navigate("settings") },
                         modifier = Modifier
+                            // 与搜索栏右侧「添加」按钮等宽对齐
+                            .width(if (addButtonWidth > 0.dp) addButtonWidth else 44.dp)
                             .height(40.dp)
                             .semantics { contentDescription = "设置" }
                     ) {
                         SettingsGearIcon(color = MaterialTheme.colorScheme.onSurface)
                     }
                 }
-                // 搜索栏（位于品牌行之下；因整块内容底对齐，随进度增长先于品牌行露出）
-                HomeSearchBar(
-                    onSearch = { navController.navigate("search") },
-                    onAdd = { navController.navigate("import") }
-                )
-                }
             }
+
+            // ── 搜索栏：常驻显示（不参与折叠），右侧「添加」直导入 ──
+            HomeSearchBar(
+                onSearch = { navController.navigate("search") },
+                onAdd = { navController.navigate("import") },
+                onAddWidthMeasured = { addButtonWidth = it }
+            )
 
             Spacer(Modifier.height(14.dp))
             HorizontalDivider(
@@ -932,53 +895,7 @@ fun HomeScreen(
         }
     }
 
-        // 左下角：入口按钮组（AI 历史 + 我的文章 + 全局统计），均使用触点展开转场。
-        // 位置固定：屏幕左下方，比屏幕底部稍上移一点（不与底部贴死）
-        // 底部导航模式（hideEntryButtons）：隐藏入口按钮，入口已迁移到底部导航栏
-        if (!hideEntryButtons) {
-        Column(
-            modifier = Modifier
-                .align(Alignment.BottomStart)
-                .padding(start = 16.dp, bottom = 40.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // 玻璃入口按钮：与右上角 GlassButton 同款磨砂质感，文字 + 主色短横线
-            GlassEntryButton(
-                label = "文章",
-                onClick = {
-                    // 触点为源的反向展开：点击位置 = 展开起点
-                    revealTarget = "list"
-                    revealState.expand(listFabRect.toTouchAnchor())
-                },
-                modifier = Modifier
-                    .onGloballyPositioned { listFabRect = it.boundsInWindow() }
-                    .semantics { contentDescription = "查看全部文章" }
-            )
-            GlassEntryButton(
-                label = "数据",
-                onClick = {
-                    revealTarget = "overview"
-                    revealState.expand(statsFabRect.toTouchAnchor())
-                },
-                modifier = Modifier
-                    .onGloballyPositioned { statsFabRect = it.boundsInWindow() }
-                    .semantics { contentDescription = "全局学习统计" }
-            )
-        }
-        } // hideEntryButtons 条件闭合
         } // 内层首页内容 Box 闭合
-
-        // 触点展开转场宿主：全屏渲染目标页面（目标页自己处理 statusBarsPadding，避免双重叠加）
-        TouchRevealHost(
-            state = revealState,
-            target = {
-                when (revealTarget) {
-                    // 触点展开方式进入：返回键/系统返回手势均通过 collapse 收起（popBackStack 在栈底无效）
-                    "list" -> ListScreen(navController, onBack = { revealState.collapse() })
-                    "overview" -> OverviewScreen(navController, onBack = { revealState.collapse() })
-                }
-            }
-        )
     }
 
     // 长按"从首页删除"选项卡
@@ -1025,18 +942,20 @@ fun HomeScreen(
 
 /**
  * 首页搜索栏：磨砂玻璃质感，点击进入搜索页；右侧「添加」按钮直达导入。
- * 默认首页显示；下拉展开品牌头部时自动收起（由 AnimatedVisibility 控制）。
+ * 常驻显示，不随下拉折叠；实测「添加」宽度上报给品牌栏「设置」按钮等宽对齐。
  */
 @Composable
 private fun HomeSearchBar(
     onSearch: () -> Unit,
     onAdd: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onAddWidthMeasured: (androidx.compose.ui.unit.Dp) -> Unit = {}
 ) {
     val isDark = isSystemInDarkTheme()
     val bgAlpha = if (isDark) GLASS_ALPHA_DARK else GLASS_ALPHA_LIGHT
     val container = MaterialTheme.colorScheme.surface.copy(alpha = bgAlpha)
     val shape = RoundedCornerShape(14.dp)
+    val density = LocalDensity.current
 
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -1071,10 +990,14 @@ private fun HomeSearchBar(
             }
         }
         Spacer(Modifier.width(10.dp))
-        // 添加按钮
+        // 添加按钮（实测宽度上报，供品牌栏「设置」按钮等宽对齐）
         GlassButton(
             onClick = onAdd,
-            modifier = Modifier.height(46.dp)
+            modifier = Modifier
+                .height(46.dp)
+                .onGloballyPositioned {
+                    onAddWidthMeasured(with(density) { it.size.width.toDp() })
+                }
         ) {
             Text(
                 text = "添加",
@@ -1161,72 +1084,6 @@ private fun HomeArticleCard(
                     Text("开始练习", style = MaterialTheme.typography.labelSmall)
                 }
             }
-        }
-    }
-}
-
-/**
- * 玻璃入口按钮（左下角「文章 / 数据」）：与右上角 GlassButton 同款磨砂质感，
- * 半透明底 + 顶部高光 + 细描边 + 大圆角，文字 + 底部主色短横线，克制的品牌感入口。
- */
-@Composable
-private fun GlassEntryButton(
-    label: String,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val isDark = isSystemInDarkTheme()
-    val highlightColor = if (isDark) {
-        MaterialTheme.colorScheme.primary.copy(alpha = 0.08f)
-    } else {
-        Color.White.copy(alpha = 0.18f)
-    }
-    val bgColor = if (isDark) {
-        MaterialTheme.colorScheme.surface.copy(alpha = GLASS_ALPHA_DARK)
-    } else {
-        MaterialTheme.colorScheme.surface.copy(alpha = GLASS_ALPHA_LIGHT)
-    }
-    val shape = RoundedCornerShape(14.dp)
-
-    Box(
-        modifier = modifier
-            .size(44.dp)
-            .clip(shape)
-            .background(bgColor)
-            .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), shape)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = ripple(),
-                onClick = onClick
-            ),
-        contentAlignment = Alignment.Center
-    ) {
-        // 顶部高光：玻璃上缘反光（matchParentSize 不参与测量，不会撑大按钮）
-        Box(
-            modifier = Modifier
-                .matchParentSize()
-                .background(
-                    Brush.verticalGradient(
-                        colorStops = arrayOf(
-                            0f to highlightColor,
-                            0.5f to Color.Transparent
-                        )
-                    )
-                )
-        )
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Text(
-                label,
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurface
-            )
-            Spacer(Modifier.height(3.dp))
-            Box(
-                modifier = Modifier
-                    .size(width = 10.dp, height = 2.dp)
-                    .clip(RoundedCornerShape(1.dp))
-                    .background(MaterialTheme.colorScheme.primary)
-            )
         }
     }
 }
