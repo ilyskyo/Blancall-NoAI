@@ -1,4 +1,4 @@
-// Copyright (c) 2026 ilyskyo
+﻿// Copyright (c) 2026 ilyskyo
 // SPDX-License-Identifier: MIT
 
 package com.ilyskyo.blancall
@@ -28,6 +28,7 @@ import androidx.navigation.compose.rememberNavController
 import com.ilyskyo.blancall.notification.NotificationHelper
 import com.ilyskyo.blancall.notification.ReminderWorker
 import com.ilyskyo.blancall.ui.common.WelcomeScreen
+import com.ilyskyo.blancall.ui.onboarding.OnboardingScreen
 import com.ilyskyo.blancall.ui.navigation.AppNavigation
 import com.ilyskyo.blancall.ui.navigation.NavigationDispatcher
 import com.ilyskyo.blancall.ui.settings.HelpScreen
@@ -91,7 +92,12 @@ class MainActivity : ComponentActivity() {
                         exit = fadeOut(tween(200))
                     ) {
                         when (guideStep) {
+                            // 0=欢迎页(隐私政策/赞赏区) → 1=可视化引导 → 2=帮助页(开始使用)
                             0 -> WelcomeScreen(onContinue = { guideStep = 1 })
+                            1 -> OnboardingScreen(
+                                navController = rememberNavController(),
+                                onFinish = { guideStep = 2 }
+                            )
                             else -> HelpScreen(
                                 navController = rememberNavController(),
                                 welcomeMode = true,
