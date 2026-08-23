@@ -18,6 +18,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -27,6 +30,8 @@ import androidx.navigation.compose.rememberNavController
 import androidx.navigation.navArgument
 import com.ilyskyo.blancall.ui.common.BottomNavBar
 import com.ilyskyo.blancall.ui.home.HomeScreen
+import com.ilyskyo.blancall.ui.onboarding.OnboardingScreen
+import com.ilyskyo.blancall.ui.search.SearchScreen
 import com.ilyskyo.blancall.ui.import.ImportScreen
 import com.ilyskyo.blancall.ui.list.ListScreen
 import com.ilyskyo.blancall.ui.practice.PracticeScreen
@@ -48,6 +53,16 @@ fun AppNavigation() {
     // 当前路由（用于底部导航栏高亮）
     val currentBackStack by navController.currentBackStackEntryAsState()
     val currentRoute = currentBackStack?.destination?.route
+
+    // 首次使用引导页：首次启动展示一次，设置里也可重看
+    val onboardingSeen by AppPrefs.onboardingSeenFlow.collectAsState()
+    var onboardingRedirected by remember { mutableStateOf(!onboardingSeen) }
+    LaunchedEffect(onboardingSeen) {
+        if (!onboardingSeen && !onboardingRedirected) {
+            onboardingRedirected = true
+            navController.navigate("onboarding")
+        }
+    }
 
     // 底部导航栏仅在三个根页面显示（子页面如阅读/练习不显示）
     val rootRoutes = listOf("home", "list", "overview")
@@ -265,6 +280,28 @@ fun AppNavigation() {
             popEnterTransition = popEnterSlide
         ) {
             SettingsScreen(navController)
+        }
+
+        // 首页搜索页（搜索标题 / 正文 / 添加日期）
+        composable(
+            "search",
+            enterTransition = enterSlide,
+            exitTransition = exitSlide,
+            popExitTransition = popExitSlide,
+            popEnterTransition = popEnterSlide
+        ) {
+            SearchScreen(navController)
+        }
+
+        // 首次使用引导页（首启自动进入；设置里可从「帮助」重看）
+        composable(
+            "onboarding",
+            enterTransition = enterSlide,
+            exitTransition = exitSlide,
+            popExitTransition = popExitSlide,
+            popEnterTransition = popEnterSlide
+        ) {
+            OnboardingScreen(navController)
         }
 
         composable(
