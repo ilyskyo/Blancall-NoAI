@@ -1,4 +1,4 @@
-// Copyright (c) 2026 ilyskyo
+﻿// Copyright (c) 2026 ilyskyo
 // SPDX-License-Identifier: MIT
 
 package com.ilyskyo.blancall.ui.common
@@ -71,7 +71,7 @@ fun WelcomeScreen(
                 .padding(horizontal = 28.dp, vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(Modifier.height(24.dp))
+            Spacer(Modifier.height(56.dp))
 
             // ── 品牌标题 ──
             Text(
@@ -89,7 +89,7 @@ fun WelcomeScreen(
                 textAlign = TextAlign.Center
             )
 
-            Spacer(Modifier.height(40.dp))
+            Spacer(Modifier.height(68.dp))
 
             // ── 完全离线介绍 ──
             Text(
