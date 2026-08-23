@@ -157,7 +157,7 @@ fun AppNavigation() {
         Box(modifier = Modifier.weight(1f)) {
     NavHost(
         navController = navController,
-        startDestination = "home"
+        startDestination = if (onboardingSeen) "home" else "onboarding" // 首启进引导
     ) {
         composable(
             "home",
