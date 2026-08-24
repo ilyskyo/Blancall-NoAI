@@ -80,6 +80,10 @@ object AppPrefs {
     /** 已看过「非官方内容免责提示」的素材库 id 集合（如 "gaokao"），每个库首次打开提示一次 */
     val libraryDisclaimerSeenFlow: StateFlow<Set<String>> = _libraryDisclaimerSeenFlow.asStateFlow()
 
+    private val _pdfViewModeFlow = MutableStateFlow("text")
+    /** PDF 预览视图模式：text=纯文本排版，image=原 PDF 图片渲染；跨篇目持久记忆 */
+    val pdfViewModeFlow: StateFlow<String> = _pdfViewModeFlow.asStateFlow()
+
     @SuppressLint("ApplySharedPref")
     fun init(context: Context) {
         prefs = context.applicationContext.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
@@ -98,6 +102,7 @@ object AppPrefs {
         _builtInLibraryKeysFlow.value = prefs.getStringSet("built_in_library_keys", emptySet())?.toSet() ?: emptySet()
         _onboardingSeenFlow.value = prefs.getBoolean("onboarding_seen", false)
         _libraryDisclaimerSeenFlow.value = prefs.getStringSet("library_disclaimer_seen", emptySet())?.toSet() ?: emptySet()
+        _pdfViewModeFlow.value = prefs.getString("pdf_view_mode", "text") ?: "text"
     }
 
     var predictiveBackEnabled: Boolean
@@ -237,6 +242,16 @@ object AppPrefs {
         prefs.edit { putStringSet("library_disclaimer_seen", set) }
         _libraryDisclaimerSeenFlow.value = set.toSet()
     }
+
+    /** 设置 PDF 预览视图模式（text=纯文本排版 / image=原 PDF 图片渲染），跨篇目持久记忆 */
+    fun setPdfViewMode(mode: String) {
+        if (!::prefs.isInitialized) return
+        prefs.edit { putString("pdf_view_mode", mode) }
+        _pdfViewModeFlow.value = mode
+    }
+
+    /** 当前 PDF 预览视图模式（text=纯文本排版 / image=原 PDF 图片渲染） */
+    fun pdfViewMode(): String = _pdfViewModeFlow.value
 
     /** 首次使用引导是否已完成（开屏页与欢迎帮助页只在第一次出现） */
     var firstLaunchDone: Boolean
