@@ -22,6 +22,9 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
@@ -35,6 +38,8 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.text.TextStyle
 import com.ilyskyo.blancall.ui.common.AppIcon
 import com.ilyskyo.blancall.ui.common.AppIconKind
 import com.ilyskyo.blancall.ui.common.BlancallAlertDialog
@@ -158,6 +163,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
         derivedStateOf { userAnswers.values.count { it.isNotBlank() } }
     }
     val showHint by vm.showHint.collectAsState()
+    val fontScale by vm.fontScale.collectAsState()
     val blankCountWarning by vm.blankCountWarning.collectAsState()
 
     // PDF 导出（F8）
@@ -174,11 +180,31 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
         ) {
             BackButton(onClick = { navController.popBackStack() })
             Spacer(Modifier.width(8.dp))
+            // Top title: swipe left/right to cycle the three practice modes
+            val latestMode by rememberUpdatedState(mode)
+            val titleSwipeEnabled by rememberUpdatedState(modeSelected && !isSubmitted)
             Text(
                 text = article?.title ?: "",
                 style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.weight(1f),
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier
+                    .weight(1f)
+                    .pointerInput(Unit) {
+                        var accumulated = 0f
+                        detectHorizontalDragGestures(
+                            onDragStart = { accumulated = 0f },
+                            onDragCancel = { accumulated = 0f },
+                            onDragEnd = {
+                                if (titleSwipeEnabled) {
+                                    when {
+                                        accumulated <= -TitleSwipeThreshold -> vm.setMode(nextMode(latestMode))
+                                        accumulated >= TitleSwipeThreshold -> vm.setMode(prevMode(latestMode))
+                                    }
+                                }
+                                accumulated = 0f
+                            }
+                        ) { _, dragAmount -> accumulated += dragAmount }
+                    },
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -462,7 +488,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
         Spacer(modifier = Modifier.height(12.dp))
 
         // 内容区域
-        Box(modifier = Modifier.weight(1f)) {
+        Box(modifier = Modifier.weight(1f).pinchZoom { vm.adjustFontScale(it) }) {
             if (article == null || (modeSelected && (
                 (mode == BlancallMode.SENTENCE && sentenceCloze == null)
                 || (mode == BlancallMode.WORD && wordCloze == null)
@@ -492,6 +518,15 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                     transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(180)) },
                     label = "modeContent"
                 ) { currentMode ->
+                    // Two-finger pinch zoom: keep colors/shapes, scale all text sizes by fontScale
+                    val scheme = MaterialTheme.colorScheme
+                    val shapes = MaterialTheme.shapes
+                    val baseType = MaterialTheme.typography
+                    MaterialTheme(
+                        colorScheme = scheme,
+                        shapes = shapes,
+                        typography = scaledTypography(baseType, fontScale)
+                    ) {
                     // 判分卡"查看本篇文章数据"：仅单篇文章练习时可用（跨文复习无单篇统计页）
                     val viewArticleData: (() -> Unit)? = if (articleIds.size == 1) {
                         { navController.navigate("statistics/${articleIds.first()}") }
@@ -523,6 +558,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                             onViewArticleData = viewArticleData,
                             onInputChange = { vm.updateDictationInput(it) }
                         )
+                    }
                     }
                 }
             }
@@ -2059,4 +2095,69 @@ private fun SectionCheckItem(
             )
         }
     }
+}
+
+// ========== Top title: swipe to switch practice mode ==========
+
+private const val TitleSwipeThreshold = 80f
+
+/** Ordered list of the three modes for looping swipe switching. */
+private val MODE_ORDER = listOf(BlancallMode.SENTENCE, BlancallMode.WORD, BlancallMode.REVERSE)
+
+private fun nextMode(m: BlancallMode): BlancallMode =
+    MODE_ORDER[(MODE_ORDER.indexOf(m) + 1) % MODE_ORDER.size]
+
+private fun prevMode(m: BlancallMode): BlancallMode =
+    MODE_ORDER[(MODE_ORDER.indexOf(m) - 1 + MODE_ORDER.size) % MODE_ORDER.size]
+
+// ========== Two-finger pinch to scale font size ==========
+
+/**
+ * Two-finger pinch zoom: only reports zoom when >=2 pointers are down,
+ * so a single-finger drag passes through to the underlying scroller.
+ */
+private fun Modifier.pinchZoom(onZoomChange: (Float) -> Unit): Modifier = pointerInput(Unit) {
+    awaitEachGesture {
+        awaitFirstDown(requireUnconsumed = false)
+        var prevDist = -1f
+        do {
+            val event = awaitPointerEvent()
+            val pressed = event.changes.filter { it.pressed }
+            if (pressed.size >= 2) {
+                val a = pressed[0].position
+                val b = pressed[1].position
+                val dx = a.x - b.x
+                val dy = a.y - b.y
+                val dist = kotlin.math.sqrt(dx * dx + dy * dy)
+                if (prevDist > 0f && dist > 0f) {
+                    val factor = dist / prevDist
+                    if (factor.isFinite()) onZoomChange(factor)
+                }
+                prevDist = dist
+            }
+        } while (event.changes.any { it.pressed })
+    }
+}
+
+/** Scale every font size in [base] Typography by [scale] (lineHeight too). */
+private fun scaledTypography(base: Typography, scale: Float): Typography {
+    if (scale <= 0f || scale == 1f) return base
+    fun s(ts: TextStyle): TextStyle = ts.copy(fontSize = ts.fontSize * scale, lineHeight = ts.lineHeight * scale)
+    return Typography(
+        displayLarge = s(base.displayLarge),
+        displayMedium = s(base.displayMedium),
+        displaySmall = s(base.displaySmall),
+        headlineLarge = s(base.headlineLarge),
+        headlineMedium = s(base.headlineMedium),
+        headlineSmall = s(base.headlineSmall),
+        titleLarge = s(base.titleLarge),
+        titleMedium = s(base.titleMedium),
+        titleSmall = s(base.titleSmall),
+        bodyLarge = s(base.bodyLarge),
+        bodyMedium = s(base.bodyMedium),
+        bodySmall = s(base.bodySmall),
+        labelLarge = s(base.labelLarge),
+        labelMedium = s(base.labelMedium),
+        labelSmall = s(base.labelSmall)
+    )
 }

@@ -137,6 +137,15 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
     private val _showHint = MutableStateFlow(false)
     val showHint: StateFlow<Boolean> = _showHint.asStateFlow()
 
+    // 双指缩放字号（练习页），默认 1.0x，范围 0.6x ~ 3.0x
+    private val _fontScale = MutableStateFlow(1f)
+    val fontScale: StateFlow<Float> = _fontScale.asStateFlow()
+    fun adjustFontScale(factor: Float) {
+        if (!factor.isFinite() || factor <= 0f) return
+        _fontScale.value = (_fontScale.value * factor).coerceIn(0.6f, 3.0f)
+    }
+    fun resetFontScale() { _fontScale.value = 1f }
+
     // 空数警告提示
     private val _blankCountWarning = MutableStateFlow<BlankCountWarning?>(null)
     val blankCountWarning: StateFlow<BlankCountWarning?> = _blankCountWarning.asStateFlow()

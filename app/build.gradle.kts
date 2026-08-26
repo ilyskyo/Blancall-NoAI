@@ -1,4 +1,4 @@
-﻿import java.io.FileInputStream
+import java.io.FileInputStream
 import java.util.Properties
 
 plugins {
@@ -28,8 +28,8 @@ android {
         applicationId = "com.ilyskyo.blancall.noai"
         minSdk = 26
         targetSdk = 36
-        versionCode = 14
-        versionName = "4.7-NoAI"
+        versionCode = 15
+        versionName = "5.0-NoAI"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
