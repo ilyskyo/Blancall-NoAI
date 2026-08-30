@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 ilyskyo
+// Copyright (c) 2026 ilyskyo
 // SPDX-License-Identifier: MIT
 
 package com.ilyskyo.blancall.ui.statistics
@@ -53,6 +53,7 @@ import com.ilyskyo.blancall.data.repository.FsrsStateStore
 import com.ilyskyo.blancall.data.repository.RecordRepository
 import com.ilyskyo.blancall.ui.common.AmbientBackground
 import com.ilyskyo.blancall.ui.common.BackButton
+import com.ilyskyo.blancall.ui.theme.Macaron
 import com.ilyskyo.blancall.ui.common.GlassButton
 import com.ilyskyo.blancall.ui.common.GlassDropdownMenu
 import com.ilyskyo.blancall.ui.common.GlassMenuItem
@@ -245,12 +246,23 @@ fun OverviewScreen(navController: NavController, onBack: (() -> Unit)? = null) {
         )
     }
 
+    // 累计阅读时长（秒）：跨所有文章汇总沉浸阅读模式记录
+    val totalReadingSeconds = remember(articles) {
+        articles.sumOf { AppPrefs.getReadingSeconds(it.id) }
+    }
+
     // ── 遗忘曲线预测：FSRS 自适应调度（无 FSRS 状态的文章回退模板）──
     val fsrsStore = remember {
         FsrsStateStore.getInstance(context.filesDir.resolve("fsrs_state.json").absolutePath)
     }
-    val predictions = remember(articles, allRecords, template) {
-        ForgettingPredictor.predict(articles, allRecords, template, fsrsStore.allStates())
+    // FSRS 状态后台加载：首帧先渲染，加载完成后刷新，避免同步读文件卡顿导致预测短暂失真
+    var fsrsStates by remember { mutableStateOf(fsrsStore.allStates()) }
+    LaunchedEffect(Unit) {
+        fsrsStore.awaitLoaded()
+        fsrsStates = fsrsStore.allStates()
+    }
+    val predictions = remember(articles, allRecords, template, fsrsStates) {
+        ForgettingPredictor.predict(articles, allRecords, template, fsrsStates)
     }
     val dueSoon = remember(predictions) { ForgettingPredictor.dueSoon(predictions).take(5) }
 
@@ -424,7 +436,8 @@ fun OverviewScreen(navController: NavController, onBack: (() -> Unit)? = null) {
             item {
                 AnimatedOverviewCard {
                     GlassCard(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                        // 清新马卡龙：薰衣草淡彩卡面
+                        containerColor = Macaron.lavender().fill
                     ) {
                         Column(Modifier.padding(18.dp)) {
                             Text("数据总览", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
@@ -459,7 +472,15 @@ fun OverviewScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                                         Text("累计练习 ${hours}时${mins}分",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        Spacer(Modifier.height(6.dp))
+                                        Spacer(Modifier.height(4.dp))
+                                    }
+                                    if (totalReadingSeconds > 0) {
+                                        val rHours = totalReadingSeconds / 3600
+                                        val rMins = (totalReadingSeconds / 60) % 60
+                                        Text("累计阅读 ${rHours}时${rMins}分",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        Spacer(Modifier.height(4.dp))
                                     }
                                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                         StatItem("练习次数", "${stats.totalPractices}")
@@ -647,7 +668,7 @@ fun OverviewScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                             for ((articleId, rate, count) in stats.weakestArticles) {
                                 GlassCard(
                                     modifier = Modifier.weight(1f),
-                                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                                    containerColor = Macaron.neutral().fill,
                                     onClick = { navController.navigate("statistics/$articleId") }
                                 ) {
                                     Row(
@@ -676,7 +697,7 @@ fun OverviewScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                     items(stats.weakestArticles, key = { it.first }) { (articleId, rate, count) ->
                         GlassCard(
                             modifier = Modifier.fillMaxWidth(),
-                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            containerColor = Macaron.neutral().fill,
                             onClick = { navController.navigate("statistics/$articleId") }
                         ) {
                             Row(
@@ -898,7 +919,7 @@ private fun ForgettingPredictionCard(
 
     GlassCard(
         modifier = Modifier.fillMaxWidth(),
-        containerColor = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f)
+        containerColor = MaterialTheme.colorScheme.error.copy(alpha = 0.06f)
     ) {
         Column(Modifier.padding(16.dp)) {
             Text("⏰ 即将遗忘", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold,

@@ -23,11 +23,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.ilyskyo.blancall.algorithm.PdfTextExtractor
 import kotlin.math.max
@@ -90,8 +88,7 @@ fun TextContentReader(
                     text = para,
                     style = MaterialTheme.typography.bodyLarge.copy(
                         fontSize = 18.sp,
-                        lineHeight = 30.sp,
-                        textIndent = TextIndent(firstLine = 2.em)
+                        lineHeight = 30.sp
                     ),
                     color = MaterialTheme.colorScheme.onSurface,
                     modifier = Modifier.fillMaxWidth()

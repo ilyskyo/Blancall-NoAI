@@ -48,6 +48,7 @@ val OnBackgroundDark = Color(0xFFE7E8EC)
 val SurfaceDark = Color(0xFF1A1C21)
 val OnSurfaceDark = Color(0xFFE7E8EC)
 val SurfaceVariantDark = Color(0xFF23252B)
+val SurfaceContainerHighDark = Color(0xFF2E3138) // 更高层：浮层 / 入口按钮 / 顶栏
 val OnSurfaceVariantDark = Color(0xFFBDC0C8)
 val OutlineDark = Color(0xFF7E8289)
 val OutlineVariantDark = Color(0xFF43474E)

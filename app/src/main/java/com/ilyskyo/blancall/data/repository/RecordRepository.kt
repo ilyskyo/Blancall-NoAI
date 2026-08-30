@@ -87,7 +87,9 @@ class RecordRepository(private val filePath: String) {
                     timestamp = obj.optLong("timestamp", System.currentTimeMillis()),
                     duration = obj.optLong("duration", 0L),
                     similarity = obj.optDouble("similarity", 0.0).toFloat(),
-                    rating = obj.optInt("rating", 0)
+                    rating = obj.optInt("rating", 0),
+                    weakHints = obj.optInt("weakHints", 0),
+                    strongHints = obj.optInt("strongHints", 0)
                 )
                 loaded.add(record)
                 if (record.id > maxId) maxId = record.id
@@ -149,6 +151,8 @@ class RecordRepository(private val filePath: String) {
                         obj.put("duration", record.duration)
                         obj.put("similarity", record.similarity.toDouble())
                         obj.put("rating", record.rating)
+                        obj.put("weakHints", record.weakHints)
+                        obj.put("strongHints", record.strongHints)
                         val mistakesArr = JSONArray()
                         for (m in record.mistakes) {
                             val mObj = JSONObject()
@@ -165,7 +169,9 @@ class RecordRepository(private val filePath: String) {
                     tmpFile.writeText(jsonArray.toString())
                     val mainFile = File(filePath)
                     if (mainFile.exists()) {
-                        mainFile.copyTo(File(filePath + ".bak"), overwrite = true)
+                        val bak = File(filePath + ".bak")
+                        if (bak.exists()) bak.delete()
+                        mainFile.renameTo(bak)
                     }
                     if (!tmpFile.renameTo(mainFile)) {
                         throw IOException("重命名临时文件失败: ${tmpFile.absolutePath} -> ${mainFile.absolutePath}")
@@ -202,16 +208,6 @@ class RecordRepository(private val filePath: String) {
         awaitLoaded()
         // O(n) 过滤；记录数量可控，暂不维护 articleId 索引 Map
         return _records.value.filter { it.articleId == articleId }.sortedByDescending { it.timestamp }
-    }
-
-    fun getTotalCount(): Int = _records.value.size
-
-    fun getCorrectRate(): Float {
-        val all = _records.value
-        if (all.isEmpty()) return 0f
-        val total = all.sumOf { it.totalBlanks }
-        val correct = all.sumOf { it.correctCount }
-        return if (total > 0) correct.toFloat() / total else 0f
     }
 
     companion object {

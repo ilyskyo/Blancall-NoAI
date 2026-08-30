@@ -27,9 +27,13 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
@@ -47,6 +51,7 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun ReaderScreen(navController: NavController, articleId: Long) {
+    val context = LocalContext.current
     val articleViewModel: ArticleViewModel = viewModel()
     var article by remember { mutableStateOf<Article?>(null) }
     // 加载失败标记：articleId 无对应文章时展示“文章不存在”而非永久转圈
@@ -183,6 +188,7 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
         }
         }
 
+        // 娌夋蹈闃呰妯″紡涓嬮《閮ㄥ鑸闅愯棌锛岄渶涓哄彸涓婅鎮诞閫€鍑烘寜閽鐣欑┖闂达紝閬垮厤鎸夐挳涓庨琛屾爣棰?姝ｆ枃閲嶅彔
         Spacer(modifier = Modifier.height(8.dp))
 
         article?.let { art ->
@@ -224,20 +230,39 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
 
                     Spacer(modifier = Modifier.height(16.dp))
 
+                    val readingFontId by AppPrefs.readingFontIdFlow.collectAsState()
+                    val readingFontFamily = remember(readingFontId) {
+                        ReaderFonts.resolveFontFamily(context, readingFontId) ?: FontFamily.Default
+                    }
+                    val autoIndentEnabled by AppPrefs.autoIndentEnabledFlow.collectAsState()
+                    val paragraphs = remember(art.content) {
+                        art.content.split("\n\n").map { it.trim() }.filter { it.isNotEmpty() }
+                    }
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
                         color = MaterialTheme.colorScheme.surface,
                         shape = RoundedCornerShape(12.dp),
                         tonalElevation = 1.dp
                     ) {
-                        Text(
-                            text = art.content,
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface,
+                        Column(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(16.dp)
-                        )
+                        ) {
+                            paragraphs.forEachIndexed { index, para ->
+                                if (index > 0) Spacer(Modifier.height(10.dp))
+                                Text(
+                                    text = para,
+                                    style = MaterialTheme.typography.bodyLarge.copy(
+                                        textIndent = if (autoIndentEnabled && art.autoIndent)
+                                            TextIndent(firstLine = 2.em) else TextIndent()
+                                    ),
+                                    fontFamily = readingFontFamily,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    modifier = Modifier.fillMaxWidth()
+                                )
+                            }
+                        }
                     }
                 }
 
@@ -363,32 +388,15 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
         }
     }
 
-    // 沉浸阅读模式：右上角悬浮退出按钮（返回手势同样可退出）
+    // ── 沉浸阅读模式：全屏沉浸 + 章节翻页 + 断点续读 ──
     if (readingMode) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding(),
-            contentAlignment = Alignment.TopEnd
-        ) {
-            TextButton(
-                onClick = { readingMode = false },
-                modifier = Modifier.padding(top = 12.dp, end = 12.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    AppIcon(
-                        kind = AppIconKind.Close,
-                        modifier = Modifier.size(18.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.width(4.dp))
-                    Text("退出阅读", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                }
-            }
+        article?.let { art ->
+            ReadingModeScreen(
+                article = art,
+                onExit = { readingMode = false }
+            )
         }
     }
-
     // 删除确认对话框（引用公共组件）
     if (showDeleteDialog) {
         article?.let { art ->

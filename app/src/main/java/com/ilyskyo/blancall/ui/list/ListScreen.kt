@@ -21,6 +21,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,9 +45,11 @@ import com.ilyskyo.blancall.algorithm.PdfExporter
 import com.ilyskyo.blancall.data.model.Article
 import com.ilyskyo.blancall.data.repository.FsrsStateStore
 import com.ilyskyo.blancall.data.repository.RecordRepository
+import com.ilyskyo.blancall.ui.common.AmbientBackground
 import com.ilyskyo.blancall.ui.common.BackButton
 import com.ilyskyo.blancall.ui.common.DeleteConfirmDialog
 import com.ilyskyo.blancall.ui.common.GlassButton
+import com.ilyskyo.blancall.ui.common.GlassCard
 import com.ilyskyo.blancall.ui.practice.AdaptiveModePicker
 import com.ilyskyo.blancall.ui.theme.AppPrefs
 import com.ilyskyo.blancall.ui.viewmodel.ArticleViewModel
@@ -61,6 +64,12 @@ import java.util.Locale
 fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
     val articleViewModel: ArticleViewModel = viewModel()
     val articles by articleViewModel.articles.collectAsState()
+    // 文章列表按"新添加在前"排列：创建时间倒序，同时间按 id 倒序（id 单调递增，兜底旧数据无 createdAt）
+    val sortedArticles = remember(articles) {
+        articles.sortedWith(
+            compareByDescending<Article> { it.createdAt }.thenByDescending { it.id }
+        )
+    }
     val context = LocalContext.current
     val recordRepo = remember { RecordRepository.getInstance(context.filesDir.resolve("records.json").absolutePath) }
     val allRecords by recordRepo.records.collectAsState()
@@ -72,7 +81,22 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
     val fsrsStore = remember {
         FsrsStateStore.getInstance(context.filesDir.resolve("fsrs_state.json").absolutePath)
     }
-    val fsrsStates = remember { fsrsStore.allStates() }
+    // FSRS 状态后台加载：首帧先渲染（无状态=未开始），加载完成后刷新，避免进入列表时同步读文件卡顿
+    var fsrsStates by remember { mutableStateOf(fsrsStore.allStates()) }
+    LaunchedEffect(Unit) {
+        fsrsStore.awaitLoaded()
+        fsrsStates = fsrsStore.allStates()
+    }
+    // 预计算每篇文章复习状态，避免 Lazy 列表逐项组合时重复对记录排序（记录多的文章尤甚）。
+    // 同时配合下方 items/gridItems 的 contentType，消除进入列表与滚动时的重复组合开销。
+    val reviewStatusByArticle = remember(recordsByArticle, fsrsStates) {
+        sortedArticles.associate { article ->
+            article.id to EbbinghausScheduler.getReviewStatus(
+                fsrsStates[article.id],
+                recordsByArticle[article.id] ?: emptyList()
+            )
+        }
+    }
     var deleteTarget by remember { mutableStateOf<Article?>(null) }
     var deleteTargets by remember { mutableStateOf<List<Article>>(emptyList()) }
     val dateFormat = remember { SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()) }
@@ -108,10 +132,11 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .statusBarsPadding()
-            .background(MaterialTheme.colorScheme.background),
+            .statusBarsPadding(),
         contentAlignment = Alignment.TopCenter
     ) {
+        // 氛围光斑背景（与首页统一玻璃语言）
+        AmbientBackground()
         Column(
             modifier = Modifier
                 .fillMaxSize()
@@ -206,12 +231,12 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(bottom = 12.dp)
                 ) {
-                    gridItems(articles, key = { it.id }) { article ->
-                        val records = recordsByArticle[article.id] ?: emptyList()
+                    gridItems(sortedArticles, key = { it.id }, contentType = { "article" }) { article ->
                         ArticleCard(
                             article = article,
                             dateFormat = dateFormat,
-                            reviewStatus = EbbinghausScheduler.getReviewStatus(fsrsStates[article.id], records),
+                            reviewStatus = reviewStatusByArticle[article.id]
+                                ?: EbbinghausScheduler.ReviewStatus.NOT_STARTED,
                             onClick = {
                                 if (crossSelectMode) {
                                     selectedIds = if (article.id in selectedIds)
@@ -250,12 +275,12 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     contentPadding = PaddingValues(bottom = 12.dp)
                 ) {
-                    items(articles, key = { it.id }) { article ->
-                        val records = recordsByArticle[article.id] ?: emptyList()
+                    items(sortedArticles, key = { it.id }, contentType = { "article" }) { article ->
                         ArticleCard(
                             article = article,
                             dateFormat = dateFormat,
-                            reviewStatus = EbbinghausScheduler.getReviewStatus(fsrsStates[article.id], records),
+                            reviewStatus = reviewStatusByArticle[article.id]
+                                ?: EbbinghausScheduler.ReviewStatus.NOT_STARTED,
                             onClick = {
                                 if (crossSelectMode) {
                                     selectedIds = if (article.id in selectedIds)
@@ -486,20 +511,17 @@ private fun ArticleCard(
         is EbbinghausScheduler.ReviewStatus.PENDING -> "${s.daysLeft}天后复习" to MaterialTheme.colorScheme.outline
         is EbbinghausScheduler.ReviewStatus.COMPLETED -> "已掌握" to MaterialTheme.colorScheme.primary
     }
-    Card(
-        modifier = Modifier
-            .fillMaxWidth()
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
+    GlassCard(
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
-        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-            else MaterialTheme.colorScheme.surface
-        ),
-        border = androidx.compose.foundation.BorderStroke(
-            if (isSelected) 1.dp else 0.5.dp,
-            if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
-        )
+        // 列表含数十张卡片：关闭逐卡毛玻璃模糊背板，改用半透明染色层，
+        // 既保留玻璃观感又彻底消除进入列表时的 GPU 模糊卡顿
+        backdrop = false,
+        containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else null,
+        containerAlpha = if (isSelected) 0.30f else null,
+        borderColor = if (isSelected) MaterialTheme.colorScheme.primary else null,
+        onClick = onClick,
+        onLongClick = onLongClick
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(
@@ -515,45 +537,51 @@ private fun ArticleCard(
                     )
                     Spacer(Modifier.width(8.dp))
                 }
-                Text(
-                    text = article.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-                if (statusText != null) {
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = statusText.component2().copy(alpha = 0.12f)
+                Column(modifier = Modifier.weight(1f)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = statusText.component1(),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = statusText.component2(),
-                            fontWeight = FontWeight.Medium
+                            text = article.title,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
                         )
+                        if (statusText != null) {
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = statusText.component2().copy(alpha = 0.12f)
+                            ) {
+                                Text(
+                                    text = statusText.component1(),
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = statusText.component2(),
+                                    fontWeight = FontWeight.Medium
+                                )
+                            }
+                        }
                     }
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        text = "${article.content.length} 字符  ·  ${dateFormat.format(Date(article.createdAt))}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-            }
-            Spacer(modifier = Modifier.height(6.dp))
-            Text(
-                text = "${article.content.length} 字符  ·  ${dateFormat.format(Date(article.createdAt))}",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Spacer(Modifier.width(12.dp))
+                // 开始练习：固定卡片右侧垂直居中（不再独占一行），胶囊圆角更精致
                 Button(
                     onClick = onPractice,
                     modifier = practiceModifier.height(40.dp),
-                    shape = RoundedCornerShape(8.dp),
-                    contentPadding = PaddingValues(horizontal = 16.dp, vertical = 0.dp)
+                    shape = RoundedCornerShape(50),
+                    contentPadding = PaddingValues(horizontal = 18.dp, vertical = 0.dp)
                 ) {
-                    Text("开始练习", style = MaterialTheme.typography.labelMedium)
+                    Text("练习", style = MaterialTheme.typography.labelMedium)
                 }
             }
         }

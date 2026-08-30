@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 ilyskyo
+// Copyright (c) 2026 ilyskyo
 // SPDX-License-Identifier: MIT
 
 package com.ilyskyo.blancall.ui.settings
@@ -7,7 +7,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.isSystemInDarkTheme
+import com.ilyskyo.blancall.ui.theme.isBlancallDark
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
@@ -37,6 +37,7 @@ import com.ilyskyo.blancall.R
 import com.ilyskyo.blancall.algorithm.ReviewTemplate
 import com.ilyskyo.blancall.notification.ReminderWorker
 import com.ilyskyo.blancall.ui.common.BackButton
+import com.ilyskyo.blancall.ui.common.GlassCard
 import com.ilyskyo.blancall.ui.common.MarkdownText
 import com.ilyskyo.blancall.ui.theme.AccentPresets
 import com.ilyskyo.blancall.ui.theme.AppPrefs
@@ -85,11 +86,9 @@ fun SettingsScreen(navController: NavController) {
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary)
 
-            Card(
+            GlassCard(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
+                shape = RoundedCornerShape(14.dp)
             ) {
                 Column(Modifier.padding(4.dp)) {
                     // 浅色米黄底色开关（深色模式始终纯黑，不受此开关影响）
@@ -147,11 +146,9 @@ fun SettingsScreen(navController: NavController) {
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary)
 
-            Card(
+            GlassCard(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
+                shape = RoundedCornerShape(14.dp)
             ) {
                 val accentIndex by AppPrefs.accentColorFlow.collectAsState()
                 Row(
@@ -162,7 +159,7 @@ fun SettingsScreen(navController: NavController) {
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     // 根据系统深色模式选择 primaryDark/primaryLight，保证深色下对比度
-                    val isDark = isSystemInDarkTheme()
+                    val isDark = isBlancallDark()
                     AccentPresets.forEachIndexed { index, preset ->
                         val isSelected = index == accentIndex
                         val accentColor = if (isDark) preset.primaryDark else preset.primaryLight
@@ -205,11 +202,9 @@ fun SettingsScreen(navController: NavController) {
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary)
 
-            Card(
+            GlassCard(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
+                shape = RoundedCornerShape(14.dp)
             ) {
                 // 改用 AppPrefs 的 Flow collectAsState，与持久化值保持单一数据源
                 val predictiveBack by AppPrefs.predictiveBackFlow.collectAsState()
@@ -256,6 +251,32 @@ fun SettingsScreen(navController: NavController) {
                     )
                 }
 
+                HorizontalDivider(
+                    Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                )
+
+                // 段落首行缩进开关（导入时给未缩进段落补两格；关闭后不再新增缩进）
+                val autoIndentEnabled by AppPrefs.autoIndentEnabledFlow.collectAsState()
+                Row(
+                    Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f)) {
+                        Text("段落首行缩进", style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurface)
+                        Text("开启后，导入纯文本/粘贴文章时自动为每段首行补两个空格；PDF、Word 等文档保持原文不动",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(end = 16.dp))
+                    }
+                    Switch(
+                        checked = autoIndentEnabled,
+                        onCheckedChange = { AppPrefs.autoIndentEnabled = it }
+                    )
+                }
+
             }
 
             Spacer(Modifier.height(8.dp))
@@ -265,11 +286,9 @@ fun SettingsScreen(navController: NavController) {
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary)
 
-            Card(
+            GlassCard(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
+                shape = RoundedCornerShape(14.dp)
             ) {
                 val templateId by AppPrefs.reviewTemplateFlow.collectAsState()
                 val templates = listOf(ReviewTemplate.SPRINT, ReviewTemplate.STANDARD, ReviewTemplate.DEEP)
@@ -310,11 +329,9 @@ fun SettingsScreen(navController: NavController) {
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary)
 
-            Card(
+            GlassCard(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
+                shape = RoundedCornerShape(14.dp)
             ) {
                 Surface(
                     onClick = { navController.navigate("onboarding") },
@@ -372,11 +389,9 @@ fun SettingsScreen(navController: NavController) {
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary)
 
-            Card(
+            GlassCard(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
+                shape = RoundedCornerShape(14.dp)
             ) {
                 // ── 内置素材库：多库各自可启用，未来可继续追加 ──
                 Text("内置素材库", style = MaterialTheme.typography.titleSmall,
@@ -418,11 +433,9 @@ fun SettingsScreen(navController: NavController) {
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary)
 
-            Card(
+            GlassCard(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
+                shape = RoundedCornerShape(14.dp)
             ) {
                 Column(Modifier.padding(16.dp)) {
                     Text("Blancall", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
@@ -449,11 +462,9 @@ fun SettingsScreen(navController: NavController) {
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary)
 
-            Card(
+            GlassCard(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
+                shape = RoundedCornerShape(14.dp)
             ) {
                 Column(
                     modifier = Modifier.padding(16.dp).fillMaxWidth(),
@@ -625,11 +636,9 @@ private fun ReminderSettingsCard() {
     var showCustomMinutesDialog by remember { mutableStateOf(false) }
     var customMinutesInput by remember { mutableStateOf("") }
 
-    Card(
+    GlassCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
+        shape = RoundedCornerShape(14.dp)
     ) {
         Column(Modifier.padding(4.dp)) {
             // ── 开关行 ──
