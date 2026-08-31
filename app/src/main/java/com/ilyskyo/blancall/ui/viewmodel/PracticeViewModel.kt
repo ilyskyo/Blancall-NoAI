@@ -12,6 +12,7 @@ import com.ilyskyo.blancall.algorithm.CrossTextReview
 import com.ilyskyo.blancall.algorithm.DictationScorer
 import com.ilyskyo.blancall.algorithm.FsrsEngine
 import com.ilyskyo.blancall.algorithm.SectionSplitter
+import com.ilyskyo.blancall.algorithm.SentenceSplitter
 import com.ilyskyo.blancall.data.model.Article
 import com.ilyskyo.blancall.data.model.MistakeDetail
 import com.ilyskyo.blancall.data.model.PracticeRecord
@@ -34,6 +35,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlin.math.abs
 
 enum class BlancallMode { SENTENCE, WORD, REVERSE }
 
@@ -212,6 +214,19 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
     private val _rankedSections = MutableStateFlow<List<SectionSplitter.RankedSection>>(emptyList())
     val rankedSections: StateFlow<List<SectionSplitter.RankedSection>> = _rankedSections.asStateFlow()
 
+    /**
+     * 句子锚点表：**当前 effectiveContent 中的句子索引 → 该句在文章全文中的字符起始位置**。
+     *
+     * 判分时 blank 携带的 sentenceIndex 只相对 effectiveContent（段落模式下只是若干段落的拼接
+     * 子集），与记忆热力图所用的「全文切句」口径不同——标题行在全文切句中独立成句，而段落
+     * contentOnly 不含标题，两者会整体错位。记录字符位置可跨口径稳定对齐。
+     *
+     * 由 [buildSentenceAnchors] 在每次生成挖空时同步计算；为空表示尚未生成，
+     * 此时判分不写 answeredSentenceStarts，热力图自动回退到整篇统计。
+     */
+    private val _sentenceAnchors = MutableStateFlow<List<Int>>(emptyList())
+    val sentenceAnchors: StateFlow<List<Int>> = _sentenceAnchors.asStateFlow()
+
     // 沉浸模式（F4）
     private val _immersiveMode = MutableStateFlow(false)
     val immersiveMode: StateFlow<Boolean> = _immersiveMode.asStateFlow()
@@ -258,6 +273,8 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
         }
 
     fun loadArticle(articleId: Long, resume: Boolean = false, initialSectionMode: SectionMode? = null) {
+        // 「继续练习」是否已恢复上次挖好的空（恢复成功时跳过生成处重新生成）
+        var resumeRestoredCloze = false
         // 取消上一次加载，防止快速切换文章时旧结果覆盖新结果
         loadJob?.cancel()
         loadJob = viewModelScope.launch {
@@ -293,6 +310,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                                     ?.associate { k -> k.toInt() to json.getJSONObject("answers").getString(k) }
                                     ?: emptyMap(),
                                 dictationInput = json.optString("dictationInput", ""),
+                                clozeJson = if (json.has("clozeJson")) json.getString("clozeJson") else null,
                                 lastPracticeTime = json.optLong("lastPracticeTime", System.currentTimeMillis())
                             )
                         } else null
@@ -326,8 +344,27 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                         BlancallMode.REVERSE -> _dictationInput.value = savedState.dictationInput
                     }
                     _resumed.value = true
-                } else {
-                    _resumed.value = false
+                    // 恢复上次挖好的空（clozeJson）：直接复用上次挖空，无需重新生成/选难度
+                    val restored = savedState.clozeJson
+                    val restoredOk = when (restoredMode) {
+                        BlancallMode.SENTENCE -> {
+                            _sentenceCloze.value = restored?.let { BlancallGenerator.sentenceClozeFromJson(it) }
+                            _sentenceCloze.value != null
+                        }
+                        BlancallMode.WORD -> {
+                            _wordCloze.value = restored?.let { BlancallGenerator.wordClozeFromJson(it) }
+                            _wordCloze.value != null
+                        }
+                        BlancallMode.REVERSE -> {
+                            _dictationResult.value = restored?.let { BlancallGenerator.dictationFromJson(it) }
+                            _dictationResult.value != null
+                        }
+                    }
+                    resumeRestoredCloze = restoredOk
+                    if (restoredOk) {
+                        // 直接恢复挖空：进度条立即用保存的总空数显示
+                        _totalBlanks.value = savedState.totalBlanks.coerceAtLeast(0)
+                    }
                 }
             } else {
                 _resumed.value = false
@@ -371,7 +408,10 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                 _selectedSections.value = secs.map { it.index }.toSet()
             }
             // 按已应用的段落模式统一生成挖空（内部读取 _article/_sections/_sectionMode/_selectedSections）
-            regenerateCloze()
+            // 「继续练习」已恢复上次挖好的空时跳过重新生成，保留恢复的挖空
+            if (!resumeRestoredCloze) {
+                regenerateCloze()
+            }
         }
     }
 
@@ -407,6 +447,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
             var sentenceResult: BlancallGenerator.SentenceClozeResult? = null
             var wordResult: BlancallGenerator.WordClozeResult? = null
             var dictationResult: BlancallGenerator.DictationResult? = null
+            var anchors: List<Int> = emptyList()
             try {
                 withContext(Dispatchers.Default) {
                     mixed = CrossTextReview.mix(triples)
@@ -423,6 +464,10 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                             effectiveContent, errorProfile = errorProfile, strategy = strat, classicalMode = classical
                         )
                         dictationResult = BlancallGenerator.generateDictation(effectiveContent)
+                        // 跨文本模式强制全篇：锚点即全文切句位置
+                        anchors = buildSentenceAnchors(
+                            content, effectiveContent, secs, secs.map { it.index }.toSet()
+                        )
                     }
                 }
             } catch (_: Exception) { /* 生成失败保持 null，UI 显示空态 */ }
@@ -434,6 +479,10 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
             _article.value = Article(
                 id = -1L,
                 title = articles.joinToString(" · ") { it.title },
+                author = articles.map { it.author.trim() }
+                    .filter { it.isNotEmpty() }
+                    .distinct()
+                    .joinToString(" · "),
                 content = mixed!!.content
             )
 
@@ -458,6 +507,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                 _sentenceCloze.value = null
                 _wordCloze.value = null
                 _dictationResult.value = null
+                _sentenceAnchors.value = emptyList()
                 _totalBlanks.value = 0
                 return@launch
             }
@@ -467,6 +517,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
             _sentenceCloze.value = sentenceResult
             _wordCloze.value = wordResult
             _dictationResult.value = dictationResult
+            _sentenceAnchors.value = anchors
             _totalBlanks.value = when (_mode.value) {
                 BlancallMode.SENTENCE -> sentenceResult?.blanks?.size ?: 0
                 BlancallMode.WORD -> wordResult?.blanks?.size ?: 0
@@ -588,10 +639,55 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
             .joinToString("\n\n") { it.text }
     }
 
+    /**
+     * 构建「effectiveContent 句子索引 → 该句在全文中的字符起始位置」锚点表，见 [_sentenceAnchors]。
+     *
+     * 两步定位：
+     * 1. 按选中段落的字符区间，把子集内偏移换算为全文**近似**位置；
+     * 2. 用句子文本在全文切句结果中**精确**匹配；句子重复出现时取位置最近者。
+     *
+     * 近似位置只用于重复句消歧，因此段落行首尾 trim 造成的几字符误差不会影响最终归属。
+     */
+    private fun buildSentenceAnchors(
+        fullContent: String,
+        effectiveContent: String,
+        secs: List<SectionSplitter.Section>,
+        selected: Set<Int>
+    ): List<Int> {
+        if (fullContent.isEmpty()) return emptyList()
+        // 整篇（或选中全部段落）：子集即全文，直接用全文切句位置
+        if (effectiveContent == fullContent) {
+            return SentenceSplitter.splitWithPositions(fullContent).map { it.startIndex }
+        }
+        // 段落模式：建立 effectiveContent 偏移区间 → 全文起始偏移 的换算表
+        val ordered = secs.filter { it.index in selected }.sortedBy { it.startChar }
+        if (ordered.isEmpty()) return emptyList()
+        // 三元组：子集内起始偏移、子集内结束偏移（exclusive）、该段在全文的起始偏移
+        val spans = ArrayList<Triple<Int, Int, Int>>()
+        var cursor = 0
+        for (s in ordered) {
+            val len = s.text.length
+            spans.add(Triple(cursor, cursor + len, s.startChar))
+            cursor += len + 2   // joinToString("\n\n") 的分隔符占 2 字符
+        }
+        val fullSents = SentenceSplitter.splitWithPositions(fullContent)
+        val byText = fullSents.groupBy { it.text }
+        return SentenceSplitter.splitWithPositions(effectiveContent).map { (text, start, _) ->
+            val approx = spans.firstOrNull { start >= it.first && start < it.second }
+                ?.let { (it.third + (start - it.first)).coerceIn(0, fullContent.length) }
+                ?: start.coerceIn(0, fullContent.length)
+            val candidates = byText[text]
+            if (candidates.isNullOrEmpty()) approx
+            else candidates.minByOrNull { abs(it.startIndex - approx) }!!.startIndex
+        }
+    }
+
     private fun regenerateCloze() {
         val content = _article.value?.content
         if (content.isNullOrBlank()) return
         val secs = _sections.value
+        // 选中段落快照：effectiveContent 与锚点表必须基于同一次选择，否则会错位
+        val selected = _selectedSections.value
         val effectiveContent = getEffectiveContent(content, secs)
         val recordsSnapshot = articleRecords
         val strat = _strategy.value
@@ -606,6 +702,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
             var sentenceResult: BlancallGenerator.SentenceClozeResult? = null
             var wordResult: BlancallGenerator.WordClozeResult? = null
             var dictationResult: BlancallGenerator.DictationResult? = null
+            var anchors: List<Int> = emptyList()
             try {
                 withContext(Dispatchers.Default) {
                     val errorProfile = errorProfileWithMemory(recordsSnapshot)
@@ -616,11 +713,13 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                         effectiveContent, errorProfile = errorProfile, strategy = strat, classicalMode = classical
                     )
                     dictationResult = BlancallGenerator.generateDictation(effectiveContent)
+                    anchors = buildSentenceAnchors(content, effectiveContent, secs, selected)
                 }
             } catch (_: Exception) { /* 保持旧值，避免崩溃 */ }
             _sentenceCloze.value = sentenceResult
             _wordCloze.value = wordResult
             _dictationResult.value = dictationResult
+            _sentenceAnchors.value = anchors
             _totalBlanks.value = when (_mode.value) {
                 BlancallMode.SENTENCE -> sentenceResult?.blanks?.size ?: 0
                 BlancallMode.WORD -> wordResult?.blanks?.size ?: 0
@@ -640,12 +739,14 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
         wordGenerateJob = viewModelScope.launch {
             val content = _article.value?.content ?: return@launch
             val secs = _sections.value
+            val selected = _selectedSections.value
             val effectiveContent = getEffectiveContent(content, secs)
             _wordAnswers.value = emptyMap()
             val recordsSnapshot = articleRecords
             val strat = _strategy.value
             val classical = _classicalMode.value
             var result: BlancallGenerator.WordClozeResult? = null
+            var anchors: List<Int> = emptyList()
             try {
                 withContext(Dispatchers.Default) {
                     val errorProfile = errorProfileWithMemory(recordsSnapshot)
@@ -653,9 +754,11 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                         effectiveContent, count = count, errorProfile = errorProfile,
                         strategy = strat, classicalMode = classical
                     )
+                    anchors = buildSentenceAnchors(content, effectiveContent, secs, selected)
                 }
             } catch (_: Exception) { /* 生成失败保持旧值，避免崩溃 */ }
             _wordCloze.value = result
+            _sentenceAnchors.value = anchors
             if (_mode.value == BlancallMode.WORD) {
                 _totalBlanks.value = result?.blanks?.size ?: 0
             }
@@ -1027,6 +1130,29 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                 else results.values.map { it.similarity }.average().toFloat()
             val correctCount = results.values.count { it.result == AnswerChecker.Result.CORRECT }
             val rating = resolveRating(similarity, if (results.isNotEmpty()) correctCount.toFloat() / results.size else 0f)
+            // 本次实际作答的句子在【全文】中的字符起始位置（未完成提交被跳过的空不进入）。
+            // 存字符位置而非句子索引：段落模式下「子集内索引」与热力图的「全文索引」整体错位
+            // （标题行在全文切句中独立成句）。锚点为空（尚未生成）时结果为空 → 热力图回退整篇统计。
+            val anchors = _sentenceAnchors.value
+            // 运行时一致性保护：锚点数必须等于该 cloze 的句子数，否则两者不同源。
+            // 典型场景：从进度文件恢复的挖空来自上次的段落子集，而恢复后段落模式被重置为整篇，
+            // 此时 sentenceIndex 是子集索引、锚点却是全文位置，硬套会指错句子。
+            // 宁可放弃精确统计（回退整篇），也不能错标。
+            val anchorsUsable = anchors.isNotEmpty() && when (mode) {
+                BlancallMode.SENTENCE -> anchors.size == sentenceCloze?.sentences?.size
+                BlancallMode.WORD -> anchors.size == wordCloze?.sentences?.size
+                else -> false
+            }
+            val answeredSentenceStarts = if (!anchorsUsable) emptyList()
+            else results.keys.mapNotNull { blankIdx ->
+                val sIdx = when (mode) {
+                    BlancallMode.SENTENCE -> sentenceCloze?.blanks?.firstOrNull { it.index == blankIdx }?.sentenceIndex
+                    BlancallMode.WORD -> wordCloze?.sentences?.indexOfFirst { s -> s.blanks.any { it == blankIdx } }
+                        ?.takeIf { it >= 0 }
+                    else -> null
+                }
+                sIdx?.let { anchors.getOrNull(it) }
+            }.distinct()
             try {
                 recordRepo.insert(
                     PracticeRecord(
@@ -1039,7 +1165,8 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                         similarity = similarity,
                         rating = rating.value,
                         weakHints = _weakHintCount.value,
-                        strongHints = _strongHintCount.value
+                        strongHints = _strongHintCount.value,
+                        answeredSentenceStarts = answeredSentenceStarts
                     )
                 )
             } catch (_: Exception) { /* 记录失败不影响主流程 */ }
@@ -1087,6 +1214,12 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
      *  dictationInput 仅反向默写模式使用，其他模式传空串即可 */
     private suspend fun savePracticeState(articleId: Long, answers: Map<Int, String>, dictationInput: String = "") {
         try {
+            // 本次挖好的空序列化：供「继续练习」恢复（无需重新生成/选难度）
+            val clozeJson = when (_mode.value) {
+                BlancallMode.SENTENCE -> _sentenceCloze.value?.let { BlancallGenerator.sentenceClozeToJson(it) }
+                BlancallMode.WORD -> _wordCloze.value?.let { BlancallGenerator.wordClozeToJson(it) }
+                BlancallMode.REVERSE -> _dictationResult.value?.let { BlancallGenerator.dictationToJson(it) }
+            }
             // 反向默写以"是否已输入"作为已答进度，便于首页"继续练习"卡片显示剩余量
             val answeredCount = if (_mode.value == BlancallMode.REVERSE) {
                 if (dictationInput.isNotBlank()) _totalBlanks.value else 0
@@ -1100,7 +1233,8 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                 totalBlanks = _totalBlanks.value,
                 answeredCount = answeredCount,
                 answers = answers.filter { it.value.isNotBlank() },
-                dictationInput = dictationInput
+                dictationInput = dictationInput,
+                clozeJson = clozeJson
             )
             val file = getApplication<Application>().filesDir.resolve("practice_state_${articleId}.json")
             withContext(Dispatchers.IO) {
@@ -1112,6 +1246,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                 json.put("answeredCount", state.answeredCount)
                 json.put("dictationInput", state.dictationInput)
                 json.put("lastPracticeTime", state.lastPracticeTime)
+                if (state.clozeJson != null) json.put("clozeJson", state.clozeJson)
                 val ansObj = org.json.JSONObject()
                 state.answers.forEach { (k, v) -> ansObj.put(k.toString(), v) }
                 json.put("answers", ansObj)
@@ -1142,6 +1277,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
         _weakHintCount.value = 0
         _strongHintCount.value = 0
         val secs = _sections.value
+        val selected = _selectedSections.value
         val effectiveContent = getEffectiveContent(content, secs)
         // 取消上一次的生成协程
         wordGenerateJob?.cancel()
@@ -1151,6 +1287,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
         val strat = _strategy.value
         val classical = _classicalMode.value
         val job = viewModelScope.launch {
+            var anchors: List<Int> = emptyList()
             try {
                 when (_mode.value) {
                     BlancallMode.SENTENCE -> {
@@ -1185,7 +1322,12 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                         _totalBlanks.value = result?.clauses?.size ?: 0
                     }
                 }
+                // 锚点只依赖 content/effectiveContent，与模式无关，统一算一次
+                anchors = withContext(Dispatchers.Default) {
+                    buildSentenceAnchors(content, effectiveContent, secs, selected)
+                }
             } catch (_: Exception) { /* 重做失败保持旧值，避免崩溃 */ }
+            _sentenceAnchors.value = anchors
             _isSubmitted.value = false
             _checkResults.value = emptyMap()
             _dictationCheckResult.value = null

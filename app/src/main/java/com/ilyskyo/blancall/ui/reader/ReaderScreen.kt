@@ -60,6 +60,7 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
     var readingMode by remember { mutableStateOf(false) }
     var editTitle by remember { mutableStateOf("") }
     var editContent by remember { mutableStateOf("") }
+    var editAuthor by remember { mutableStateOf("") }
     var showDeleteDialog by remember { mutableStateOf(false) }
     var showModePicker by remember { mutableStateOf(false) }
     var showFullscreenEdit by remember { mutableStateOf(false) }
@@ -107,6 +108,7 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
         loaded?.let {
             editTitle = it.title
             editContent = it.content
+            editAuthor = it.author
         }
     }
 
@@ -154,9 +156,19 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
                     GlassButton(
                         onClick = {
                             if (editTitle.isNotBlank()) {
-                                articleViewModel.updateArticle(art.copy(title = editTitle.trim(), content = editContent.trim()))
+                                articleViewModel.updateArticle(
+                                    art.copy(
+                                        title = editTitle.trim(),
+                                        content = editContent.trim(),
+                                        author = editAuthor.trim()
+                                    )
+                                )
                                 // 本地立即赋值以即时反映编辑结果（VM 未暴露当前文章 Flow，故保留本地同步赋值，避免与异步更新竞态时回显旧值）
-                                article = art.copy(title = editTitle.trim(), content = editContent.trim())
+                                article = art.copy(
+                                    title = editTitle.trim(),
+                                    content = editContent.trim(),
+                                    author = editAuthor.trim()
+                                )
                                 isEditing = false
                             }
                         },
@@ -219,7 +231,10 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
                     Spacer(modifier = Modifier.height(6.dp))
 
                     Text(
-                        text = "${art.content.length} 字符",
+                        text = buildString {
+                            if (art.author.isNotBlank()) append(art.author.trim()).append("  ·  ")
+                            append(art.content.length.toString()).append(" 字符")
+                        },
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -287,6 +302,15 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
                                 onValueChange = { editTitle = it },
                                 modifier = Modifier.fillMaxWidth(),
                                 label = { Text("标题") },
+                                singleLine = true,
+                                shape = RoundedCornerShape(10.dp)
+                            )
+
+                            OutlinedTextField(
+                                value = editAuthor,
+                                onValueChange = { editAuthor = it },
+                                modifier = Modifier.fillMaxWidth(),
+                                label = { Text("作者（选填）") },
                                 singleLine = true,
                                 shape = RoundedCornerShape(10.dp)
                             )

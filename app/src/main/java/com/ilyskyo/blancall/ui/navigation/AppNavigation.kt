@@ -4,11 +4,16 @@
 package com.ilyskyo.blancall.ui.navigation
 
 import androidx.compose.animation.AnimatedContentTransitionScope
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -22,6 +27,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.navigation.NavController
+import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -78,7 +85,7 @@ fun AppNavigation() {
         currentRoute == "home" || currentRoute?.startsWith("home/") == true -> 0
         currentRoute == "list" || currentRoute?.startsWith("list/") == true -> 1
         currentRoute == "overview" || currentRoute?.startsWith("statistics/") == true -> 2
-        currentRoute == "philo" || currentRoute?.startsWith("philo_content/") == true -> 3
+        currentRoute == "philo" -> 3
         else -> -1
     }
     // 首页在底部导航模式下不再显示左下角入口按钮（入口已迁移到导航栏）。
@@ -378,7 +385,22 @@ fun AppNavigation() {
         } // close weight Box
 
         // ── 底部导航栏（设置中开启后显示，仅在三个根页面） ──
-        if (currentTab >= 0) {
+        // 进入/离开根 tab 页面时使用下滑+淡出动画（避免闪现消失）。
+        AnimatedVisibility(
+            visible = currentTab >= 0,
+            enter = slideInVertically(
+                animationSpec = tween(320, easing = LinearOutSlowInEasing),
+                initialOffsetY = { fullHeight -> fullHeight }
+            ) + fadeIn(
+                animationSpec = tween(250, delayMillis = 80)
+            ),
+            exit = slideOutVertically(
+                animationSpec = tween(300, easing = FastOutSlowInEasing),
+                targetOffsetY = { fullHeight -> fullHeight }
+            ) + fadeOut(
+                animationSpec = tween(220)
+            )
+        ) {
             BottomNavBar(
                 currentTab = currentTab,
                 onSelect = { selectTab(it) },
@@ -387,4 +409,22 @@ fun AppNavigation() {
         }
     } // close Column
     } // close Box
+}
+
+/**
+ * 底部导航根页面【平级切换】：弹出当前 tab（目标 tab 之上的所有页面），
+ * 保留 startDestination 在栈底——这是 Navigation 最稳妥的 tab 切换方式，
+ * 既不把平级根页面压成上下级，也避免弹出 startDestination 后无法恢复的异常。
+ *
+ * 返回键的"平级＝退出"语义由 [BackHandler] 在根页拦截实现（见 AppNavigation）。
+ */
+fun NavController.navigateToTab(route: String) {
+    navigate(route) {
+        popUpTo(graph.findStartDestination().id) {
+            saveState = true
+            inclusive = false
+        }
+        launchSingleTop = true
+        restoreState = true
+    }
 }

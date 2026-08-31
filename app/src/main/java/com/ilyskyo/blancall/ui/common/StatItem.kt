@@ -41,7 +41,11 @@ fun StatItem(
         val baseStyle = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
         val valueStyle = if (fontSize != null) baseStyle.copy(fontSize = fontSize) else baseStyle
         // 数值用主题色强调，与整体视觉一致；可传 accentColor 覆盖（如错误率用 error 色）
-        Text(value, style = valueStyle, color = accentColor ?: MaterialTheme.colorScheme.primary)
+        Text(
+            value,
+            style = valueStyle,
+            color = accentColor ?: MaterialTheme.colorScheme.primary
+        )
         if (label.isNotEmpty()) {
             Spacer(Modifier.height(2.dp))
             Text(

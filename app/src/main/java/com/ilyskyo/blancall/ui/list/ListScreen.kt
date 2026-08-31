@@ -229,7 +229,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                     columns = GridCells.Fixed(2),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    contentPadding = PaddingValues(bottom = 12.dp)
+                    contentPadding = PaddingValues(bottom = 120.dp)
                 ) {
                     gridItems(sortedArticles, key = { it.id }, contentType = { "article" }) { article ->
                         ArticleCard(
@@ -273,7 +273,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                 LazyColumn(
                     modifier = Modifier.fillMaxWidth().weight(1f),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
-                    contentPadding = PaddingValues(bottom = 12.dp)
+                    contentPadding = PaddingValues(bottom = 120.dp)
                 ) {
                     items(sortedArticles, key = { it.id }, contentType = { "article" }) { article ->
                         ArticleCard(
@@ -568,7 +568,11 @@ private fun ArticleCard(
                     }
                     Spacer(modifier = Modifier.height(6.dp))
                     Text(
-                        text = "${article.content.length} 字符  ·  ${dateFormat.format(Date(article.createdAt))}",
+                        text = buildString {
+                            if (article.author.isNotBlank()) append(article.author.trim()).append("  ·  ")
+                            append(article.content.length.toString()).append(" 字符  ·  ")
+                            append(dateFormat.format(Date(article.createdAt)))
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )

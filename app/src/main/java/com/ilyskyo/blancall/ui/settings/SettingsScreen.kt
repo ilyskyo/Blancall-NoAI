@@ -36,8 +36,12 @@ import com.ilyskyo.blancall.MainActivity
 import com.ilyskyo.blancall.R
 import com.ilyskyo.blancall.algorithm.ReviewTemplate
 import com.ilyskyo.blancall.notification.ReminderWorker
+import com.ilyskyo.blancall.ui.common.AppIcon
+import com.ilyskyo.blancall.ui.common.AppIconKind
 import com.ilyskyo.blancall.ui.common.BackButton
+import com.ilyskyo.blancall.ui.common.BlancallAlertDialog
 import com.ilyskyo.blancall.ui.common.GlassCard
+import com.ilyskyo.blancall.ui.common.GlassSwitch
 import com.ilyskyo.blancall.ui.common.MarkdownText
 import com.ilyskyo.blancall.ui.theme.AccentPresets
 import com.ilyskyo.blancall.ui.theme.AppPrefs
@@ -51,6 +55,9 @@ import kotlinx.coroutines.withContext
 @Composable
 fun SettingsScreen(navController: NavController) {
     val themeMode by ThemeManager.themeMode.collectAsState()
+    // 首页副标题编辑弹窗（首页品牌栏收起时也可从这里修改）
+    var showSubtitleDialog by remember { mutableStateOf(false) }
+    val homeSubtitle by AppPrefs.subtitleFlow.collectAsState()
 
     Box(
         modifier = Modifier
@@ -129,10 +136,32 @@ fun SettingsScreen(navController: NavController) {
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        Switch(
+                        GlassSwitch(
                             checked = lightBeige,
                             onCheckedChange = { AppPrefs.lightBeigeBackgroundEnabled = it }
                         )
+                    }
+
+                    HorizontalDivider(Modifier.padding(horizontal = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    // ── 首页副标题（点击编辑；首页品牌栏收起时也能从这里修改）──
+                    Row(
+                        Modifier
+                            .fillMaxWidth()
+                            .clickable { showSubtitleDialog = true }
+                            .padding(horizontal = 16.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("首页副标题", style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurface)
+                            Text("首页品牌栏下方的标语，点击编辑",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        Text("编辑 ›", style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.primary)
                     }
 
                     // 内置素材库已移至下方「拓展功能」分组
@@ -184,10 +213,11 @@ fun SettingsScreen(navController: NavController) {
                                     content = {}
                                 )
                                 if (isSelected) {
-                                    Text("✓",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = accentColor,
-                                        fontWeight = FontWeight.Bold)
+                                    AppIcon(
+                                        kind = AppIconKind.Check,
+                                        tint = accentColor,
+                                        modifier = Modifier.size(14.dp)
+                                    )
                                 }
                             }
                         }
@@ -220,7 +250,7 @@ fun SettingsScreen(navController: NavController) {
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Switch(
+                    GlassSwitch(
                         checked = predictiveBack,
                         onCheckedChange = { AppPrefs.predictiveBackEnabled = it }
                     )
@@ -245,7 +275,7 @@ fun SettingsScreen(navController: NavController) {
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
-                    Switch(
+                    GlassSwitch(
                         checked = showHomeEmoji,
                         onCheckedChange = { AppPrefs.showHomeEmoji = it }
                     )
@@ -271,7 +301,7 @@ fun SettingsScreen(navController: NavController) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(end = 16.dp))
                     }
-                    Switch(
+                    GlassSwitch(
                         checked = autoIndentEnabled,
                         onCheckedChange = { AppPrefs.autoIndentEnabled = it }
                     )
@@ -408,7 +438,7 @@ fun SettingsScreen(navController: NavController) {
                         Text("西方思想", style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurface)
                     }
-                    Switch(
+                    GlassSwitch(
                         checked = "western" in enabledSet,
                         onCheckedChange = { AppPrefs.setLibraryEnabled("western", it) }
                     )
@@ -422,7 +452,7 @@ fun SettingsScreen(navController: NavController) {
                         Text("高考必背篇目", style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurface)
                     }
-                    Switch(
+                    GlassSwitch(
                         checked = "gaokao" in enabledSet,
                         onCheckedChange = { AppPrefs.setLibraryEnabled("gaokao", it) }
                     )
@@ -579,6 +609,41 @@ fun SettingsScreen(navController: NavController) {
         }
     }
     }
+
+    // ── 首页副标题编辑弹窗 ──
+    if (showSubtitleDialog) {
+        var editText by remember(homeSubtitle) { mutableStateOf(homeSubtitle) }
+        BlancallAlertDialog(
+            onDismissRequest = { showSubtitleDialog = false },
+            title = { Text("编辑首页副标题") },
+            text = {
+                Column {
+                    OutlinedTextField(
+                        value = editText,
+                        // 默认副标题 38 字 > 旧 30 字限制，编辑会被拦截；取消限制
+                        onValueChange = { editText = it },
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true,
+                        label = { Text("自定义副标题") },
+                        shape = RoundedCornerShape(12.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        // 直接保存（允许清空：清空即移除副标题）
+                        AppPrefs.subtitle = editText
+                        showSubtitleDialog = false
+                    },
+                    shape = RoundedCornerShape(14.dp)
+                ) { Text("保存") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSubtitleDialog = false }) { Text("取消") }
+            }
+        )
+    }
 }
 
 @Composable
@@ -612,9 +677,11 @@ private fun OptionRow(
                 }
             }
             if (selected) {
-                Text("✓", style = MaterialTheme.typography.titleMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold)
+                AppIcon(
+                    kind = AppIconKind.Check,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(20.dp)
+                )
             }
         }
     }
@@ -657,7 +724,7 @@ private fun ReminderSettingsCard() {
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                Switch(
+                GlassSwitch(
                     checked = enabled,
                     onCheckedChange = { newEnabled ->
                         ReminderPrefs.enabled = newEnabled

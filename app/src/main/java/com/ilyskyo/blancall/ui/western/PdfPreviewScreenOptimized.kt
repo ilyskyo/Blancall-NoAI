@@ -144,9 +144,11 @@ fun PdfPreviewScreenOptimized(
     val textExtractor = remember { PdfTextExtractor() }
     var textPages by remember { mutableStateOf<List<PdfTextExtractor.TextPage>>(emptyList()) }
     
-    // 提取文本（异步）
+    // 提取文本（异步）：仅在无配套纯文字版时才用 PDFBox 从 PDF 提取。
+    // 高考 60 篇已全部配置 pN.txt，且 gaokao_full.pdf 共 88 页、PDFBox 全文提取
+    // 会耗尽 256MB 堆导致 OOM 闪退——有 txt 时必须直接跳过提取。
     LaunchedEffect(pdfFile) {
-        if (pdfFile != null) {
+        if (pdfFile != null && textLoaded == null) {
             val extracted = withContext(Dispatchers.IO) {
                 textExtractor.extractText(context, pdfFile)
             }
@@ -241,10 +243,11 @@ fun PdfPreviewScreenOptimized(
                                 showMenu = false
                                 // 点完即导入：不弹模式选择、不强制进入练习（之后可在背诵列表中自行开始）
                                 val finalTitle = textLoaded?.first ?: displayTitle
-                                val finalText = textLoaded?.second ?: textPages.joinToString("\n\n") { it.text }
+                                val finalAuthor = textLoaded?.second ?: ""
+                                val finalText = textLoaded?.third ?: textPages.joinToString("\n\n") { it.text }
                                 if (finalText.isNotBlank()) {
                                     scope.launch {
-                                        val articleId = importTextToBlancall(context, finalTitle, finalText)
+                                        val articleId = importTextToBlancall(context, finalTitle, finalText, finalAuthor)
                                         Toast.makeText(
                                             context,
                                             if (articleId > 0) "已导入背诵列表" else "导入失败，请重试",
@@ -275,11 +278,12 @@ fun PdfPreviewScreenOptimized(
             )
         } else if (useVectorRendering && (textLoaded != null || textPages.isNotEmpty())) {
             // 文本模式：优先用配套纯文字版（排版最干净），否则用 PDF 提取文本
-            val content = textLoaded?.second ?: textPages.joinToString("\n\n") { it.text }
+            val content = textLoaded?.third ?: textPages.joinToString("\n\n") { it.text }
             Box(Modifier.weight(1f).fillMaxWidth()) {
                 TextContentReader(
                     title = displayTitle,
                     content = content,
+                    author = textLoaded?.second ?: "",
                     modifier = Modifier.fillMaxSize()
                 )
             }
