@@ -23,6 +23,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import com.ilyskyo.blancall.ui.common.BackButton
 
 @Composable
 fun HelpScreen(
@@ -44,19 +45,33 @@ fun HelpScreen(
                 .widthIn(max = 600.dp)
                 .padding(horizontal = 20.dp, vertical = 20.dp)
         ) {
-            // 无返回按钮：系统返回手势/键即可退出，标题与统计页等其他页面同高度对齐
-            Text(
-                if (welcomeMode) "欢迎使用 Blancall" else "使用帮助",
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onBackground
-            )
             if (welcomeMode) {
+                // 欢迎引导：无返回按钮（引导页底部有「开始使用」按钮）
+                Text(
+                    "欢迎使用 Blancall",
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.onBackground
+                )
                 Spacer(Modifier.height(4.dp))
                 Text(
                     "先花几分钟了解基本用法，即可开始背诵",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+            } else {
+                // 顶部返回按钮 + 标题
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    BackButton(onClick = { navController.popBackStack() })
+                    Spacer(Modifier.width(12.dp))
+                    Text(
+                        "使用帮助",
+                        style = MaterialTheme.typography.headlineMedium,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                }
             }
 
             Spacer(Modifier.height(24.dp))
@@ -247,7 +262,7 @@ fun HelpScreen(
                     title = "操作小贴士",
                     expandedContent = {
                         Text(
-                            "本应用为保持界面简洁，移除了页面顶部的返回按钮，并隐藏了部分操作入口。以下列出全部特殊操作方式：",
+                            "本应用为保持界面简洁，将部分操作入口收纳在长按与菜单中。以下列出全部特殊操作方式：",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -259,7 +274,7 @@ fun HelpScreen(
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            "所有页面（设置、帮助、我的文章、统计、阅读、练习等）均不显示返回按钮，统一使用系统返回手势（从屏幕边缘右滑）或系统返回键退出。",
+                            "所有页面（设置、帮助、我的文章、统计、阅读、练习等）均提供左上角白色圆形的返回按钮；也可使用系统返回手势（从屏幕边缘右滑）或系统返回键退出。",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
