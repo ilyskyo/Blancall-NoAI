@@ -12,15 +12,21 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import com.ilyskyo.blancall.ui.common.BlancallAlertDialog
 import com.ilyskyo.blancall.ui.common.AppIcon
 import com.ilyskyo.blancall.ui.common.AppIconKind
+import com.ilyskyo.blancall.ui.common.LiquidGlassPageBar
+import com.ilyskyo.blancall.ui.theme.isBlancallDark
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Rect
@@ -28,6 +34,8 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextIndent
@@ -51,8 +59,8 @@ import kotlinx.coroutines.launch
 
 @Composable
 fun ReaderScreen(navController: NavController, articleId: Long) {
-    val context = LocalContext.current
     val articleViewModel: ArticleViewModel = viewModel()
+    val context = LocalContext.current
     var article by remember { mutableStateOf<Article?>(null) }
     // 加载失败标记：articleId 无对应文章时展示“文章不存在”而非永久转圈
     var loadFailed by remember { mutableStateOf(false) }
@@ -67,6 +75,8 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
     var practiceButtonRect by remember { mutableStateOf(Rect.Zero) }
     // 预测性返回跟手进度：编辑模式下侧滑返回时驱动编辑界面缩放/淡出动画
     var editBackProgress by remember { mutableStateOf(0f) }
+    // 阅读模式返回跟手进度：侧滑返回时驱动阅读界面缩退淡出
+    var readingBackProgress by remember { mutableStateOf(0f) }
     val scope = rememberCoroutineScope()
 
     // 兜底（先注册、优先级低）：PredictiveBackHandler 在个别系统/场景下可能不拦截，
@@ -91,13 +101,15 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
         }
     }
 
-    // 沉浸阅读模式：拦截返回手势退出（回到常规详情页）
+    // 沉浸阅读模式：拦截返回手势退出（回到常规详情页）。
+    // 用 progressFlow 驱动阅读界面缩退，让「返回」有预测性跟手动画（ReadingModeScreen 内部响应）
     PredictiveBackHandler(enabled = readingMode) { progressFlow ->
         try {
-            progressFlow.collect { }
+            progressFlow.collect { readingBackProgress = it.progress }
             readingMode = false
+            readingBackProgress = 0f
         } catch (e: CancellationException) {
-            // 手势取消 → 保持阅读模式
+            readingBackProgress = 0f
         }
     }
 
@@ -179,6 +191,54 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
                             color = MaterialTheme.colorScheme.primary)
                     }
                 } else {
+                    // 非编辑态：返回键右侧展示标题 +（作者 / 字符数 上下堆叠），最右是删除/编辑。
+                    // 标题字号 = 右侧两行总高度（上下边缘与作者/字符数对齐）
+                    var metaHeightPx by remember { mutableStateOf(0) }
+                    val titleFontSize = if (metaHeightPx > 0) {
+                        // 标题字号 ≈ 右侧两行总高的 80%：视觉上与两行高度接近但不过大，
+                        // 且不把顶栏 Row 撑高（保证作者/字符数与按钮中心线对齐）
+                        val d = LocalDensity.current
+                        (metaHeightPx / (d.density * d.fontScale) * 0.8f).sp
+                    } else {
+                        MaterialTheme.typography.titleLarge.fontSize
+                    }
+                    Row(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(start = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = art.title,
+                            style = MaterialTheme.typography.titleLarge.copy(
+                                fontSize = titleFontSize,
+                                lineHeight = titleFontSize
+                            ),
+                            color = MaterialTheme.colorScheme.onBackground,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        Spacer(modifier = Modifier.width(10.dp))
+                        Column(
+                            modifier = Modifier.onGloballyPositioned { metaHeightPx = it.size.height },
+                            verticalArrangement = Arrangement.Center
+                        ) {
+                            if (art.author.isNotBlank()) {
+                                Text(
+                                    text = art.author.trim(),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                            Text(
+                                text = "${art.content.length} 字符",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         GlassButton(
                             onClick = { showDeleteDialog = true },
@@ -200,7 +260,6 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
         }
         }
 
-        // 娌夋蹈闃呰妯″紡涓嬮《閮ㄥ鑸闅愯棌锛岄渶涓哄彸涓婅鎮诞閫€鍑烘寜閽鐣欑┖闂达紝閬垮厤鎸夐挳涓庨琛屾爣棰?姝ｆ枃閲嶅彔
         Spacer(modifier = Modifier.height(8.dp))
 
         article?.let { art ->
@@ -210,6 +269,19 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
                     .fillMaxWidth()
                     .weight(1f)
             ) {
+                // 固定分割线：位于滚动区之外，标题下方，不随正文上下滚动
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            alpha = if (isEditing) editBackProgress else 1f
+                        }
+                ) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+                    Spacer(modifier = Modifier.height(16.dp))
+                }
+
                 // ── 阅读内容（可滚动）：编辑模式下供预测性返回手势渐现露出 ──
                 Column(
                     modifier = Modifier
@@ -221,40 +293,18 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
                             alpha = if (isEditing) editBackProgress else 1f
                         }
                 ) {
-                    Text(
-                        text = art.title,
-                        style = MaterialTheme.typography.headlineMedium,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        fontWeight = FontWeight.SemiBold
-                    )
-
-                    Spacer(modifier = Modifier.height(6.dp))
-
-                    Text(
-                        text = buildString {
-                            if (art.author.isNotBlank()) append(art.author.trim()).append("  ·  ")
-                            append(art.content.length.toString()).append(" 字符")
-                        },
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
-
-                    Spacer(modifier = Modifier.height(16.dp))
-
-                    val readingFontId by AppPrefs.readingFontIdFlow.collectAsState()
+                    val readingFontId by com.ilyskyo.blancall.ui.theme.AppPrefs.readingFontIdFlow.collectAsState()
                     val readingFontFamily = remember(readingFontId) {
-                        ReaderFonts.resolveFontFamily(context, readingFontId) ?: FontFamily.Default
+                        com.ilyskyo.blancall.ui.reader.ReaderFonts.resolveFontFamily(context, readingFontId) ?: FontFamily.Default
                     }
                     val autoIndentEnabled by AppPrefs.autoIndentEnabledFlow.collectAsState()
                     val paragraphs = remember(art.content) {
                         art.content.split("\n\n").map { it.trim() }.filter { it.isNotEmpty() }
                     }
                     Surface(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 8.dp),
                         color = MaterialTheme.colorScheme.surface,
                         shape = RoundedCornerShape(12.dp),
                         tonalElevation = 1.dp
@@ -357,30 +407,56 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            if (!isEditing && !readingMode) {
+            // 液态玻璃操作栏：学习统计 / 阅读模式 / AI / 开始练习
+            // 玻璃 = LiquidGlassPageBar（自绘中性光斑采样源，bind 兄弟画布——
+            // 不能 bind 页面宿主 pageHost：宿主是玻璃的祖先，PreDraw 反馈循环会致
+            // RenderThread 栈溢出闪退；参数对齐导航栏基准（blur 6 / dispersion 0 / 折射 20·70 / 染色 0.04·0.06）
+            // 注意：LiquidGlassView 不能条件移除（detach 必崩），故整条**常驻组合**，
+            // 编辑/阅读模式下仅 alpha 归零并禁用点击。
+            val barVisible = !isEditing && !readingMode
+            val barAlpha by animateFloatAsState(
+                targetValue = if (barVisible) 1f else 0f,
+                animationSpec = tween(200),
+                label = "actionBarAlpha"
+            )
+            val barCornerPx = with(LocalDensity.current) { 24.dp.toPx() }
+            val barShape = RoundedCornerShape(barCornerPx)
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .graphicsLayer { alpha = barAlpha }
+                    .shadow(
+                        elevation = 10.dp,
+                        shape = barShape,
+                        ambientColor = Color.Black.copy(alpha = 0.15f),
+                        spotColor = Color.Black.copy(alpha = 0.20f),
+                        clip = false
+                    )
+            ) {
+                LiquidGlassPageBar(
+                    cornerDp = 24,
+                    // 纯透明无色玻璃：关闭色散（消除彩色边缘）、染色压到极低（接近导航栏般通透）
+                    dispersion = 0f,
+                    tintAlphaLight = 0.04f,
+                    tintAlphaDark = 0.06f,
+                    modifier = Modifier.matchParentSize()
+                )
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    OutlinedButton(
-                        onClick = { navController.navigate("statistics/${art.id}") },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
-                    ) {
-                        AdaptiveButtonLabel("学习统计")
+                    GlassActionItem("学习统计", Modifier.weight(1f), enabled = barVisible) {
+                        navController.navigate("statistics/${art.id}")
                     }
-                    OutlinedButton(
-                        onClick = { readingMode = true },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
-                    ) {
-                        AdaptiveButtonLabel("阅读模式")
+                    GlassActionItem("阅读模式", Modifier.weight(1f), enabled = barVisible) {
+                        readingMode = true
                     }
-                    Button(
-                        onClick = { showModePicker = true },
-                        modifier = Modifier
+                    GlassActionItem(
+                        "开始练习",
+                        Modifier
                             .weight(1f)
                             .onGloballyPositioned { coords ->
                                 val pos = coords.positionInWindow()
@@ -390,10 +466,10 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
                                     pos.y + coords.size.height
                                 )
                             },
-                        shape = RoundedCornerShape(12.dp),
-                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 8.dp)
+                        enabled = barVisible,
+                        emphasized = true
                     ) {
-                        AdaptiveButtonLabel("开始练习")
+                        showModePicker = true
                     }
                 }
             }
@@ -415,12 +491,23 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
     // ── 沉浸阅读模式：全屏沉浸 + 章节翻页 + 断点续读 ──
     if (readingMode) {
         article?.let { art ->
-            ReadingModeScreen(
-                article = art,
-                onExit = { readingMode = false }
-            )
+            // 预测性返回跟手：阅读界面随返回进度缩退（用户偏好的外层缩退效果）
+            Box(
+                Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        translationY = readingBackProgress * 24f
+                        alpha = 1f - readingBackProgress
+                    }
+            ) {
+                ReadingModeScreen(
+                    article = art,
+                    onExit = { readingMode = false }
+                )
+            }
         }
     }
+
     // 删除确认对话框（引用公共组件）
     if (showDeleteDialog) {
         article?.let { art ->
@@ -515,6 +602,36 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
             }
         }
     }
+    }
+}
+
+/**
+ * 玻璃操作栏内的单个操作项：透明底、无涟漪克制反馈，文字居中自适应缩放。
+ * @param emphasized true 时文字用主色（「开始练习」主 CTA）。
+ */
+@Composable
+private fun GlassActionItem(
+    text: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    emphasized: Boolean = false,
+    onClick: () -> Unit
+) {
+    val contentColor = if (emphasized) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurface
+    }
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(18.dp))
+            .clickable(enabled = enabled, onClick = onClick)
+            .padding(horizontal = 4.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        CompositionLocalProvider(LocalContentColor provides contentColor) {
+            AdaptiveButtonLabel(text)
+        }
     }
 }
 

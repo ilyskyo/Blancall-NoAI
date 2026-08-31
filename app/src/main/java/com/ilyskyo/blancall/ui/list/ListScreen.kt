@@ -1,10 +1,12 @@
-﻿// Copyright (c) 2026 ilyskyo
+// Copyright (c) 2026 ilyskyo
 // SPDX-License-Identifier: MIT
 
 package com.ilyskyo.blancall.ui.list
 
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -21,8 +23,12 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import com.ilyskyo.blancall.ui.common.BlancallAlertDialog
+import com.ilyskyo.blancall.ui.common.AmbientBackground
+import com.ilyskyo.blancall.ui.common.AppIcon
+import com.ilyskyo.blancall.ui.common.AppIconKind
 import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,7 +51,6 @@ import com.ilyskyo.blancall.algorithm.PdfExporter
 import com.ilyskyo.blancall.data.model.Article
 import com.ilyskyo.blancall.data.repository.FsrsStateStore
 import com.ilyskyo.blancall.data.repository.RecordRepository
-import com.ilyskyo.blancall.ui.common.AmbientBackground
 import com.ilyskyo.blancall.ui.common.BackButton
 import com.ilyskyo.blancall.ui.common.DeleteConfirmDialog
 import com.ilyskyo.blancall.ui.common.GlassButton
@@ -62,6 +67,11 @@ import java.util.Locale
 
 @Composable
 fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
+    // 根 tab 页面：返回键 = 退出应用（与「数据」「素材库」tab 平级语义一致，绝不 pop 回上一 tab/首页）
+    val rootBackContext = LocalContext.current
+    BackHandler {
+        (rootBackContext as? android.app.Activity)?.finish()
+    }
     val articleViewModel: ArticleViewModel = viewModel()
     val articles by articleViewModel.articles.collectAsState()
     // 文章列表按"新添加在前"排列：创建时间倒序，同时间按 id 倒序（id 单调递增，兜底旧数据无 createdAt）
@@ -73,6 +83,19 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
     val context = LocalContext.current
     val recordRepo = remember { RecordRepository.getInstance(context.filesDir.resolve("records.json").absolutePath) }
     val allRecords by recordRepo.records.collectAsState()
+
+    // ── 性能埋点（排查进入列表卡顿）：测量组合耗时与各数据流到达时刻 ──
+    val perfTag = "ListPerf"
+    val perfStart = remember { System.currentTimeMillis() }
+    LaunchedEffect(Unit) {
+        Log.d(perfTag, "首帧完成 耗时=${(System.currentTimeMillis() - perfStart)}ms | articles=${articles.size} records=${allRecords.size}")
+    }
+    LaunchedEffect(articles) {
+        if (articles.isNotEmpty()) Log.d(perfTag, "articles 到达 size=${articles.size} t=${(System.currentTimeMillis() - perfStart)}ms")
+    }
+    LaunchedEffect(allRecords) {
+        if (allRecords.isNotEmpty()) Log.d(perfTag, "records 到达 size=${allRecords.size} t=${(System.currentTimeMillis() - perfStart)}ms")
+    }
     // 预建 文章ID→练习记录 映射，避免每个 ArticleCard 内重复 O(N×M) 过滤
     val recordsByArticle = remember(allRecords) {
         allRecords.groupBy { it.articleId }
@@ -205,7 +228,11 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                 contentAlignment = Alignment.Center
             ) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("📭", fontSize = 40.sp)
+                    AppIcon(
+                        kind = AppIconKind.Inbox,
+                        modifier = Modifier.size(48.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     Spacer(modifier = Modifier.height(12.dp))
                     Text(
                         text = "暂无文章",
@@ -229,14 +256,14 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                     columns = GridCells.Fixed(2),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp),
-                    contentPadding = PaddingValues(bottom = 120.dp)
+                    contentPadding = PaddingValues(bottom = 12.dp)
                 ) {
-                    gridItems(sortedArticles, key = { it.id }, contentType = { "article" }) { article ->
-                        ArticleCard(
-                            article = article,
-                            dateFormat = dateFormat,
-                            reviewStatus = reviewStatusByArticle[article.id]
-                                ?: EbbinghausScheduler.ReviewStatus.NOT_STARTED,
+                gridItems(sortedArticles, key = { it.id }, contentType = { "article" }) { article ->
+                    ArticleCard(
+                        article = article,
+                        dateFormat = dateFormat,
+                        reviewStatus = reviewStatusByArticle[article.id]
+                            ?: EbbinghausScheduler.ReviewStatus.NOT_STARTED,
                             onClick = {
                                 if (crossSelectMode) {
                                     selectedIds = if (article.id in selectedIds)
@@ -273,14 +300,15 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                 LazyColumn(
                     modifier = Modifier.fillMaxWidth().weight(1f),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
+                    // 底部留白：悬浮导航栏覆盖屏幕底部约 100dp，避免最后内容被遮挡
                     contentPadding = PaddingValues(bottom = 120.dp)
                 ) {
-                    items(sortedArticles, key = { it.id }, contentType = { "article" }) { article ->
-                        ArticleCard(
-                            article = article,
-                            dateFormat = dateFormat,
-                            reviewStatus = reviewStatusByArticle[article.id]
-                                ?: EbbinghausScheduler.ReviewStatus.NOT_STARTED,
+                items(sortedArticles, key = { it.id }, contentType = { "article" }) { article ->
+                    ArticleCard(
+                        article = article,
+                        dateFormat = dateFormat,
+                        reviewStatus = reviewStatusByArticle[article.id]
+                            ?: EbbinghausScheduler.ReviewStatus.NOT_STARTED,
                             onClick = {
                                 if (crossSelectMode) {
                                     selectedIds = if (article.id in selectedIds)
@@ -376,7 +404,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
 
     // 批量删除确认对话框
     if (deleteTargets.isNotEmpty()) {
-        AlertDialog(
+        BlancallAlertDialog(
             onDismissRequest = { deleteTargets = emptyList() },
             title = { Text("确认删除") },
             text = {
@@ -400,7 +428,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
         var selectedArticle by remember { mutableStateOf<Article?>(null) }
         // 排序结果缓存，避免每次重组新建列表
         val sortedArticles = remember(articles) { articles.sortedByDescending { it.updatedAt } }
-        AlertDialog(
+        BlancallAlertDialog(
             onDismissRequest = { showExportDialog = false },
             title = { Text("导出 PDF") },
             text = {

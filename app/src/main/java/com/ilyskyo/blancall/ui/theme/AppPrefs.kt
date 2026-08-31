@@ -1,3 +1,6 @@
+// Copyright (c) 2026 ilyskyo
+// SPDX-License-Identifier: MIT
+
 package com.ilyskyo.blancall.ui.theme
 
 import android.annotation.SuppressLint

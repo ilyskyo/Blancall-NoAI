@@ -3,6 +3,9 @@
 
 package com.ilyskyo.blancall.data.model
 
+import androidx.compose.runtime.Immutable
+
+@Immutable
 data class Article(
     val id: Long = 0,
     val title: String,

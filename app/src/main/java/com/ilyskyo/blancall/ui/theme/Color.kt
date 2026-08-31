@@ -42,16 +42,18 @@ val InverseOnSurfaceLight = Color(0xFFF5EFE2)
 val InversePrimaryLight = Color(0xFF8DA9FF)
 val ScrimLight = Color(0xFF000000)
 
-// Dark theme — 冷灰石板体系
-val BackgroundDark = Color(0xFF121418)
-val OnBackgroundDark = Color(0xFFE7E8EC)
-val SurfaceDark = Color(0xFF1A1C21)
-val OnSurfaceDark = Color(0xFFE7E8EC)
-val SurfaceVariantDark = Color(0xFF23252B)
-val SurfaceContainerHighDark = Color(0xFF2E3138) // 更高层：浮层 / 入口按钮 / 顶栏
-val OnSurfaceVariantDark = Color(0xFFBDC0C8)
-val OutlineDark = Color(0xFF7E8289)
-val OutlineVariantDark = Color(0xFF43474E)
+// Dark theme — 纯黑底色（深色模式各页面背景均为纯黑，无任何黄色调）
+// 层级抬升：背景保持纯黑，卡片 / 容器逐级抬升（Apple iOS 系统填充层级：
+// #000000 → #1C1C1E → #2C2C2E → #3A3A3C），深色下形成清晰纵深、不再糊成一片。
+val BackgroundDark = Color(0xFF000000)
+val OnBackgroundDark = Color(0xFFF4F5F8)
+val SurfaceDark = Color(0xFF1C1C1E)        // 一级抬升：卡片表面
+val OnSurfaceDark = Color(0xFFF4F5F8)
+val SurfaceVariantDark = Color(0xFF2C2C2E)   // 二级抬升：次级表面
+val SurfaceContainerHighDark = Color(0xFF3A3A3C) // 更高层：浮层 / 入口按钮 / 顶栏
+val OnSurfaceVariantDark = Color(0xFFCBD0DA)
+val OutlineDark = Color(0xFF9097A2)
+val OutlineVariantDark = Color(0xFF3F434C)
 val OnErrorDark = Color(0xFF690005)
 val ErrorContainerDark = Color(0xFF93000A)
 val OnErrorContainerDark = Color(0xFFFFDAD6)
