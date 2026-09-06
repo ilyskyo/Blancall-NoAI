@@ -19,6 +19,7 @@ import com.ilyskyo.blancall.data.model.PracticeRecord
 import com.ilyskyo.blancall.data.model.PracticeState
 import com.ilyskyo.blancall.data.model.PracticeStatus
 import com.ilyskyo.blancall.data.repository.ArticleRepository
+import com.ilyskyo.blancall.data.repository.CustomClozeStore
 import com.ilyskyo.blancall.data.repository.FsrsStateStore
 import com.ilyskyo.blancall.data.repository.RecordRepository
 import com.ilyskyo.blancall.ui.theme.AppPrefs
@@ -750,6 +751,89 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
         sentenceGenerateJob = job
         wordGenerateJob = job
         dictationGenerateJob = job
+    }
+
+    /**
+     * 进入自定义挖空练习：按配置的「句索引 + 句内区间」确定性构造字词挖空结果，
+     * 复用字词挖空的作答/判分/进度恢复链路。
+     * 强制整篇模式（段落选择清空）保证配置的句子索引与全文切句口径对齐。
+     */
+    fun startCustomPractice(blanks: List<CustomClozeStore.BlankSpec>) {
+        val content = _article.value?.content ?: return
+        if (content.isBlank() || blanks.isEmpty()) return
+        val sentences = SentenceSplitter.split(content)
+
+        // 合并相邻/重叠区间并过滤越界
+        val bySentence = blanks.filter { it.s in sentences.indices }
+            .groupBy { it.s }
+            .mapValues { (_, list) ->
+                list.map { spec ->
+                    val a = spec.a.coerceIn(0, sentences[spec.s].length)
+                    val b = spec.b.coerceIn(a + 1, sentences[spec.s].length)
+                    a until b
+                }.sortedBy { it.first }
+                    .fold(mutableListOf<IntRange>()) { acc, r ->
+                        val last = acc.lastOrNull()
+                        if (last != null && r.first <= last.last + 1) {
+                            acc[acc.size - 1] = last.first..maxOf(last.last, r.last)
+                        } else acc.add(r)
+                        acc
+                    }
+            }
+        if (bySentence.isEmpty()) return
+
+        // 取消在途生成，防止竞态覆盖
+        sentenceGenerateJob?.cancel()
+        wordGenerateJob?.cancel()
+        dictationGenerateJob?.cancel()
+
+        // 强制整篇模式，句子索引与全文切句对齐
+        _sectionMode.value = SectionMode.FULL
+        _selectedSections.value = emptySet()
+        _mode.value = BlancallMode.WORD
+        _wordAnswers.value = emptyMap()
+        _checkResults.value = emptyMap()
+        _isSubmitted.value = false
+        _dictationInput.value = ""
+        _dictationCheckResult.value = null
+        stopAllBlankHints()
+        _weakHintCount.value = 0
+        _strongHintCount.value = 0
+
+        data class Sel(val sIdx: Int, val range: IntRange, val text: String)
+        val all = bySentence.entries.sortedBy { it.key }.flatMap { (s, ranges) ->
+            ranges.map { Sel(s, it, sentences[s].substring(it.first, it.last + 1)) }
+        }
+
+        // 构造显示文本（从后往前替换为 ___），收集空位
+        val builders = sentences.map { StringBuilder(it) }.toMutableList()
+        for (sel in all.sortedWith(compareByDescending<Sel> { it.sIdx }.thenByDescending { it.range.first })) {
+            builders[sel.sIdx].replace(sel.range.first, sel.range.last + 1, "___")
+        }
+        val resultBlanks = mutableListOf<BlancallGenerator.WordBlankInfo>()
+        val resultSentences = mutableListOf<BlancallGenerator.WordClozeSentence>()
+        var globalIdx = 0
+        for (s in sentences.indices) {
+            val idxs = mutableListOf<Int>()
+            all.filter { it.sIdx == s }.sortedBy { it.range.first }.forEach { sel ->
+                resultBlanks.add(BlancallGenerator.WordBlankInfo(globalIdx, sel.text, sel.range.first))
+                idxs.add(globalIdx)
+                globalIdx++
+            }
+            resultSentences.add(BlancallGenerator.WordClozeSentence(builders[s].toString(), idxs))
+        }
+        val result = BlancallGenerator.WordClozeResult(
+            resultSentences, resultBlanks, resultSentences.joinToString("\n") { it.text },
+            maxBlanks = resultBlanks.size, suggestedBlanks = resultBlanks.size
+        )
+
+        _wordCloze.value = result
+        _sentenceCloze.value = null
+        _dictationResult.value = null
+        // 整篇模式：锚点即全文切句位置（判分记录的句子归属与热力图依赖）
+        _sentenceAnchors.value = buildSentenceAnchors(content, content, SectionSplitter.split(content), emptySet())
+        _totalBlanks.value = result.blanks.size
+        practiceStartTime = System.currentTimeMillis()
     }
 
     /** 设置字词挖空数量并重新生成 */
