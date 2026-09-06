@@ -85,33 +85,6 @@ fun buildErrorProfile(records: List<PracticeRecord>): BlancallGenerator.ErrorPro
 
 class PracticeViewModel(application: Application) : AndroidViewModel(application) {
 
-    /** 閿欒鐢诲儚 + 褰撳墠鏂囩珷 FSRS 璁板繂鍥犲瓙锛?1 璁板繂寮憋紝鎻愬崌鎸栫┖瀵嗗害涓庤杽寮卞€炬枩锛岀敱 BlancallGenerator 娑堣垂锛?*/
-    private fun errorProfileWithMemory(records: List<PracticeRecord>): BlancallGenerator.ErrorProfile =
-        buildErrorProfile(records).copy(memoryFactor = currentMemoryFactor())
-
-    /**
-     * 褰撳墠鏂囩珷鐨勮蹇嗗己搴﹀洜瀛愶紙FSRS 瀵煎嚭锛夛細
-     * - 鏈粌涔犺繃锛堟棤 FSRS 鐘舵€侊級鈫?1f锛堜腑鎬э紝鎸夊巻鍙查敊璇瓥鐣ュ嵆鍙級
-     * - 鐣欏瓨鐜囪秺浣?鈫?鍥犲瓙瓒婇珮锛堣澶氭寲銆佹洿鍊炬枩钖勫急澶勶級
-     * - 閬楀繕娆℃暟澶氬啀灏忓箙鍔犵爜
-     */
-    private fun currentMemoryFactor(): Float {
-        val articleId = _article.value?.id ?: return 1f
-        val state = FsrsStateStore.getInstance(
-            getApplication<Application>().filesDir.resolve("fsrs_state.json").absolutePath
-        ).get(articleId) ?: return 1f
-        if (state.reviewCount <= 0 || state.stability <= 0.0) return 1f
-        val retention = FsrsEngine.retentionRate(state) // 0..1
-        var factor = when {
-            retention < 0.5 -> 1.45f
-            retention < 0.7 -> 1.25f
-            retention < 0.85 -> 1.10f
-            else -> 1f
-        }
-        if (state.lapses >= 2) factor += 0.1f
-        return factor.coerceIn(1f, 1.6f)
-    }
-
     private val repository = ArticleRepository(
         application.filesDir.resolve("articles.json").absolutePath
     )
@@ -251,8 +224,49 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
     private val _crossArticleTitles = MutableStateFlow<List<String>>(emptyList())
     val crossArticleTitles: StateFlow<List<String>> = _crossArticleTitles.asStateFlow()
 
-    // 当前文章的所有练习记录（用于构建错误画像）
+    // 当前已加载的文章 id（幂等保护：旋转重建不重复加载，避免清空答案/重生成题目）
+    private var loadedArticleId: Long? = null
+    private var loadedArticleIds: List<Long>? = null
+
+    /** 当前文章的所有练习记录（用于构建错误画像） */
     private var articleRecords: List<PracticeRecord> = emptyList()
+
+    // 错误画像记忆化缓存：buildErrorProfile 为纯函数，仅在入参引用变化时重算，输出与原来完全一致
+    private var errorProfileCache: BlancallGenerator.ErrorProfile? = null
+    private var errorProfileCacheKey: List<PracticeRecord>? = null
+    private fun errorProfileFor(records: List<PracticeRecord>): BlancallGenerator.ErrorProfile {
+        // 缓存只缓存错误率统计；memoryFactor 依赖 FSRS 实时留存率（随时间衰减），须每次现算
+        if (records === errorProfileCacheKey && errorProfileCache != null) {
+            return errorProfileCache!!.copy(memoryFactor = currentMemoryFactor())
+        }
+        val p = buildErrorProfile(records).copy(memoryFactor = currentMemoryFactor())
+        errorProfileCache = p
+        errorProfileCacheKey = records
+        return p
+    }
+
+    /**
+     * 当前文章的记忆强度因子（FSRS 导出），>1 表示记忆偏弱：
+     * - 未练习过（无 FSRS 状态）→ 1f（中性，按历史错误策略即可）
+     * - 留存率越低 → 因子越高（该多挖、更倾斜薄弱处）
+     * - 遗忘次数多再小幅加码
+     */
+    private fun currentMemoryFactor(): Float {
+        val articleId = _article.value?.id ?: return 1f
+        val state = FsrsStateStore.getInstance(
+            getApplication<Application>().filesDir.resolve("fsrs_state.json").absolutePath
+        ).get(articleId) ?: return 1f
+        if (state.reviewCount <= 0 || state.stability <= 0.0) return 1f
+        val retention = FsrsEngine.retentionRate(state) // 0..1
+        var factor = when {
+            retention < 0.5 -> 1.45f
+            retention < 0.7 -> 1.25f
+            retention < 0.85 -> 1.10f
+            else -> 1f
+        }
+        if (state.lapses >= 2) factor += 0.1f
+        return factor.coerceIn(1f, 1.6f)
+    }
 
     // 用于取消上一次生成的协程，防止竞态条件（快速切换文章/模式/策略时避免旧结果覆盖新结果）
     private var wordGenerateJob: Job? = null
@@ -273,6 +287,10 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
         }
 
     fun loadArticle(articleId: Long, resume: Boolean = false, initialSectionMode: SectionMode? = null) {
+        // 幂等：旋转横屏等配置变更导致 Activity 重建时 LaunchedEffect 会重跑，
+        // 同一篇文章直接跳过，避免清空已输入答案并重新生成题目。
+        if (loadedArticleId == articleId) return
+        loadedArticleId = articleId
         // 「继续练习」是否已恢复上次挖好的空（恢复成功时跳过生成处重新生成）
         var resumeRestoredCloze = false
         // 取消上一次加载，防止快速切换文章时旧结果覆盖新结果
@@ -384,7 +402,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
             var ranked: List<SectionSplitter.RankedSection> = emptyList()
             try {
                 withContext(Dispatchers.Default) {
-                    val errorProfile = errorProfileWithMemory(articleRecords)
+                    val errorProfile = errorProfileFor(articleRecords)
                     secs = SectionSplitter.split(art.content)
                     ranked = SectionSplitter.rankByErrorRate(secs, errorProfile.sentenceErrorRates)
                 }
@@ -417,6 +435,9 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
 
     /** 跨文本联动：加载多篇文章混合练习 */
     fun loadArticles(articleIds: List<Long>) {
+        // 幂等：旋转重建重跑时跳过，保护跨文本练习已输入答案
+        if (loadedArticleIds == articleIds) return
+        loadedArticleIds = articleIds
         _isCrossMode.value = articleIds.size > 1
         // 取消上一次加载，防止竞态
         loadJob?.cancel()
@@ -453,7 +474,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                     mixed = CrossTextReview.mix(triples)
                     val content = mixed?.content.orEmpty()
                     if (content.isNotBlank()) {
-                        val errorProfile = errorProfileWithMemory(articleRecords)
+                        val errorProfile = errorProfileFor(articleRecords)
                         secs = SectionSplitter.split(content)
                         ranked = SectionSplitter.rankByErrorRate(secs, errorProfile.sentenceErrorRates)
                         val effectiveContent = getEffectiveContent(content, secs)
@@ -705,7 +726,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
             var anchors: List<Int> = emptyList()
             try {
                 withContext(Dispatchers.Default) {
-                    val errorProfile = errorProfileWithMemory(recordsSnapshot)
+                    val errorProfile = errorProfileFor(recordsSnapshot)
                     sentenceResult = BlancallGenerator.generateSentenceCloze(
                         effectiveContent, errorProfile = errorProfile, strategy = strat
                     )
@@ -749,7 +770,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
             var anchors: List<Int> = emptyList()
             try {
                 withContext(Dispatchers.Default) {
-                    val errorProfile = errorProfileWithMemory(recordsSnapshot)
+                    val errorProfile = errorProfileFor(recordsSnapshot)
                     result = BlancallGenerator.generateWordCloze(
                         effectiveContent, count = count, errorProfile = errorProfile,
                         strategy = strat, classicalMode = classical
@@ -1293,7 +1314,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                     BlancallMode.SENTENCE -> {
                         var result: BlancallGenerator.SentenceClozeResult? = null
                         withContext(Dispatchers.Default) {
-                            val errorProfile = errorProfileWithMemory(recordsSnapshot)
+                            val errorProfile = errorProfileFor(recordsSnapshot)
                             result = BlancallGenerator.generateSentenceCloze(
                                 effectiveContent, errorProfile = errorProfile, strategy = strat
                             )
@@ -1304,7 +1325,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                     BlancallMode.WORD -> {
                         var result: BlancallGenerator.WordClozeResult? = null
                         withContext(Dispatchers.Default) {
-                            val errorProfile = errorProfileWithMemory(recordsSnapshot)
+                            val errorProfile = errorProfileFor(recordsSnapshot)
                             result = BlancallGenerator.generateWordCloze(
                                 effectiveContent, count = _wordBlankCount.value,
                                 errorProfile = errorProfile, strategy = strat, classicalMode = classical

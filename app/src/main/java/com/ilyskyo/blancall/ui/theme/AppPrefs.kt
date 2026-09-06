@@ -27,10 +27,6 @@ object AppPrefs {
         "logo", "celebrate", "edit", "inbox", "arrowforward", "openinfull", "check"
     )
 
-    private val _predictiveBackFlow = MutableStateFlow(true)
-    /** 响应式状态流，Compose 中通过 collectAsState() 订阅 */
-    val predictiveBackFlow: StateFlow<Boolean> = _predictiveBackFlow.asStateFlow()
-
     private val _homeBrandExpandedFlow = MutableStateFlow(false)
     /** 首页品牌栏(Blancall 栏)展开状态：拉下后跨页面(如前往设置再返回)保持，直到用户再次下拉/上滑手动收起 */
     val homeBrandExpandedFlow: StateFlow<Boolean> = _homeBrandExpandedFlow.asStateFlow()
@@ -58,6 +54,10 @@ object AppPrefs {
     private val _lightBeigeBackgroundFlow = MutableStateFlow(false)
     /** 浅色模式米黄底色开关：开启使用暖米黄底色，关闭使用纯白底色（深色模式不受影响） */
     val lightBeigeBackgroundFlow: StateFlow<Boolean> = _lightBeigeBackgroundFlow.asStateFlow()
+
+    private val _navLiquidGlassFlow = MutableStateFlow(true)
+    /** 底部导航栏液态玻璃开关：关闭后玻璃层隐藏，回退纯色底（性能/功耗优先） */
+    val navLiquidGlassFlow: StateFlow<Boolean> = _navLiquidGlassFlow.asStateFlow()
 
     private val _reviewTemplateFlow = MutableStateFlow("standard")
     /** 复习模板 ID（sprint / standard / deep） */
@@ -129,7 +129,6 @@ object AppPrefs {
     @SuppressLint("ApplySharedPref")
     fun init(context: Context) {
         prefs = context.applicationContext.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
-        _predictiveBackFlow.value = prefs.getBoolean("predictive_back", true)
         _homeBrandExpandedFlow.value = prefs.getBoolean("home_brand_expanded", false)
         _autoIndentEnabledFlow.value = prefs.getBoolean("auto_indent_enabled", true)
         _accentColorFlow.value = prefs.getInt("accent_color", 0)
@@ -137,6 +136,7 @@ object AppPrefs {
         _subtitleFlow.value = prefs.getString("subtitle", "Fill the blank, recall the knowledge.") ?: "Fill the blank, recall the knowledge."
         _showHomeEmojiFlow.value = prefs.getBoolean("show_home_emoji", false)
         _lightBeigeBackgroundFlow.value = prefs.getBoolean("light_beige_background", false)
+        _navLiquidGlassFlow.value = prefs.getBoolean("nav_liquid_glass", true)
         _reviewTemplateFlow.value = prefs.getString("review_template", "standard") ?: "standard"
         _hiddenArticleIdsFlow.value = prefs.getStringSet("hidden_articles", emptySet())
             ?.mapNotNull { it.toLongOrNull() }?.toSet() ?: emptySet()
@@ -163,15 +163,6 @@ object AppPrefs {
             prefs.getString("reading_occlusion_mode", "long")?.takeIf { it in setOf("long", "short", "mixed") } ?: "long"
         _readingOcclusionColorFlow.value = prefs.getInt("reading_occlusion_color", 0).coerceIn(0, 5)
     }
-
-    var predictiveBackEnabled: Boolean
-        get() = if (::prefs.isInitialized) prefs.getBoolean("predictive_back", true) else true
-        set(value) {
-            if (::prefs.isInitialized) {
-                prefs.edit { putBoolean("predictive_back", value) }
-                _predictiveBackFlow.value = value
-            }
-        }
 
     /** 段落首行自动缩进开关 */
     var autoIndentEnabled: Boolean
@@ -240,6 +231,16 @@ object AppPrefs {
             if (::prefs.isInitialized) {
                 prefs.edit { putBoolean("light_beige_background", value) }
                 _lightBeigeBackgroundFlow.value = value
+            }
+        }
+
+    /** 底部导航栏液态玻璃开关（关闭后回退纯色底） */
+    var navLiquidGlassEnabled: Boolean
+        get() = if (::prefs.isInitialized) prefs.getBoolean("nav_liquid_glass", true) else true
+        set(value) {
+            if (::prefs.isInitialized) {
+                prefs.edit { putBoolean("nav_liquid_glass", value) }
+                _navLiquidGlassFlow.value = value
             }
         }
 

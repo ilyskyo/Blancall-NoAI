@@ -144,6 +144,28 @@ fun SettingsScreen(navController: NavController) {
 
                     HorizontalDivider(Modifier.padding(horizontal = 16.dp),
                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    // ── 导航栏液态玻璃开关（关闭后底部导航栏回退纯色底）──
+                    val navGlass by AppPrefs.navLiquidGlassFlow.collectAsState()
+                    Row(
+                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("导航栏液态玻璃", style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurface)
+                            Text("底部导航栏的真液态玻璃折射效果，关闭后改为纯色底，更省电。",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        GlassSwitch(
+                            checked = navGlass,
+                            onCheckedChange = { AppPrefs.navLiquidGlassEnabled = it }
+                        )
+                    }
+
+                    HorizontalDivider(Modifier.padding(horizontal = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                     // ── 首页副标题（点击编辑；首页品牌栏收起时也能从这里修改）──
                     Row(
                         Modifier
@@ -236,31 +258,6 @@ fun SettingsScreen(navController: NavController) {
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(14.dp)
             ) {
-                // 改用 AppPrefs 的 Flow collectAsState，与持久化值保持单一数据源
-                val predictiveBack by AppPrefs.predictiveBackFlow.collectAsState()
-                Row(
-                    Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text("预测性返回手势", style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface)
-                        Text("返回时有滑动缩放动画，关闭后使用淡入淡出",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                    GlassSwitch(
-                        checked = predictiveBack,
-                        onCheckedChange = { AppPrefs.predictiveBackEnabled = it }
-                    )
-                }
-
-                HorizontalDivider(
-                    Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-                )
-
                 // 首页表情图标显示开关
                 val showHomeEmoji by AppPrefs.showHomeEmojiFlow.collectAsState()
                 Row(
