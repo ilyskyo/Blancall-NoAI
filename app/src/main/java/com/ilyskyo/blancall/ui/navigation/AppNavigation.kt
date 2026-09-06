@@ -262,7 +262,7 @@ fun AppNavigation() {
         }
 
         composable(
-            route = "practice/{articleId}?mode={mode}&resume={resume}&sectionMode={sectionMode}",
+            route = "practice/{articleId}?mode={mode}&resume={resume}&sectionMode={sectionMode}&custom={custom}",
             arguments = listOf(
                 navArgument("articleId") { type = NavType.LongType },
                 navArgument("mode") {
@@ -276,6 +276,10 @@ fun AppNavigation() {
                 navArgument("sectionMode") {
                     type = NavType.StringType
                     defaultValue = ""
+                },
+                navArgument("custom") {
+                    type = NavType.StringType
+                    defaultValue = "false"
                 }
             ),
             enterTransition = enterSlide,
@@ -292,7 +296,8 @@ fun AppNavigation() {
             PracticeScreen(
                 navController, listOf(articleId), initialMode,
                 resume = resumeStr == "true",
-                initialSectionMode = initialSectionMode
+                initialSectionMode = initialSectionMode,
+                openCustomPicker = backStackEntry.arguments?.getString("custom") == "true"
             )
         }
 
