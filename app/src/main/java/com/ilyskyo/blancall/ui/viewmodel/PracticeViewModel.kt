@@ -11,6 +11,7 @@ import com.ilyskyo.blancall.algorithm.BlancallGenerator
 import com.ilyskyo.blancall.algorithm.CrossTextReview
 import com.ilyskyo.blancall.algorithm.DictationScorer
 import com.ilyskyo.blancall.algorithm.FsrsEngine
+import com.ilyskyo.blancall.algorithm.PracticeContentOps
 import com.ilyskyo.blancall.algorithm.SectionSplitter
 import com.ilyskyo.blancall.algorithm.SentenceSplitter
 import com.ilyskyo.blancall.data.model.Article
@@ -492,7 +493,11 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                         )
                     }
                 }
-            } catch (_: Exception) { /* 生成失败保持 null，UI 显示空态 */ }
+            } catch (e: Exception) {
+                // 协程被取消（跨文本模式快速切换）时必须继续上抛，否则下方会把旧结果覆盖为 null
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                /* 生成失败保持 null，UI 显示空态 */
+            }
 
             if (mixed == null) return@launch
             _crossSourceInfo.value = mixed!!.sources
@@ -651,15 +656,14 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
     }
 
     /** 根据当前段落模式获取实际用于挖空的文本内容 */
-    private fun getEffectiveContent(fullContent: String, secs: List<SectionSplitter.Section>): String {
-        if (_sectionMode.value == SectionMode.FULL) return fullContent
-        val selected = _selectedSections.value
-        if (selected.isEmpty() || selected.size == secs.size) return fullContent
-        return secs
-            .filter { it.index in selected }
-            .sortedBy { it.startChar }
-            .joinToString("\n\n") { it.text }
-    }
+    /** 段落选择模式下的有效正文；纯逻辑见 [PracticeContentOps.effectiveContent]，此处只注入当前状态 */
+    private fun getEffectiveContent(fullContent: String, secs: List<SectionSplitter.Section>): String =
+        PracticeContentOps.effectiveContent(
+            fullContent = fullContent,
+            sections = secs,
+            isFullMode = _sectionMode.value == SectionMode.FULL,
+            selected = _selectedSections.value
+        )
 
     /**
      * 构建「effectiveContent 句子索引 → 该句在全文中的字符起始位置」锚点表，见 [_sentenceAnchors]。
@@ -675,34 +679,12 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
         effectiveContent: String,
         secs: List<SectionSplitter.Section>,
         selected: Set<Int>
-    ): List<Int> {
-        if (fullContent.isEmpty()) return emptyList()
-        // 整篇（或选中全部段落）：子集即全文，直接用全文切句位置
-        if (effectiveContent == fullContent) {
-            return SentenceSplitter.splitWithPositions(fullContent).map { it.startIndex }
-        }
-        // 段落模式：建立 effectiveContent 偏移区间 → 全文起始偏移 的换算表
-        val ordered = secs.filter { it.index in selected }.sortedBy { it.startChar }
-        if (ordered.isEmpty()) return emptyList()
-        // 三元组：子集内起始偏移、子集内结束偏移（exclusive）、该段在全文的起始偏移
-        val spans = ArrayList<Triple<Int, Int, Int>>()
-        var cursor = 0
-        for (s in ordered) {
-            val len = s.text.length
-            spans.add(Triple(cursor, cursor + len, s.startChar))
-            cursor += len + 2   // joinToString("\n\n") 的分隔符占 2 字符
-        }
-        val fullSents = SentenceSplitter.splitWithPositions(fullContent)
-        val byText = fullSents.groupBy { it.text }
-        return SentenceSplitter.splitWithPositions(effectiveContent).map { (text, start, _) ->
-            val approx = spans.firstOrNull { start >= it.first && start < it.second }
-                ?.let { (it.third + (start - it.first)).coerceIn(0, fullContent.length) }
-                ?: start.coerceIn(0, fullContent.length)
-            val candidates = byText[text]
-            if (candidates.isNullOrEmpty()) approx
-            else candidates.minByOrNull { abs(it.startIndex - approx) }!!.startIndex
-        }
-    }
+    ): List<Int> = PracticeContentOps.buildSentenceAnchors(
+        fullContent = fullContent,
+        effectiveContent = effectiveContent,
+        sections = secs,
+        selected = selected
+    )
 
     private fun regenerateCloze() {
         val content = _article.value?.content
@@ -902,7 +884,11 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                     )
                     anchors = buildSentenceAnchors(content, effectiveContent, secs, selected)
                 }
-            } catch (_: Exception) { /* 生成失败保持旧值，避免崩溃 */ }
+            } catch (e: Exception) {
+                // 协程被取消（如快速切换挖空数）时必须继续上抛，否则下方会把 _wordCloze 覆盖为 null/旧值
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                /* 生成失败保持旧值，避免崩溃 */
+            }
             _wordCloze.value = result
             _sentenceAnchors.value = anchors
             if (_mode.value == BlancallMode.WORD) {
@@ -1477,7 +1463,11 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                 anchors = withContext(Dispatchers.Default) {
                     buildSentenceAnchors(content, effectiveContent, secs, selected)
                 }
-            } catch (_: Exception) { /* 重做失败保持旧值，避免崩溃 */ }
+            } catch (e: Exception) {
+                // 协程被取消（重做过程中再次切换模式）时必须继续上抛，否则下方重置会覆盖新结果
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                /* 重做失败保持旧值，避免崩溃 */
+            }
             _sentenceAnchors.value = anchors
             _isSubmitted.value = false
             _checkResults.value = emptyMap()
