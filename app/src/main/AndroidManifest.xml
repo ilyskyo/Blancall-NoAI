@@ -5,6 +5,9 @@
     <!-- Android 13+ 通知权限 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- 关键交互的触感反馈（长按 / 拖拽 / 下拉达阈值等） -->
+    <uses-permission android:name="android.permission.VIBRATE" />
+
     <application
         android:name=".BlancallApp"
         android:enableOnBackInvokedCallback="true"
