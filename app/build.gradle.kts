@@ -28,8 +28,8 @@ android {
         applicationId = "com.ilyskyo.blancall.noai"
         minSdk = 26
         targetSdk = 36
-        versionCode = 28
-        versionName = "6.6-NoAI"
+        versionCode = 29
+        versionName = "6.7-NoAI"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
