@@ -64,6 +64,8 @@ import com.ilyskyo.blancall.ui.common.CalendarHeatmap
 import com.ilyskyo.blancall.ui.common.DailyTrendChart
 import com.ilyskyo.blancall.ui.common.GaugeProgress
 import com.ilyskyo.blancall.ui.common.GlassCard
+import com.ilyskyo.blancall.ui.common.GridMaxWidth
+import com.ilyskyo.blancall.ui.common.LocalIsLargeScreen
 import com.ilyskyo.blancall.ui.common.MemoryDecayChart
 import com.ilyskyo.blancall.ui.common.MistakeBar
 import com.ilyskyo.blancall.ui.common.RadarChart
@@ -319,7 +321,8 @@ fun OverviewScreen(navController: NavController, onBack: (() -> Unit)? = null) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .widthIn(max = 600.dp)
+                // 大屏放宽上限：平板横屏用满宽度展示统计卡，窄屏不受影响（600dp 内铺满）
+                .widthIn(max = if (LocalIsLargeScreen) GridMaxWidth else 600.dp)
                 .padding(horizontal = 20.dp, vertical = 20.dp)
         ) {
             // ── 顶部栏：返回 + 标题 + 筛选 + 导出 ──
@@ -439,7 +442,7 @@ fun OverviewScreen(navController: NavController, onBack: (() -> Unit)? = null) {
         LazyColumn(
             modifier = Modifier.fillMaxWidth().weight(1f),
             verticalArrangement = Arrangement.spacedBy(12.dp),
-            // 底部留白：悬浮导航栏覆盖屏幕底部约 100dp，避免最后内容被遮挡
+            // 底部留白：悬浮导航栏会覆盖屏幕底部约 100dp，避免最后内容被遮挡
             contentPadding = PaddingValues(bottom = 120.dp)
         ) {
             // ── 总览卡片（仪表盘 + 连续天数 + 时长） ──
@@ -934,7 +937,7 @@ private fun ForgettingPredictionCard(
 
     GlassCard(
         modifier = Modifier.fillMaxWidth(),
-        // 清新马卡龙：蜜桃淡彩卡面（与 Pro 版一致）
+        // 清新马卡龙：蜜桃淡彩卡面
         containerColor = Macaron.warn().fill
     ) {
         Column(Modifier.padding(16.dp)) {

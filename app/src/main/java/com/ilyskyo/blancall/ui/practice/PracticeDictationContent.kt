@@ -74,6 +74,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlin.math.roundToInt
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavController
 import com.ilyskyo.blancall.algorithm.AnswerChecker
 import com.ilyskyo.blancall.algorithm.BlancallGenerator
@@ -81,6 +82,8 @@ import com.ilyskyo.blancall.algorithm.PdfExporter
 import com.ilyskyo.blancall.algorithm.SectionSplitter
 import com.ilyskyo.blancall.algorithm.ShareImageGenerator
 import com.ilyskyo.blancall.data.repository.CustomClozeStore
+import com.ilyskyo.blancall.data.handwriting.HandwritingScript
+import com.ilyskyo.blancall.ui.handwriting.AnswerInputField
 import com.ilyskyo.blancall.ui.theme.AppPrefs
 import com.ilyskyo.blancall.ui.common.BackButton
 import com.ilyskyo.blancall.ui.viewmodel.BlankCountWarning
@@ -126,6 +129,12 @@ internal fun DictationContent(
         if (!isSubmitted) onEnterInput()
     }
     val context = LocalContext.current
+    val handwritingMode by AppPrefs.handwritingInputEnabledFlow.collectAsStateWithLifecycle()
+    // ⚠️ 手写文种必须按**原文**选：整段默写的目标就是原文，而 AnswerInputField 默认走中文模型 ——
+    // 英文文章下会一个字都认不出（真机反馈「反向默写的手写没法用」的直接原因之一）。
+    val dictationScript = remember(dictation.clauses) {
+        HandwritingScript.forAnswer(dictation.clauses.joinToString(""))
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         contentPadding = PaddingValues(bottom = 24.dp),
@@ -149,16 +158,24 @@ internal fun DictationContent(
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.padding(top = 8.dp, bottom = 4.dp))
                 // 反向默写弱提示：提示字紧跟已输入文字的下一字位（5s 淡入浅灰）
-                HintOutlinedField(
+                // 用 AnswerInputField 而非 HintOutlinedField：支持键盘 ⇄ 手写双模式，
+                // 与两版共用的手写识别引擎对接（离线，不涉及任何联网能力）。
+                AnswerInputField(
                     value = userInput,
                     onValueChange = onInputChange,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .heightIn(min = 160.dp, max = 320.dp),
+                        .then(
+                            // 手写态下不撑高：书写板自己就占 140dp+，
+                            // 再让输入框占 160–320dp 会把书写区挤出可视范围（真机反馈「写起来别扭」）。
+                            if (handwritingMode) Modifier
+                            else Modifier.heightIn(min = 160.dp, max = 320.dp)
+                        ),
                     placeholder = "按原文顺序默写整段，可把复制下来的分句拼回去…",
                     hintChar = if (!isSubmitted) dictationHintChar else null,
                     maxLines = Int.MAX_VALUE,
-                    minHeight = 100.dp
+                    minHeight = 100.dp,
+                    script = dictationScript
                 )
             }
         } else if (checkResult != null) {

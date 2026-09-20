@@ -94,6 +94,16 @@ object AppPrefs {
     private val _pdfViewModeFlow = MutableStateFlow("text")
     /** PDF 预览视图模式：text=纯文本排版，image=原 PDF 图片渲染；跨篇目持久记忆 */
     val pdfViewModeFlow: StateFlow<String> = _pdfViewModeFlow.asStateFlow()
+
+    private val _handwritingInputEnabledFlow = MutableStateFlow(false)
+    /**
+     * 作答输入方式：false=键盘输入（默认），true=手写输入。
+     *
+     * 用户明确要求「选了笔就一直用笔，直到自己切回键盘」——因此这是**跨页面、跨启动持久**的偏好，
+     * 而不是每次进练习页都要重新点一次的一次性开关。切换入口是答题输入框右上角的笔图标。
+     */
+    val handwritingInputEnabledFlow: StateFlow<Boolean> = _handwritingInputEnabledFlow.asStateFlow()
+
     private val _readingFontFlow = MutableStateFlow(17f)
     /** 阅读字号(px)，14~24 可调 */
     val readingFontFlow: StateFlow<Float> = _readingFontFlow.asStateFlow()
@@ -159,6 +169,7 @@ object AppPrefs {
         _onboardingSeenFlow.value = prefs.getBoolean("onboarding_seen", false)
         _libraryDisclaimerSeenFlow.value = prefs.getStringSet("library_disclaimer_seen", emptySet())?.toSet() ?: emptySet()
         _pdfViewModeFlow.value = prefs.getString("pdf_view_mode", "text") ?: "text"
+        _handwritingInputEnabledFlow.value = prefs.getBoolean("handwriting_input_enabled", false)
         _readingFontFlow.value = prefs.getFloat("reading_font", 17f).coerceIn(14f, 36f)
         _readingLineHeightFlow.value = prefs.getFloat("reading_line_height", 2.0f).coerceIn(1.4f, 2.4f)
         _readingBgModeFlow.value = prefs.getInt("reading_bg_mode", 0)
@@ -360,6 +371,19 @@ object AppPrefs {
 
     /** 当前 PDF 预览视图模式（text=纯文本排版 / image=原 PDF 图片渲染） */
     fun pdfViewMode(): String = _pdfViewModeFlow.value
+
+    /**
+     * 作答输入方式（跨页面／跨启动持久）：true=手写输入，false=键盘输入。
+     * 见 [handwritingInputEnabledFlow] 的说明——用户要求「选了笔就一直用笔」。
+     */
+    var handwritingInputEnabled: Boolean
+        get() = if (::prefs.isInitialized) prefs.getBoolean("handwriting_input_enabled", false) else false
+        set(value) {
+            if (::prefs.isInitialized) {
+                prefs.edit { putBoolean("handwriting_input_enabled", value) }
+                _handwritingInputEnabledFlow.value = value
+            }
+        }
     // ── 沉浸阅读模式设置 ──
 
     /** 阅读字号(px) */

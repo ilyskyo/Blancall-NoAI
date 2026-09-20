@@ -24,8 +24,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
@@ -41,7 +39,6 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.TextStyle
 import com.ilyskyo.blancall.ui.common.AppIcon
 import com.ilyskyo.blancall.ui.common.AppIconKind
@@ -54,6 +51,7 @@ import com.ilyskyo.blancall.ui.common.GlassCard
 import com.ilyskyo.blancall.ui.common.GlassMenuDivider
 import com.ilyskyo.blancall.ui.common.GlassModalBottomSheet
 import com.ilyskyo.blancall.ui.common.GlassSwitch
+import com.ilyskyo.blancall.ui.common.pinchZoomByTouch
 import com.ilyskyo.blancall.ui.theme.isBlancallDark
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -92,7 +90,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 
-// ========== Top title: swipe to switch practice mode ==========
+// ========== 顶部标题滑动切换模式 ==========
 
 internal const val TitleSwipeThreshold = 80f
 
@@ -100,7 +98,7 @@ internal const val TitleSwipeThreshold = 80f
 internal const val MaxTitleDrag = 96f
 
 
-/** Ordered list of the three modes for looping swipe switching. */
+/** 三种模式的有序列表（用于标题左右滑动循环切换） */
 internal val MODE_ORDER = listOf(BlancallMode.SENTENCE, BlancallMode.WORD, BlancallMode.REVERSE)
 
 
@@ -112,37 +110,22 @@ internal fun prevMode(m: BlancallMode): BlancallMode =
     MODE_ORDER[(MODE_ORDER.indexOf(m) - 1 + MODE_ORDER.size) % MODE_ORDER.size]
 
 
-// ========== Two-finger pinch to scale font size ==========
+// ========== 双指缩放字号 ==========
 
 /**
- * Two-finger pinch zoom: only reports zoom when >=2 pointers are down,
- * so a single-finger drag passes through to the underlying scroller.
+ * 双指捏合缩放（仅手指触点）：实现已统一到
+ * [com.ilyskyo.blancall.ui.common.pinchZoomByTouch]，此处保留同名入口，
+ * 避免各处调用点大面积改动。
+ *
+ * 关键修复：旧实现用 `pressed.size >= 2` 判定双指，**未过滤 PointerType**，
+ * 导致平板上「一手扶屏（手指）+ 一手写字（主动笔）」被判成双指捏合 → 字号乱跳。
+ * 现在只有手指参与捏合，手写笔与鼠标不触发缩放。
  */
-internal fun Modifier.pinchZoom(onZoomChange: (Float) -> Unit): Modifier = pointerInput(Unit) {
-    awaitEachGesture {
-        awaitFirstDown(requireUnconsumed = false)
-        var prevDist = -1f
-        do {
-            val event = awaitPointerEvent()
-            val pressed = event.changes.filter { it.pressed }
-            if (pressed.size >= 2) {
-                val a = pressed[0].position
-                val b = pressed[1].position
-                val dx = a.x - b.x
-                val dy = a.y - b.y
-                val dist = kotlin.math.sqrt(dx * dx + dy * dy)
-                if (prevDist > 0f && dist > 0f) {
-                    val factor = dist / prevDist
-                    if (factor.isFinite()) onZoomChange(factor)
-                }
-                prevDist = dist
-            }
-        } while (event.changes.any { it.pressed })
-    }
-}
+internal fun Modifier.pinchZoom(onZoomChange: (Float) -> Unit): Modifier =
+    this.pinchZoomByTouch(onZoomChange = onZoomChange)
 
 
-/** Scale every font size in [base] Typography by [scale] (lineHeight too). */
+/** 把整套 Typography 的每个字号按 [scale] 放大（lineHeight 同步），用于练习页字号缩放。 */
 internal fun scaledTypography(base: Typography, scale: Float): Typography {
     if (scale <= 0f || scale == 1f) return base
     fun s(ts: TextStyle): TextStyle = ts.copy(fontSize = ts.fontSize * scale, lineHeight = ts.lineHeight * scale)

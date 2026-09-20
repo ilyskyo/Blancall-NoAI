@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.windowsizeclass.ExperimentalMaterial3WindowSizeClassApi
+import androidx.compose.material3.windowsizeclass.calculateWindowSizeClass
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -27,6 +29,7 @@ import androidx.core.content.ContextCompat
 import androidx.navigation.compose.rememberNavController
 import com.ilyskyo.blancall.notification.NotificationHelper
 import com.ilyskyo.blancall.notification.ReminderWorker
+import com.ilyskyo.blancall.ui.common.ProvideWindowSizeClass
 import com.ilyskyo.blancall.ui.common.WelcomeScreen
 import com.ilyskyo.blancall.ui.onboarding.OnboardingScreen
 import com.ilyskyo.blancall.ui.navigation.AppNavigation
@@ -64,6 +67,7 @@ class MainActivity : ComponentActivity() {
         runCatching { ReminderWorker.scheduleNext(this) }
     }
 
+    @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         // 安装启动屏：在 setContent 之前调用，保证第一帧即显示与主页一致的底色，消除白屏
         installSplashScreen()
@@ -78,6 +82,11 @@ class MainActivity : ComponentActivity() {
         handleNotificationIntent(intent)
 
         setContent {
+            // 窗口尺寸类别：随窗口大小实时变化（旋转、分屏、折叠展开均会更新），
+            // 供全树按 Compact / Medium / Expanded 决定布局（网格列数、限宽、导航形态）。
+            val windowSizeClass = calculateWindowSizeClass(this)
+
+            ProvideWindowSizeClass(windowSizeClass) {
             BlancallTheme {
                 // ── 首次使用引导：开屏页 → 欢迎帮助页 → 淡出进入 ──
                 // 只出现在第一次使用（AppPrefs.firstLaunchDone 持久化标记）
@@ -135,6 +144,7 @@ class MainActivity : ComponentActivity() {
                     )
                 }
                 }
+            }
             }
         }
 
