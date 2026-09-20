@@ -11,8 +11,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -51,13 +49,23 @@ fun HandwritingAnswerSheet(
     blankLabel: String? = null,
     onAnswerChange: (String) -> Unit,
     onDismissRequest: () -> Unit,
-    script: HandwritingScript = HandwritingScript.Chinese
+    script: HandwritingScript = HandwritingScript.Chinese,
+    /** 下一个期望字符（生僻字守卫）；null = 不启用 */
+    expectedNextChar: Char? = null,
+    /** 英文默写的「答案先验」（剩余标准答案）；null = 不启用。 */
+    expectedWord: String? = null
 ) {
     GlassModalBottomSheet(onDismissRequest = onDismissRequest) {
+        // ⚠️⚠️ 这里**绝不能再加 `verticalScroll`**：`GlassModalBottomSheet` 内部
+        // （M3 `ModalBottomSheet`）已经把内容放进一个 `Column(verticalScroll)`，
+        // 套第二层可滚动容器时，内层会拿到「无限高」约束并直接抛
+        // `IllegalStateException: Vertically scrollable component was measured with an
+        // infinity maximum height constraints` —— 真机表现为「点开书写弹层立刻闪退」
+        // （栈里是 ScrollNode 套 ScrollNode + sheet 的 DraggableAnchorsNode）。
+        // 面板内容过高时由外层那层滚动负责。
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
                 .padding(bottom = 24.dp)
         ) {
@@ -121,7 +129,13 @@ fun HandwritingAnswerSheet(
                 autoCommit = true,
                 onCharsPicked = { chars -> onAnswerChange(answer + chars.joinToString("")) },
                 onUndoLast = { onAnswerChange(answer.dropLast(1)) },
-                script = script
+                script = script,
+                expectedNextChar = expectedNextChar,
+                // 汉字待填字 ⇒ 禁用拉丁回退（用户要求：答案只含汉字不做英文识别）
+                allowLatinFallback = expectedNextChar?.let {
+                    HandwritingScript.isLatinInputChar(it)
+                } != false,
+                expectedWord = expectedWord
             )
 
             Spacer(Modifier.height(8.dp))
