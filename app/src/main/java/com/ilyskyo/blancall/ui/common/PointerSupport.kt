@@ -5,7 +5,9 @@ package com.ilyskyo.blancall.ui.common
 
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.input.pointer.PointerEvent
 import androidx.compose.ui.input.pointer.PointerEventPass
@@ -202,6 +204,52 @@ fun Modifier.tapGesturesPenAware(
             if (!ch.pressed) {
                 if (!moved) onTap(start)
                 break
+            }
+        }
+    }
+}
+
+/**
+ * **笔点即书写**：手写笔在控件上按下时立刻回调 [onPenDown]，并**消费整段手势** ——
+ * 控件本身拿不到焦点，所以不会弹出软键盘。
+ *
+ * ## 为什么必须有这一层
+ * 拿笔的人点「作答区」，期望的是**写字**；这时弹软键盘是最差路径
+ * （真机日志证实：系统会去请求 IME 的手写模式，而多数输入法不支持，静默失败）。
+ *
+ * ## 交互约定（三个练习模式统一）
+ * - **笔**落在目标上 → 进入书写（切到手写模式并弹出书写板）；
+ * - **手指**点 → 完全不拦截，照常走原有交互（弹键盘、滚动）。
+ *
+ * `onPenDown` 用 [rememberUpdatedState] 兜住：`pointerInput` 只在 key 变化时重启，
+ * 直接捕获回调会冻结成「首次组合那次」的实例（与 `HandwritingPanel` 里踩过的坑同源）。
+ *
+ * ⚠️ 与 [Modifier.tapGesturesPenAware] 的分工：后者管「笔在写时忽略手指」（掌托保护），
+ * 本函数管「笔点即切书写」（入口分流）。两者互补，需要时都要挂。
+ *
+ * @param key 额外的 pointerInput key（例如所在卡片的空序号）
+ * @param enabled 是否启用拦截
+ * @param onPenDown 笔按下时的动作
+ */
+fun Modifier.penTapToHandwriting(
+    key: Any? = Unit,
+    enabled: Boolean = true,
+    onPenDown: () -> Unit
+): Modifier = composed {
+    val callback = rememberUpdatedState(onPenDown)
+    val on = rememberUpdatedState(enabled)
+    pointerInput(key) {
+        awaitEachGesture {
+            val down = awaitPointerEvent(PointerEventPass.Initial)
+            val pressed = down.changes.firstOrNull { it.pressed } ?: return@awaitEachGesture
+            if (pressed.type != PointerType.Stylus || !on.value) return@awaitEachGesture
+            callback.value()
+            // 吞掉这一笔的后续事件直到抬起：否则下层（输入框/可滚动容器）仍会拿到
+            // 焦点或把这一下当成拖动 —— 真机现象就是「页面跟着笔一起滚」。
+            while (true) {
+                val e = awaitPointerEvent(PointerEventPass.Initial)
+                e.changes.forEach { it.consume() }
+                if (e.changes.all { !it.pressed }) break
             }
         }
     }
