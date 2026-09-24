@@ -110,6 +110,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
     val isSubmitted by vm.isSubmitted.collectAsState()
     val isSubmitting by vm.isSubmitting.collectAsState()
     val resumed by vm.resumed.collectAsState()
+    val loadFailed by vm.loadFailed.collectAsState()
     val totalBlanks by vm.totalBlanks.collectAsState()
 
     val wordBlankCount by vm.wordBlankCount.collectAsState()
@@ -127,6 +128,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
     // 跨文本联动（F7）
     val isCrossMode by vm.isCrossMode.collectAsState()
     val crossArticleTitles by vm.crossArticleTitles.collectAsState()
+    val crossSourceInfo by vm.crossSourceInfo.collectAsState()
 
     // 挖空策略与古文模式
     val strategy by vm.strategy.collectAsState()
@@ -149,18 +151,26 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
     val context = LocalContext.current
 
     // 自定义挖空：从配置列表页「开始练习」进入（?configId=）——应用配置直接开始，无弹层
-    var customConfigApplied by rememberSaveable { mutableStateOf(false) }
+    // 用普通 remember + VM 侧 customConfigName 双重判定：进程死亡重建时 VM 已清空，
+    // 必须重新应用配置（rememberSaveable 会把"已应用"误恢复为 true，导致随机挖空且不锁定）
+    var customConfigApplied by remember { mutableStateOf(false) }
     LaunchedEffect(initialConfigId, article?.id) {
-        if (initialConfigId > 0 && article != null && articleIds.size == 1 && !customConfigApplied) {
+        if (initialConfigId > 0 && article != null && articleIds.size == 1 &&
+            !customConfigApplied && vm.customConfigName.value == null
+        ) {
             customConfigApplied = true
-            // 配置读取放 IO 线程；配置不存在（已被删除等）给出提示，不静默卡在随机挖空
+            // 配置读取放 IO 线程；按 (articleId, configId) 双键精确读取（不跨文章串篇）
             val cfg = withContext(Dispatchers.IO) {
-                CustomClozeStore.getInstance(context.filesDir).getConfigs(articleIds.first())
-                    .firstOrNull { it.id == initialConfigId }
+                CustomClozeStore.getInstance(context.filesDir).getConfig(articleIds.first(), initialConfigId)
             }
             if (cfg != null) {
-                vm.startCustomPractice(cfg)
-                modeSelected = true
+                if (vm.startCustomPractice(cfg)) {
+                    modeSelected = true
+                } else {
+                    // 配置与当前文章内容不匹配（文章被修改变短等）：已自动回退随机生成，仅提示
+                    Toast.makeText(context, "配置与当前文章内容不匹配，已改为随机挖空", Toast.LENGTH_LONG).show()
+                    modeSelected = true
+                }
             } else {
                 Toast.makeText(context, "自定义配置不存在或已被删除", Toast.LENGTH_SHORT).show()
             }
@@ -511,26 +521,36 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                 shape = RoundedCornerShape(8.dp),
                 color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("🔗", style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer)
-                    Spacer(Modifier.width(8.dp))
+                Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text("🔗", style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer)
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            "跨文复习",
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(
+                            crossArticleTitles.joinToString(" · "),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.7f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Spacer(Modifier.height(2.dp))
+                    // 跨文不使用单篇自定义配置：预期落差在此显式说明
                     Text(
-                        "跨文复习",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text(
-                        crossArticleTitles.joinToString(" · "),
+                        "混合练习使用智能挖空，不套用单篇自定义挖空配置",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.7f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.6f)
                     )
                 }
             }
@@ -578,7 +598,20 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
 
         // 内容区域
         Box(modifier = Modifier.weight(1f).pinchZoom { vm.adjustFontScale(it) }) {
-            if (article == null || (modeSelected && (
+            if (loadFailed) {
+                // 文章不存在/被删除（含跨文所选文章全部缺失）：错误态替代无限"正在生成挖空"
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            "文章不存在或已被删除",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        Spacer(Modifier.height(12.dp))
+                        TextButton(onClick = { navController.popBackStack() }) { Text("返回") }
+                    }
+                }
+            } else if (article == null || (modeSelected && (
                 (mode == BlancallMode.SENTENCE && sentenceCloze == null)
                 || (mode == BlancallMode.WORD && wordCloze == null)
                 || (mode == BlancallMode.REVERSE && dictationResult == null)
@@ -627,6 +660,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                             checkResults = checkResults,
                             isSubmitted = isSubmitted,
                             hintChars = hintChars,
+                            crossSourceInfo = crossSourceInfo,
                             weakHints = weakHintCount,
                             strongHints = strongHintCount,
                             onViewArticleData = viewArticleData,
