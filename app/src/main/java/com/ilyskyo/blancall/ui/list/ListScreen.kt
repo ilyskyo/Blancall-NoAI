@@ -57,11 +57,6 @@ import com.ilyskyo.blancall.data.repository.FsrsStateStore
 import com.ilyskyo.blancall.data.repository.RecordRepository
 import com.ilyskyo.blancall.data.repository.TagStore
 import com.ilyskyo.blancall.ui.common.BackButton
-import com.ilyskyo.blancall.ui.common.TouchAnchor
-import com.ilyskyo.blancall.ui.common.navigateReveal
-import com.ilyskyo.blancall.ui.common.rememberTouchAnchor
-import com.ilyskyo.blancall.ui.common.toTouchAnchor
-import com.ilyskyo.blancall.ui.common.trackTouchAnchor
 import com.ilyskyo.blancall.ui.common.DeleteConfirmDialog
 import com.ilyskyo.blancall.ui.common.GlassButton
 import com.ilyskyo.blancall.ui.common.GlassCard
@@ -391,13 +386,13 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                         dateFormat = dateFormat,
                         reviewStatus = reviewStatusByArticle[article.id]
                             ?: EbbinghausScheduler.ReviewStatus.NOT_STARTED,
-                            onClick = { anchor ->
+                            onClick = {
                                 if (crossSelectMode) {
                                     selectedIds = if (article.id in selectedIds)
                                         selectedIds - article.id
                                     else selectedIds + article.id
                                 } else {
-                                    navController.navigateReveal("reader/${article.id}", anchor)
+                                    navController.navigate("reader/${article.id}")
                                 }
                             },
                             onLongClick = {
@@ -438,13 +433,13 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                         dateFormat = dateFormat,
                         reviewStatus = reviewStatusByArticle[article.id]
                             ?: EbbinghausScheduler.ReviewStatus.NOT_STARTED,
-                            onClick = { anchor ->
+                            onClick = {
                                 if (crossSelectMode) {
                                     selectedIds = if (article.id in selectedIds)
                                         selectedIds - article.id
                                     else selectedIds + article.id
                                 } else {
-                                    navController.navigateReveal("reader/${article.id}", anchor)
+                                    navController.navigate("reader/${article.id}")
                                 }
                             },
                             onLongClick = {
@@ -668,10 +663,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                     is PickerSelection.Base ->
                         navController.navigate("practice/${pendingPracticeArticleId}?mode=${sel.mode.name}")
                     PickerSelection.Custom ->
-                        navController.navigateReveal(
-                            "custom_cloze_list/${pendingPracticeArticleId}?pick=true",
-                            practiceButtonRect.takeIf { it != Rect.Zero }?.toTouchAnchor(),
-                        )
+                        navController.navigate("custom_cloze_list/${pendingPracticeArticleId}?pick=true")
                 }
             }
         }
@@ -686,7 +678,7 @@ private fun ArticleCard(
     tags: List<TagChipUi> = emptyList(),
     dateFormat: SimpleDateFormat,
     reviewStatus: EbbinghausScheduler.ReviewStatus = EbbinghausScheduler.ReviewStatus.NOT_STARTED,
-    onClick: (TouchAnchor?) -> Unit,
+    onClick: () -> Unit,
     onLongClick: () -> Unit = {},
     onPractice: () -> Unit,
     showCheckbox: Boolean = false,
@@ -699,11 +691,9 @@ private fun ArticleCard(
         is EbbinghausScheduler.ReviewStatus.PENDING -> "${s.daysLeft}天后复习" to MaterialTheme.colorScheme.outline
         is EbbinghausScheduler.ReviewStatus.COMPLETED -> "已掌握" to MaterialTheme.colorScheme.primary
     }
-    val anchor = rememberTouchAnchor()
     GlassCard(
         modifier = Modifier
-            .fillMaxWidth()
-            .trackTouchAnchor(anchor),
+            .fillMaxWidth(),
         shape = RoundedCornerShape(14.dp),
         // 列表含数十张卡片：关闭逐卡毛玻璃模糊背板，改用半透明染色层，
         // 既保留玻璃观感又彻底消除进入列表时的 GPU 模糊卡顿
@@ -711,7 +701,7 @@ private fun ArticleCard(
         containerColor = if (isSelected) MaterialTheme.colorScheme.primaryContainer else null,
         containerAlpha = if (isSelected) 0.30f else null,
         borderColor = if (isSelected) MaterialTheme.colorScheme.primary else null,
-        onClick = { onClick(anchor.value) },
+        onClick = { onClick() },
         onLongClick = onLongClick
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -728,7 +718,7 @@ private fun ArticleCard(
                 if (showCheckbox) {
                     Checkbox(
                         checked = isSelected,
-                        onCheckedChange = { onClick(anchor.value) },
+                        onCheckedChange = { onClick() },
                         modifier = Modifier.size(24.dp)
                     )
                     Spacer(Modifier.width(8.dp))
