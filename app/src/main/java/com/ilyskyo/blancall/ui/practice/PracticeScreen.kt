@@ -89,6 +89,7 @@ import com.ilyskyo.blancall.ui.viewmodel.BlankCountWarning
 import com.ilyskyo.blancall.ui.viewmodel.BlancallMode
 import com.ilyskyo.blancall.ui.viewmodel.PracticeViewModel
 import com.ilyskyo.blancall.ui.viewmodel.SectionMode
+import com.ilyskyo.blancall.ui.viewmodel.ensureHintTimer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -665,7 +666,8 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                             strongHints = strongHintCount,
                             onViewArticleData = viewArticleData,
                             onBlankFocus = { vm.ensureHintTimer(it) },
-                            onAnswerChange = { i, a -> vm.updateAnswer(i, a) }
+                            onAnswerChange = { i, a -> vm.updateAnswer(i, a) },
+                            onInkCommitted = { i, s, w, h -> vm.appendInk(i, s, w, h) }
                         )
                         BlancallMode.WORD -> WordClozeContent(
                             blancall = wordCloze,
@@ -677,7 +679,8 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                             strongHints = strongHintCount,
                             onViewArticleData = viewArticleData,
                             onBlankFocus = { vm.ensureHintTimer(it) },
-                            onAnswerChange = { i, a -> vm.updateAnswer(i, a) }
+                            onAnswerChange = { i, a -> vm.updateAnswer(i, a) },
+                            onInkCommitted = { i, s, w, h -> vm.appendInk(i, s, w, h) }
                         )
                         BlancallMode.REVERSE -> DictationContent(
                             dictationResult = dictationResult,
