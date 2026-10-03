@@ -112,36 +112,38 @@ Blancall turns any article into cloze practice and uses memory science to help y
 
 ## Install
 
-This project is distributed as source code. **No APK is provided** — build it yourself.
+### Direct install
 
-### Requirements
+Download the `.apk` from [Releases](https://github.com/ilyskyo/Blancall-NoAI/releases) and install it.
 
-- Android Studio
-- Kotlin
-- (Other dependencies are managed by Gradle)
+### Build it yourself
 
-### Clone & build
+Build from source:
 
 ```bash
-# Clone the repository
 git clone https://github.com/ilyskyo/Blancall-NoAI.git
-
-# Open the project in Android Studio
-# Wait for the Gradle sync to finish
-# Click Run to build and install
 ```
+
+Open the project in Android Studio, wait for the Gradle sync to finish, then click Run.
+
+## Privacy
+
+This app **does not declare the `INTERNET` permission** in `AndroidManifest.xml` — that is not a promise but a system-level inability to access the network. You can download the APK and verify this yourself by decompiling it.
+
+All data (articles, practice records, statistics) lives only in the app's private directory on your device: **no account, no cloud, no personal information collected**. See [PRIVACY.md](PRIVACY.md) for details.
 
 ## Data & Backup
 
 - All data (articles, practice progress, statistics) lives only in the app's private directory on your device. No account, no cloud.
 - CSV export covers **practice records**; there is currently no one-tap full backup of the article library or progress.
 - Device migration: use your system or vendor migration tool to move app data (completeness not guaranteed), or re-import articles on the new device.
+- System cloud backup is explicitly excluded (see `backup_rules.xml`), so data is never auto-migrated via Google cloud backup — this prevents a stale backup from overwriting your progress.
 
 ## FAQ
 
-**Why is there no APK?**
+**Are both an APK and the source available?**
 
-The project is open-sourced as source code for learning, research, and self-building. No prebuilt installers are distributed.
+Yes. Releases provides a signed installer; if you'd rather change the code and build it yourself, the repository contains the complete Gradle project.
 
 **Standard (NoAI) or Pro?**
 
