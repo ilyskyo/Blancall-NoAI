@@ -15,6 +15,9 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeOut
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.compose.ui.platform.LocalView
+import com.ilyskyo.blancall.ui.common.Motion
+import com.ilyskyo.blancall.ui.common.MotionFade
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.SnackbarHost
@@ -62,6 +65,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    /**
+     * 首帧是否真的画上屏。用 @Volatile 普通字段而不是 Compose 状态：它只被启动屏的条件轮询读取，
+     * 不需要（也不应该）触发任何重组。
+     */
+    @Volatile
+    private var firstFrameDrawn = false
+
+    /** 启动屏最长滞留时间：兜底放行，宁可闪一下也不要把用户永久关在启动屏里 */
+    private val keepOnScreenMaxMs = 1_500L
+
     /** 安全调度提醒：捕获 WorkManager 未初始化等异常，避免主流程崩溃 */
     private fun safeScheduleNext() {
         runCatching { ReminderWorker.scheduleNext(this) }
@@ -70,8 +83,28 @@ class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         // 安装启动屏：在 setContent 之前调用，保证第一帧即显示与主页一致的底色，消除白屏
-        installSplashScreen()
+        val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
+
+        // 首帧没画好之前不退场：否则撤掉启动屏之后是一帧空底色，用户读成"闪了两下"。
+        // 别把下面那条时限当保险：这个条件只在启动屏自己重绘时被轮询，实测模拟器首帧要 6.9s，
+        // 时限 1.5s 早过了画面却仍停在启动屏 —— 真出现"永远停在启动屏"时该查的是首帧为什么没到，
+        // 条件轮询救不了那种卡死。时限只在启动屏本来就在动的时候起作用。
+        val releaseDeadline = android.os.SystemClock.elapsedRealtime() + keepOnScreenMaxMs
+        splash.setKeepOnScreenCondition {
+            !firstFrameDrawn && android.os.SystemClock.elapsedRealtime() < releaseDeadline
+        }
+        // 退场：整屏淡出后再撤掉启动屏。图标是这层视图的子节点，淡整屏就等于淡图标。
+        // 不要碰 info.iconView：API 31+ 上它在启动屏没有配置 windowSplashScreenAnimatedIcon 时
+        // 直接抛 NullPointerException（崩在 SplashScreenViewProvider$ViewImpl31.getIconView），
+        // 不是返回 null —— 实测两版都因此崩在冷启动，runCatching 之外别无他法，索性不用。
+        // 减动效下时长为 0：直接淡完 remove，绝不为播动画而延后撤销。
+        splash.setOnExitAnimationListener { info ->
+            val duration = if (Motion.reduced) 0L else MotionFade.splashExit.toLong()
+            info.view.animate().alpha(0f).setDuration(duration)
+                .withEndAction { info.remove() }
+                .start()
+        }
 
         // ThemeManager / AppPrefs / ReminderPrefs / NotificationHelper
         // 已移至 BlancallApp.onCreate 统一初始化，保证 Worker 进程也可用
@@ -88,6 +121,12 @@ class MainActivity : ComponentActivity() {
 
             ProvideWindowSizeClass(windowSizeClass) {
             BlancallTheme {
+                // 首帧真的上屏之后再放行启动屏。View.post 排在当前这次遍历之后，
+                // 比 LaunchedEffect / SideEffect 更接近"用户已经看见内容"这个事实。
+                // 放在引导分支之外：首启（欢迎页）与常规进入都要能解掉启动屏。
+                val composeView = LocalView.current
+                LaunchedEffect(Unit) { composeView.post { firstFrameDrawn = true } }
+
                 // ── 首次使用引导：开屏页 → 欢迎帮助页 → 淡出进入 ──
                 // 只出现在第一次使用（AppPrefs.firstLaunchDone 持久化标记）
                 val firstLaunchDone by AppPrefs.firstLaunchDoneFlow.collectAsState()
@@ -98,7 +137,7 @@ class MainActivity : ComponentActivity() {
                 if (!firstLaunchDone) {
                     AnimatedVisibility(
                         visible = !fadingOut,
-                        exit = fadeOut(tween(200))
+                        exit = fadeOut(MotionFade.alpha(MotionFade.enter))
                     ) {
                         when (guideStep) {
                             // 0=欢迎页(隐私政策/赞赏区) → 1=可视化引导 → 2=帮助页(开始使用)
@@ -115,9 +154,10 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     // 淡出动画播放完毕后正式进入主界面
+                    // 等待时长与上面的淡出共用同一个 token（原来是 200 动画 + 220 等待，两个各写各的数）
                     LaunchedEffect(fadingOut) {
                         if (fadingOut) {
-                            delay(220)
+                            delay(MotionFade.enter.toLong())
                             AppPrefs.firstLaunchDone = true
                         }
                     }

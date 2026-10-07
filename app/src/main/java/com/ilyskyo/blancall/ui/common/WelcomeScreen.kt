@@ -1,9 +1,10 @@
-﻿// Copyright (c) 2026 ilyskyo
+// Copyright (c) 2026 ilyskyo
 // SPDX-License-Identifier: MIT
 
 package com.ilyskyo.blancall.ui.common
 
 import android.widget.Toast
+import com.ilyskyo.blancall.ui.common.pressClick
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -122,7 +123,7 @@ fun WelcomeScreen(
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
-                    .clickable { showDonateDialog = true }
+                    .pressClick { showDonateDialog = true }
                     .padding(vertical = 2.dp),
                 textAlign = TextAlign.Center
             )
@@ -148,7 +149,7 @@ fun WelcomeScreen(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
-                    .clickable {
+                    .pressClick {
                         showLegalDialog = true
                     }
                     .padding(horizontal = 6.dp, vertical = 4.dp)
@@ -168,7 +169,7 @@ fun WelcomeScreen(
 
     // ── 赞赏码弹窗 ──
     if (showDonateDialog) {
-        AlertDialog(
+        BlancallAlertDialog(
             onDismissRequest = { showDonateDialog = false },
             shape = RoundedCornerShape(28.dp),
             containerColor = MaterialTheme.colorScheme.surface,
@@ -205,7 +206,7 @@ fun WelcomeScreen(
 
     // ── 隐私政策弹窗 ──
     if (showLegalDialog) {
-        AlertDialog(
+        BlancallAlertDialog(
             onDismissRequest = { showLegalDialog = false },
             shape = RoundedCornerShape(28.dp),
             containerColor = MaterialTheme.colorScheme.surface,

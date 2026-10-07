@@ -7,6 +7,11 @@ import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -48,7 +53,10 @@ import com.ilyskyo.blancall.ui.common.BackButton
 import com.ilyskyo.blancall.ui.common.BlancallAlertDialog
 import com.ilyskyo.blancall.ui.common.GlassCard
 import com.ilyskyo.blancall.ui.common.GlassSwitch
+import com.ilyskyo.blancall.ui.common.Motion
+import com.ilyskyo.blancall.ui.common.MotionFade
 import com.ilyskyo.blancall.ui.common.MarkdownText
+import com.ilyskyo.blancall.ui.common.pressClick
 import com.ilyskyo.blancall.ui.theme.AccentPresets
 import com.ilyskyo.blancall.ui.theme.AppPrefs
 import com.ilyskyo.blancall.ui.theme.ReminderFrequency
@@ -216,11 +224,44 @@ fun SettingsScreen(navController: NavController) {
 
                     HorizontalDivider(Modifier.padding(horizontal = 16.dp),
                         color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                    // ── 触感强度（本 app 自己的四档）──
+                    // 不去镜像系统的全局触感开关：直振本来就是为绕开「定制 ROM 把触感
+                    // 弱化到无感」而写的（见 ui/common/Haptics.kt），镜像开关等于把那个
+                    // 老问题重新请回来。想关，就用这里的「关」。
+                    val hapticLevel by AppPrefs.hapticLevelFlow.collectAsState()
+                    Row(
+                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(Modifier.weight(1f)) {
+                            Text("触感强度", style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurface)
+                            Text("翻卡提交、拖拽落位、开关与删除回执的震动轻重。选「关」则完全不振。",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    }
+                    Row(
+                        Modifier.padding(start = 16.dp, end = 16.dp, bottom = 10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        hapticLevelChoices.forEach { (value, label) ->
+                            FilterChip(
+                                selected = hapticLevel == value,
+                                onClick = { AppPrefs.setHapticLevel(value) },
+                                label = { Text(label) },
+                            )
+                        }
+                    }
+
+                    HorizontalDivider(Modifier.padding(horizontal = 16.dp),
+                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                     // ── 首页副标题（点击编辑；首页品牌栏收起时也能从这里修改）──
                     Row(
                         Modifier
                             .fillMaxWidth()
-                            .clickable { showSubtitleDialog = true }
+                            .pressClick { showSubtitleDialog = true }
                             .padding(horizontal = 16.dp, vertical = 10.dp),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
@@ -733,7 +774,7 @@ fun SettingsScreen(navController: NavController) {
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.primary,
                     modifier = Modifier
-                        .clickable {
+                        .pressClick {
                             showLegalDialog = true
                         }
                         .padding(top = 6.dp, bottom = 8.dp)
@@ -741,7 +782,7 @@ fun SettingsScreen(navController: NavController) {
             }
 
             if (showLegalDialog) {
-                AlertDialog(
+                BlancallAlertDialog(
                     onDismissRequest = { showLegalDialog = false },
                     shape = RoundedCornerShape(28.dp),
                     containerColor = MaterialTheme.colorScheme.surface,
@@ -878,6 +919,17 @@ fun SettingsScreen(navController: NavController) {
     }
 }
 
+/**
+ * 触感强度的四个可选项：`value` 存进偏好（与 ui.common.HapticLevel 的字符串一一对应），
+ * `label` 上屏。顺序就是屏幕上从左到右 —— 「关」放最后，避免手滑点掉全部反馈。
+ */
+private val hapticLevelChoices = listOf(
+    "light" to "弱",
+    "standard" to "标准",
+    "strong" to "强",
+    "off" to "关",
+)
+
 @Composable
 private fun OptionRow(
     label: String,
@@ -970,7 +1022,13 @@ private fun ReminderSettingsCard() {
             }
 
             // ── 展开设置（仅开启时显示）──
-            androidx.compose.animation.AnimatedVisibility(visible = enabled) {
+            AnimatedVisibility(
+                visible = enabled,
+                enter = fadeIn(MotionFade.alpha(MotionFade.enter)) +
+                    expandVertically(Motion.contentSize()),
+                exit = fadeOut(MotionFade.alpha(MotionFade.exit)) +
+                    shrinkVertically(Motion.contentSize())
+            ) {
                 Column {
                     HorizontalDivider(
                         Modifier.padding(horizontal = 16.dp),
@@ -1083,7 +1141,7 @@ private fun ReminderSettingsCard() {
 
     // ── 自定义目标分钟数输入对话框 ──
     if (showCustomMinutesDialog) {
-        AlertDialog(
+        BlancallAlertDialog(
             onDismissRequest = { showCustomMinutesDialog = false },
             title = { Text("自定义每日学习时长") },
             text = {
@@ -1128,7 +1186,7 @@ private fun TimePickerDialog(
     var hourText by remember(currentHour) { mutableStateOf(currentHour.toString().padStart(2, '0')) }
     var minuteText by remember(currentMinute) { mutableStateOf(currentMinute.toString().padStart(2, '0')) }
 
-    AlertDialog(
+    BlancallAlertDialog(
         onDismissRequest = onDismiss,
         shape = RoundedCornerShape(20.dp),
         title = { Text("设置提醒时间", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) },
