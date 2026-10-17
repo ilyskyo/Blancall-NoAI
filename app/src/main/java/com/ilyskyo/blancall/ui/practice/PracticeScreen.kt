@@ -57,6 +57,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import kotlin.math.roundToInt
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavController
@@ -77,7 +78,7 @@ import androidx.compose.runtime.setValue
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PracticeScreen(navController: NavController, articleIds: List<Long>, initialMode: BlancallMode? = null, resume: Boolean = false, initialSectionMode: SectionMode? = null, initialConfigId: Long = -1L) {
+fun PracticeScreen(navController: NavController, articleIds: List<Long>, initialMode: BlancallMode? = null, resume: Boolean = false, initialSectionMode: SectionMode? = null, initialConfigId: Long = -1L, initialFocusSentence: Int = -1) {
     val vm: PracticeViewModel = viewModel()
     val article by vm.article.collectAsState()
     val mode by vm.mode.collectAsState()
@@ -152,11 +153,11 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                     modeSelected = true
                 } else {
                     // 配置与当前文章内容不匹配（文章被修改变短等）：已自动回退随机生成，仅提示
-                    Toast.makeText(context, "配置与当前文章内容不匹配，已改为随机挖空", Toast.LENGTH_LONG).show()
+                    Toast.makeText(context, context.getString(com.ilyskyo.blancall.R.string.cloze_config_mismatch), Toast.LENGTH_LONG).show()
                     modeSelected = true
                 }
             } else {
-                Toast.makeText(context, "自定义配置不存在或已被删除", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(com.ilyskyo.blancall.R.string.custom_config_missing), Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -168,8 +169,14 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
         if (articleIds.size > 1) {
             vm.loadArticles(articleIds)
         } else if (articleIds.size == 1) {
-            // 初始段落模式（薄弱集训等）由 loadArticle 在段落数据就绪后统一应用
-            vm.loadArticle(articleIds.first(), resume = resume, initialSectionMode = initialSectionMode)
+            // 初始段落模式（薄弱集训等）由 loadArticle 在段落数据就绪后统一应用；
+            // focusSentence（句级薄弱榜直达）同样在此传入，由 loadArticle 归段后生效
+            vm.loadArticle(
+                articleIds.first(),
+                resume = resume,
+                initialSectionMode = initialSectionMode,
+                focusSentence = initialFocusSentence
+            )
         }
     }
 
@@ -302,7 +309,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
             )
             // 已提交：快捷操作
             if (isSubmitted && modeSelected) {
-                TextButton(onClick = { vm.reset() }) { Text("重做") }
+                TextButton(onClick = { vm.reset() }) { Text(stringResource(com.ilyskyo.blancall.R.string.redo_desc)) }
             }
             // 未提交：提交按钮
             if (!isSubmitted && modeSelected && totalBlanks > 0) {
@@ -311,7 +318,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                     TextButton(
                         onClick = { vm.submitAnswers() },
                         enabled = dictationInput.isNotBlank() && !isSubmitting
-                    ) { Text(if (isSubmitting) "判分中…" else "提交") }
+                    ) { Text(if (isSubmitting) stringResource(com.ilyskyo.blancall.R.string.practice_grading) else stringResource(com.ilyskyo.blancall.R.string.practice_submit)) }
                 } else {
                     val hasAnyAnswer = userAnswers.values.any { it.isNotBlank() }
                     val filled = userAnswers.values.count { it.isNotBlank() }
@@ -326,7 +333,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                         },
                         enabled = hasAnyAnswer && !isSubmitting
                     ) {
-                        Text(if (isSubmitting) "判分中…" else if (filled > 0) "提交($filled/$totalBlanks)" else "提交")
+                        Text(if (isSubmitting) stringResource(com.ilyskyo.blancall.R.string.practice_grading) else if (filled > 0) stringResource(com.ilyskyo.blancall.R.string.submit_progress, filled, totalBlanks) else stringResource(com.ilyskyo.blancall.R.string.practice_submit))
                     }
                 }
             }
@@ -341,7 +348,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                             kind = AppIconKind.MoreVert,
                             tint = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier.size(22.dp),
-                            contentDescription = "更多"
+                            contentDescription = stringResource(com.ilyskyo.blancall.R.string.more)
                         )
                     }
                     GlassDropdownMenu(
@@ -354,7 +361,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                         onClick = {},
                         label = {
                             Text(
-                                "当前模式",
+                                stringResource(com.ilyskyo.blancall.R.string.current_mode),
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
@@ -381,7 +388,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                                 modifier = Modifier.size(20.dp)
                             )
                         },
-                        label = { Text("切换模式…", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface) }
+                        label = { Text(stringResource(com.ilyskyo.blancall.R.string.switch_mode_ellipsis), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface) }
                     )
                     // ── 挖空策略 → 打开 BottomSheet ──
                     GlassMenuItem(
@@ -398,7 +405,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text("挖空策略", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
+                                Text(stringResource(com.ilyskyo.blancall.R.string.cloze_strategy), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface)
                                 Text(
                                     strategyLabel(strategy),
                                     style = MaterialTheme.typography.labelSmall,
@@ -412,7 +419,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                     // ── 提示开关（保留菜单，符合系统开关直觉）──
                     GlassMenuItem(
                         onClick = { vm.toggleHint() },
-                        label = { Text("显示提示", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface) },
+                        label = { Text(stringResource(com.ilyskyo.blancall.R.string.show_hints), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface) },
                         trailing = {
                             GlassSwitch(
                                 checked = showHint,
@@ -424,7 +431,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                     if (customConfigName == null && mode == BlancallMode.WORD) {
                         GlassMenuItem(
                             onClick = { vm.setClassicalMode(!classicalMode) },
-                            label = { Text("古文模式", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface) },
+                            label = { Text(stringResource(com.ilyskyo.blancall.R.string.classical_mode), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface) },
                             trailing = {
                                 GlassSwitch(
                                     checked = classicalMode,
@@ -439,7 +446,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                         onClick = { vm.toggleImmersiveMode(); showMoreMenu = false },
                         label = {
                             Text(
-                                if (immersiveMode) "退出沉浸" else "沉浸模式",
+                                if (immersiveMode) stringResource(com.ilyskyo.blancall.R.string.exit_immersive) else stringResource(com.ilyskyo.blancall.R.string.enter_immersive),
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
@@ -459,9 +466,9 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                     if (customConfigName == null) {
                     GlassMenuDivider()
                     val sectionLabel = when (sectionMode) {
-                        SectionMode.FULL -> "段落：全文连贯"
-                        SectionMode.WEAKNESS -> "段落：薄弱集训"
-                        SectionMode.SELECTED -> "段落：自选 (${selectedSections.size}/${sections.size})"
+                        SectionMode.FULL -> stringResource(com.ilyskyo.blancall.R.string.section_full)
+                        SectionMode.WEAKNESS -> stringResource(com.ilyskyo.blancall.R.string.section_weak)
+                        SectionMode.SELECTED -> stringResource(com.ilyskyo.blancall.R.string.section_selected, selectedSections.size, sections.size)
                     }
                     GlassMenuItem(
                         onClick = {
@@ -490,7 +497,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                                     modifier = Modifier.size(20.dp)
                                 )
                             },
-                            label = { Text("导出 PDF", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface) }
+                            label = { Text(stringResource(com.ilyskyo.blancall.R.string.export_pdf), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface) }
                         )
                         GlassMenuItem(
                             onClick = {
@@ -506,7 +513,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                                     modifier = Modifier.size(20.dp)
                                 )
                             },
-                            label = { Text("分享笔记", style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface) }
+                            label = { Text(stringResource(com.ilyskyo.blancall.R.string.share_note), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurface) }
                         )
                     }
                 }
@@ -532,7 +539,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                             color = MaterialTheme.colorScheme.onTertiaryContainer)
                         Spacer(Modifier.width(8.dp))
                         Text(
-                            "跨文复习",
+                            stringResource(com.ilyskyo.blancall.R.string.reader_cross_cloze),
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onTertiaryContainer
@@ -550,7 +557,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                     Spacer(Modifier.height(2.dp))
                     // 跨文不使用单篇自定义配置：预期落差在此显式说明
                     Text(
-                        "混合练习使用智能挖空，不套用单篇自定义挖空配置",
+                        stringResource(com.ilyskyo.blancall.R.string.mixed_smart_only),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onTertiaryContainer.copy(alpha = 0.6f)
                     )
@@ -605,12 +612,12 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                 Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            "文章不存在或已被删除",
+                            stringResource(com.ilyskyo.blancall.R.string.article_missing_deleted),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(Modifier.height(12.dp))
-                        TextButton(onClick = { navController.popBackStack() }) { Text("返回") }
+                        TextButton(onClick = { navController.popBackStack() }) { Text(stringResource(com.ilyskyo.blancall.R.string.back)) }
                     }
                 }
             } else if (article == null || (modeSelected && (
@@ -622,7 +629,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator()
                         Spacer(Modifier.height(12.dp))
-                        Text("正在生成挖空...", style = MaterialTheme.typography.bodySmall,
+                        Text(stringResource(com.ilyskyo.blancall.R.string.generating_blanks), style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -632,7 +639,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         CircularProgressIndicator()
                         Spacer(Modifier.height(12.dp))
-                        Text("正在准备...", style = MaterialTheme.typography.bodySmall,
+                        Text(stringResource(com.ilyskyo.blancall.R.string.preparing), style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
@@ -753,7 +760,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                         horizontalAlignment = Alignment.CenterHorizontally
                     ) {
                         Text(
-                            "选择练习模式",
+                            stringResource(com.ilyskyo.blancall.R.string.pick_practice_mode),
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurface
@@ -771,8 +778,8 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                         // 句子挖空
                         ModeCard(
                             emoji = "📝",
-                            title = "句子挖空",
-                            desc = "隐藏完复句子，适合段落背诵",
+                            title = stringResource(com.ilyskyo.blancall.R.string.cloze_mode_sentence),
+                            desc = stringResource(com.ilyskyo.blancall.R.string.mode_sentence_card_desc),
                             onClick = {
                                 vm.setMode(BlancallMode.SENTENCE)
                                 modeSelected = true
@@ -783,8 +790,8 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                         // 字词挖空
                         ModeCard(
                             emoji = "🔤",
-                            title = "字词挖空",
-                            desc = "挖掉关键词/字，精准检测掌握度",
+                            title = stringResource(com.ilyskyo.blancall.R.string.cloze_mode_word),
+                            desc = stringResource(com.ilyskyo.blancall.R.string.mode_word_card_desc),
                             onClick = {
                                 vm.setMode(BlancallMode.WORD)
                                 modeSelected = true
@@ -795,8 +802,8 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                         // 反向默写
                         ModeCard(
                             emoji = "✍️",
-                            title = "反向默写",
-                            desc = "把段落打散后默写原文，深度记忆",
+                            title = stringResource(com.ilyskyo.blancall.R.string.cloze_mode_reverse),
+                            desc = stringResource(com.ilyskyo.blancall.R.string.mode_reverse_card_desc),
                             onClick = {
                                 vm.setMode(BlancallMode.REVERSE)
                                 modeSelected = true
@@ -807,8 +814,8 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                             Spacer(Modifier.height(10.dp))
                             ModeCard(
                                 emoji = "🎯",
-                                title = "自定义挖空",
-                                desc = "按文章分别指定要应用的挖空配置",
+                                title = stringResource(com.ilyskyo.blancall.R.string.custom_cloze),
+                                desc = stringResource(com.ilyskyo.blancall.R.string.mode_custom_card_desc),
                                 onClick = { showCrossCustomSheet = true }
                             )
                         }
@@ -840,27 +847,27 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
             } }
         ) {
             Column(modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 36.dp)) {
-                Text("切换练习模式", style = MaterialTheme.typography.titleMedium,
+                Text(stringResource(com.ilyskyo.blancall.R.string.switch_practice_mode), style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(20.dp))
                 // 句子挖空
                 RadioListItem(
-                    emoji = "📝", label = "句子挖空",
-                    desc = "分句/半句/复句 — 理解式记忆",
+                    emoji = "📝", label = stringResource(com.ilyskyo.blancall.R.string.cloze_mode_sentence),
+                    desc = stringResource(com.ilyskyo.blancall.R.string.mode_sentence_line),
                     selected = mode == BlancallMode.SENTENCE,
                     onClick = { vm.setMode(BlancallMode.SENTENCE); showModeSheet = false }
                 )
                 // 字词挖空
                 RadioListItem(
-                    emoji = "🔤", label = "字词挖空",
-                    desc = "1-3字词精准填空 — 细节记忆",
+                    emoji = "🔤", label = stringResource(com.ilyskyo.blancall.R.string.cloze_mode_word),
+                    desc = stringResource(com.ilyskyo.blancall.R.string.mode_word_line),
                     selected = mode == BlancallMode.WORD,
                     onClick = { vm.setMode(BlancallMode.WORD); showModeSheet = false }
                 )
                 // 反向默写
                 RadioListItem(
-                    emoji = "✍️", label = "反向默写",
-                    desc = "把段落打散后默写原文 — 深度回忆",
+                    emoji = "✍️", label = stringResource(com.ilyskyo.blancall.R.string.cloze_mode_reverse),
+                    desc = stringResource(com.ilyskyo.blancall.R.string.mode_reverse_line),
                     selected = mode == BlancallMode.REVERSE,
                     onClick = { vm.setMode(BlancallMode.REVERSE); showModeSheet = false }
                 )
@@ -886,7 +893,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                     // 所有选中配置都没有可应用的标注（如文章被改短导致全部失效）：不进入空白练习
                     Toast.makeText(
                         context,
-                        "所选配置没有可应用的挖空，请更换配置或改用其它模式",
+                        context.getString(com.ilyskyo.blancall.R.string.no_applicable_blanks),
                         Toast.LENGTH_LONG
                     ).show()
                 }
@@ -898,11 +905,11 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
     if (showBackWarning) {
         BlancallAlertDialog(
             onDismissRequest = { showBackWarning = false },
-            title = { Text("还有未提交的作答", fontWeight = FontWeight.SemiBold) },
+            title = { Text(stringResource(com.ilyskyo.blancall.R.string.unsubmitted_title), fontWeight = FontWeight.SemiBold) },
             text = {
                 Column {
                     Text(
-                        "请在练习页点右上角「提交」保存本次作答情况；点返回键不会保存当前的作答。",
+                        stringResource(com.ilyskyo.blancall.R.string.unsubmitted_body),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -920,7 +927,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                             }
                         )
                         Text(
-                            "以后不再提示，直接返回",
+                            stringResource(com.ilyskyo.blancall.R.string.back_no_more),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -928,7 +935,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                 }
             },
             confirmButton = {
-                TextButton(onClick = { showBackWarning = false }) { Text("返回作答") }
+                TextButton(onClick = { showBackWarning = false }) { Text(stringResource(com.ilyskyo.blancall.R.string.keep_answering)) }
             }
         )
     }
@@ -942,24 +949,24 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
             } }
         ) {
             Column(modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 36.dp)) {
-                Text("选择挖空策略", style = MaterialTheme.typography.titleMedium,
+                Text(stringResource(com.ilyskyo.blancall.R.string.pick_strategy), style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold)
                 Spacer(Modifier.height(20.dp))
                 RadioListItem(
-                    emoji = "⚖️", label = "均衡挖空",
-                    desc = "全覆盖 + 轻度薄弱倾斜",
+                    emoji = "⚖️", label = stringResource(com.ilyskyo.blancall.R.string.strategy_balanced),
+                    desc = stringResource(com.ilyskyo.blancall.R.string.strategy_balanced_desc),
                     selected = strategy == BlancallGenerator.Strategy.BALANCED,
                     onClick = { vm.setStrategy(BlancallGenerator.Strategy.BALANCED); showStrategySheet = false }
                 )
                 RadioListItem(
-                    emoji = "🎯", label = "薄弱优先",
-                    desc = "高频出错区域优先挖空",
+                    emoji = "🎯", label = stringResource(com.ilyskyo.blancall.R.string.strategy_weakness),
+                    desc = stringResource(com.ilyskyo.blancall.R.string.strategy_weakness_desc),
                     selected = strategy == BlancallGenerator.Strategy.WEAKNESS_FOCUS,
                     onClick = { vm.setStrategy(BlancallGenerator.Strategy.WEAKNESS_FOCUS); showStrategySheet = false }
                 )
                 RadioListItem(
-                    emoji = "🔄", label = "全覆盖",
-                    desc = "每个分句都有机会，均匀分布",
+                    emoji = "🔄", label = stringResource(com.ilyskyo.blancall.R.string.strategy_full),
+                    desc = stringResource(com.ilyskyo.blancall.R.string.strategy_full_desc),
                     selected = strategy == BlancallGenerator.Strategy.FULL_COVERAGE,
                     onClick = { vm.setStrategy(BlancallGenerator.Strategy.FULL_COVERAGE); showStrategySheet = false }
                 )

@@ -12,6 +12,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeOut
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
@@ -45,6 +46,8 @@ import kotlin.system.exitProcess
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import android.content.Context
+import com.ilyskyo.blancall.ui.common.AppLocale
 
 
 class MainActivity : ComponentActivity() {
@@ -81,6 +84,12 @@ class MainActivity : ComponentActivity() {
     }
 
     @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
+    override fun attachBaseContext(newBase: Context) {
+        // 13 以下的界面语言靠这里注入：把偏好里的 tag 写进配置后再交给系统。
+        // 13+ 由框架自己处理，wrap() 原样返回，两套来源不会打架。
+        super.attachBaseContext(AppLocale.wrap(newBase))
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // 安装启动屏：在 setContent 之前调用，保证第一帧即显示与主页一致的底色，消除白屏
         val splash = installSplashScreen()
@@ -137,6 +146,10 @@ class MainActivity : ComponentActivity() {
                 if (!firstLaunchDone) {
                     AnimatedVisibility(
                         visible = !fadingOut,
+                        // 首启引导是应用的第一屏，没有「从哪儿进来」可言：入场显式关掉，
+                        // 否则库默认的 fadeIn+expandVertically 会让整屏从 0 高度展开，
+                        // 而且那份时序写死在库里、减动效下不坍缩。
+                        enter = EnterTransition.None,
                         exit = fadeOut(MotionFade.alpha(MotionFade.enter))
                     ) {
                         when (guideStep) {
@@ -214,8 +227,13 @@ class MainActivity : ComponentActivity() {
         val navAction = intent?.getStringExtra(NotificationHelper.EXTRA_NAV_ACTION) ?: return
         val articleId = intent.getLongExtra(NotificationHelper.EXTRA_ARTICLE_ID, -1L)
 
+        // 用 NotificationHelper 里的常量，不写裸字符串：通知塞的是什么、这里就得认什么，
+        // 两边各写一份字面量时，改了一边就会**静默**退回首页（用户点了通知落在首页，看不出是 bug）。
         val route = when (navAction) {
-            "practice" -> if (articleId > 0) "practice/$articleId" else "home"
+            NotificationHelper.NAV_PRACTICE ->
+                if (articleId > 0) "practice/$articleId" else "home"
+            NotificationHelper.NAV_SENTENCE_CARDS -> "sentence_cards"
+            // 旧版本发出去的通知里可能还留着这个值（PendingIntent 会在系统里存很久），保留映射
             "statistics" -> if (articleId > 0) "statistics/$articleId" else "overview"
             else -> "home"
         }

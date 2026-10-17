@@ -22,6 +22,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
@@ -198,7 +199,7 @@ fun WelcomeScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showDonateDialog = false }) {
-                    Text("关闭", color = MaterialTheme.colorScheme.primary)
+                    Text(stringResource(com.ilyskyo.blancall.R.string.close), color = MaterialTheme.colorScheme.primary)
                 }
             }
         )
@@ -240,7 +241,7 @@ fun WelcomeScreen(
             },
             confirmButton = {
                 TextButton(onClick = { showLegalDialog = false }) {
-                    Text("关闭", color = MaterialTheme.colorScheme.primary)
+                    Text(stringResource(com.ilyskyo.blancall.R.string.close), color = MaterialTheme.colorScheme.primary)
                 }
             }
         )

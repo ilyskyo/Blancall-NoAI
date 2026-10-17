@@ -14,6 +14,8 @@ import androidx.activity.compose.PredictiveBackHandler
 
 import android.util.Log
 import android.widget.Toast
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -61,6 +63,7 @@ import androidx.navigation.NavController
 import com.ilyskyo.blancall.algorithm.EbbinghausScheduler
 import com.ilyskyo.blancall.algorithm.BlancallGenerator
 import com.ilyskyo.blancall.algorithm.PdfExporter
+import com.ilyskyo.blancall.algorithm.ReviewTemplate
 import com.ilyskyo.blancall.algorithm.TagOps
 import com.ilyskyo.blancall.data.model.Article
 import com.ilyskyo.blancall.data.repository.FsrsStateStore
@@ -108,6 +111,8 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
         )
     }
     val context = LocalContext.current
+    // Toast 在点击回调里取不到组合上下文：文案先在组合期备好
+    val noArticlesToExportMsg = stringResource(com.ilyskyo.blancall.R.string.no_articles_to_export)
     val recordRepo = remember { RecordRepository.getInstance(context.filesDir.resolve("records.json").absolutePath) }
     val allRecords by recordRepo.records.collectAsState()
 
@@ -137,13 +142,18 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
         fsrsStore.awaitLoaded()
         fsrsStates = fsrsStore.allStates()
     }
+    // 列表逐篇的复习状态也要看用户选的复习计划：与首页同一条映射、同一个参数（ReviewTemplate.fromId），
+    // 否则会出现「统计页说今天到期、列表说已完成」这种两屏互相打脸。
+    val reviewTemplateId by AppPrefs.reviewTemplateFlow.collectAsState()
+    val reviewTemplate = remember(reviewTemplateId) { ReviewTemplate.fromId(reviewTemplateId) }
     // 预计算每篇文章复习状态，避免 Lazy 列表逐项组合时重复对记录排序（记录多的文章尤甚）。
     // 同时配合下方 items/staggeredItems 的 contentType，消除进入列表与滚动时的重复组合开销。
-    val reviewStatusByArticle = remember(recordsByArticle, fsrsStates) {
+    val reviewStatusByArticle = remember(recordsByArticle, fsrsStates, reviewTemplate) {
         sortedArticles.associate { article ->
             article.id to EbbinghausScheduler.getReviewStatus(
                 fsrsStates[article.id],
-                recordsByArticle[article.id] ?: emptyList()
+                recordsByArticle[article.id] ?: emptyList(),
+                reviewTemplate
             )
         }
     }
@@ -253,7 +263,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
             // 底部导航固定启用：ListScreen 作为底部导航 tab，无返回键（切 home 即返回）
 
             Text(
-                text = if (crossSelectMode) "已选 ${selectedIds.size} 篇" else "我的文章",
+                text = if (crossSelectMode) stringResource(com.ilyskyo.blancall.R.string.selected_count, selectedIds.size) else stringResource(com.ilyskyo.blancall.R.string.nav_articles),
                 style = MaterialTheme.typography.headlineMedium,
                 color = MaterialTheme.colorScheme.onBackground,
                 modifier = Modifier.weight(1f)
@@ -277,7 +287,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                                                     },
                                                     modifier = Modifier.height(40.dp)
                                                 ) {
-                                                    Text(if (selectedIds.size == articles.size) "取消全选" else "全选",
+                                                    Text(if (selectedIds.size == articles.size) stringResource(com.ilyskyo.blancall.R.string.deselect_all) else stringResource(com.ilyskyo.blancall.R.string.select_all),
                                                         style = MaterialTheme.typography.labelMedium,
                                                         color = MaterialTheme.colorScheme.onSurface)
                                                 }
@@ -303,13 +313,13 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                                                     onClick = { navController.navigate("import") },
                                                     modifier = Modifier.height(40.dp)
                                                 ) {
-                                                    Text("导入", style = MaterialTheme.typography.labelMedium,
+                                                    Text(stringResource(com.ilyskyo.blancall.R.string.import_action), style = MaterialTheme.typography.labelMedium,
                                                         color = MaterialTheme.colorScheme.onSurface)
                                                 }
                                                 GlassButton(
                                                     onClick = {
                                                         if (articles.isEmpty()) {
-                                                            Toast.makeText(context, "暂无文章可导出", Toast.LENGTH_SHORT).show()
+                                                            Toast.makeText(context, noArticlesToExportMsg, Toast.LENGTH_SHORT).show()
                                                         } else {
                                                             exportPreselectId = -1L
                                                             showExportDialog = true
@@ -340,7 +350,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                     FilterChip(
                         selected = validTagFilter.isEmpty() && !includeUntagged,
                         onClick = { applyTagFilter(emptySet(), false) },
-                        label = { Text("全部") },
+                        label = { Text(stringResource(com.ilyskyo.blancall.R.string.filter_all)) },
                     )
                 }
                 items(tagData.tags, key = { "tag_${it.id}" }) { tag ->
@@ -360,7 +370,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                     FilterChip(
                         selected = includeUntagged,
                         onClick = { applyTagFilter(validTagFilter, !includeUntagged) },
-                        label = { Text("未分类") },
+                        label = { Text(stringResource(com.ilyskyo.blancall.R.string.uncategorized)) },
                     )
                 }
             }
@@ -391,7 +401,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Text(
-                            text = "暂无文章",
+                            text = stringResource(com.ilyskyo.blancall.R.string.no_articles),
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -400,7 +410,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                             onClick = { navController.navigate("import") },
                             shape = RoundedCornerShape(10.dp)
                         ) {
-                            Text("导入第一篇文章")
+                            Text(stringResource(com.ilyskyo.blancall.R.string.import_first_article))
                         }
                     }
                 }
@@ -413,13 +423,13 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(
-                            text = "当前筛选下没有文章",
+                            text = stringResource(com.ilyskyo.blancall.R.string.no_articles_in_filter),
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Spacer(modifier = Modifier.height(12.dp))
                         Button(onClick = { applyTagFilter(emptySet(), false) }) {
-                            Text("清除筛选")
+                            Text(stringResource(com.ilyskyo.blancall.R.string.clear_filter))
                         }
                     }
                 }
@@ -581,7 +591,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                     ),
                     border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.error.copy(alpha = 0.4f))
                 ) {
-                    AdaptiveButtonLabel("删除选中")
+                    AdaptiveButtonLabel(stringResource(com.ilyskyo.blancall.R.string.delete_selected))
                 }
                 // 打标签（批量绑定；≥1 篇可用）
                 OutlinedButton(
@@ -591,7 +601,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                     enabled = selectedIds.isNotEmpty()
                 ) {
-                    AdaptiveButtonLabel("打标签")
+                    AdaptiveButtonLabel(stringResource(com.ilyskyo.blancall.R.string.add_tags))
                 }
                 // 跨文复习（≥2篇时显示）
                 if (selectedIds.size >= 2) {
@@ -608,7 +618,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                             containerColor = MaterialTheme.colorScheme.primary
                         )
                     ) {
-                        AdaptiveButtonLabel("🔗 跨文复习")
+                        AdaptiveButtonLabel(stringResource(com.ilyskyo.blancall.R.string.cross_review))
                     }
                 }
             }
@@ -631,8 +641,8 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
     // 删除确认对话框（引用公共组件）
     deleteTarget?.let { target ->
         DeleteConfirmDialog(
-            title = "确认删除",
-            message = "确定要删除「${target.title}」吗？\n删除后无法恢复。",
+            title = stringResource(com.ilyskyo.blancall.R.string.confirm_delete_title),
+            message = stringResource(com.ilyskyo.blancall.R.string.delete_article_confirm, target.title),
             onConfirm = {
                 articleViewModel.deleteArticle(target)
                 deleteTarget = null
@@ -645,19 +655,19 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
     if (deleteTargets.isNotEmpty()) {
         BlancallAlertDialog(
             onDismissRequest = { deleteTargets = emptyList() },
-            title = { Text("确认删除") },
+            title = { Text(stringResource(com.ilyskyo.blancall.R.string.confirm_delete_title)) },
             text = {
-                Text("确定要删除选中的 ${deleteTargets.size} 篇文章吗？\n删除后无法恢复。")
+                Text(pluralStringResource(com.ilyskyo.blancall.R.plurals.delete_articles_confirm, deleteTargets.size, deleteTargets.size))
             },
             confirmButton = {
                 TextButton(onClick = {
                     deleteTargets.forEach { articleViewModel.deleteArticle(it) }
                     deleteTargets = emptyList()
                     exitCrossSelect()
-                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+                }) { Text(stringResource(com.ilyskyo.blancall.R.string.delete), color = MaterialTheme.colorScheme.error) }
             },
             dismissButton = {
-                TextButton(onClick = { deleteTargets = emptyList() }) { Text("取消") }
+                TextButton(onClick = { deleteTargets = emptyList() }) { Text(stringResource(com.ilyskyo.blancall.R.string.cancel)) }
             }
         )
     }
@@ -674,12 +684,12 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
         val sortedArticles = remember(articles) { articles.sortedByDescending { it.updatedAt } }
         BlancallAlertDialog(
             onDismissRequest = { showExportDialog = false },
-            title = { Text("导出 PDF") },
+            title = { Text(stringResource(com.ilyskyo.blancall.R.string.export_pdf)) },
             text = {
                 Column {
                     // ── 导出类型（必选其一，默认原文）──
                     Text(
-                        "导出类型",
+                        stringResource(com.ilyskyo.blancall.R.string.export_type),
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -688,7 +698,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                         FilterChip(
                             selected = !exportAsCloze,
                             onClick = { exportAsCloze = false },
-                            label = { Text("原文 PDF") },
+                            label = { Text(stringResource(com.ilyskyo.blancall.R.string.export_pdf_original)) },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
                                 selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -697,7 +707,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                         FilterChip(
                             selected = exportAsCloze,
                             onClick = { exportAsCloze = true },
-                            label = { Text("挖空 PDF") },
+                            label = { Text(stringResource(com.ilyskyo.blancall.R.string.export_pdf_cloze)) },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
                                 selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -707,14 +717,14 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                     Spacer(Modifier.height(6.dp))
                     // 说明行随类型实时切换：两种导出结果差异一眼可见
                     Text(
-                        if (exportAsCloze) "保留挖空空位（[N] ___），供练习作答"
-                        else "完整正文，不含任何挖空 / 空位",
+                        if (exportAsCloze) stringResource(com.ilyskyo.blancall.R.string.export_pdf_cloze_desc)
+                        else stringResource(com.ilyskyo.blancall.R.string.export_pdf_original_desc),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(14.dp))
                     Text(
-                        "选择要导出的文章：",
+                        stringResource(com.ilyskyo.blancall.R.string.pick_articles_to_export),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -751,7 +761,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                                             overflow = TextOverflow.Ellipsis
                                         )
                                         Text(
-                                            "${article.content.length} 字符",
+                                            pluralStringResource(com.ilyskyo.blancall.R.plurals.char_count, article.content.length, article.content.length),
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -780,7 +790,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
             },
             dismissButton = {
                 TextButton(onClick = { showExportDialog = false }) {
-                    Text("取消")
+                    Text(stringResource(com.ilyskyo.blancall.R.string.cancel))
                 }
             }
         )
@@ -824,9 +834,9 @@ private fun ArticleCard(
 ) {
     val statusText = when (val s = reviewStatus) {
         is EbbinghausScheduler.ReviewStatus.NOT_STARTED -> null
-        is EbbinghausScheduler.ReviewStatus.DUE -> "待复习" to MaterialTheme.colorScheme.error
-        is EbbinghausScheduler.ReviewStatus.PENDING -> "${s.daysLeft}天后复习" to MaterialTheme.colorScheme.outline
-        is EbbinghausScheduler.ReviewStatus.COMPLETED -> "已掌握" to MaterialTheme.colorScheme.primary
+        is EbbinghausScheduler.ReviewStatus.DUE -> stringResource(com.ilyskyo.blancall.R.string.to_review) to MaterialTheme.colorScheme.error
+        is EbbinghausScheduler.ReviewStatus.PENDING -> pluralStringResource(com.ilyskyo.blancall.R.plurals.review_in_days, s.daysLeft, s.daysLeft) to MaterialTheme.colorScheme.outline
+        is EbbinghausScheduler.ReviewStatus.COMPLETED -> stringResource(com.ilyskyo.blancall.R.string.mastered) to MaterialTheme.colorScheme.primary
     }
     GlassCard(
         modifier = modifier.heroElement("article/${article.id}")
@@ -908,7 +918,7 @@ private fun ArticleCard(
                     shape = RoundedCornerShape(50),
                     contentPadding = PaddingValues(horizontal = 18.dp, vertical = 0.dp)
                 ) {
-                    Text("练习", style = MaterialTheme.typography.labelMedium)
+                    Text(stringResource(com.ilyskyo.blancall.R.string.practice), style = MaterialTheme.typography.labelMedium)
                 }
             }
         }

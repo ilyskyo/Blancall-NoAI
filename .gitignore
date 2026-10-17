@@ -27,3 +27,7 @@ apk-output/
 
 # Kotlin IDE 缓存/日志
 .kotlin
+
+# JVM 崩溃转储与回放日志（构建中断产物）
+hs_err_pid*.log
+replay_pid*.log

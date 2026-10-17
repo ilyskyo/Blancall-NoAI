@@ -8,8 +8,10 @@
     <!-- 关键交互的触感反馈（长按 / 拖拽 / 下拉达阈值等） -->
     <uses-permission android:name="android.permission.VIBRATE" />
 
-    <!-- AI 对话需要网络 -->
-    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 这里原先声明过 INTERNET（注释写着「AI 对话需要网络」），那是从 Pro 抄过来的残留：
+         本版没有 AI，全仓也不做任何网络访问（唯一的 WebView 只 load file:///android_asset/…），
+         WorkManager 更没有 NetworkType 约束。留着它会让 README 与 PRIVACY 里「完全离线」的
+         说法变成假话，所以直接撤掉 —— 撤后那两处措辞自动对上清单。 -->
 
     <!-- 硬件能力声明（全部 required=false，不排除任何设备，仅用于大屏/手写笔分发的筛选与优化） -->
     <!-- 触摸屏非必需：允许极少数无触摸设备安装（外接笔 / 键鼠场景） -->
@@ -26,6 +28,7 @@
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
+        android:localeConfig="@xml/locales_config"
         android:resizeableActivity="true"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"

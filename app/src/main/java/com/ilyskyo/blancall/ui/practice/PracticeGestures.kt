@@ -3,10 +3,10 @@
 
 package com.ilyskyo.blancall.ui.practice
 
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import androidx.compose.ui.text.TextStyle
 import com.ilyskyo.blancall.ui.common.pinchZoomByTouch
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.scale
@@ -36,12 +36,11 @@ internal fun prevMode(m: BlancallMode): BlancallMode =
 // ========== 双指缩放字号 ==========
 
 /**
- * 双指捏合缩放（仅手指触点）：实现已统一到
- * [com.ilyskyo.blancall.ui.common.pinchZoomByTouch]，此处保留同名入口，
- * 避免各处调用点大面积改动。
+ * 双指捏合缩放（仅手指触点）。实现已统一到 [com.ilyskyo.blancall.ui.common.pinchZoomByTouch]，
+ * 此处保留同名的内部别名，避免各处调用点大面积改动。
  *
  * 关键修复：旧实现用 `pressed.size >= 2` 判定双指，**未过滤 PointerType**，
- * 导致平板上「一手扶屏（手指）+ 一手写字（主动笔）」被判成双指捏合 → 字号乱跳。
+ * 导致平板上「一手扶屏（手指）+ 一手写字（主动笔）」被误判为双指捏合 → 字号乱跳。
  * 现在只有手指参与捏合，手写笔与鼠标不触发缩放。
  */
 internal fun Modifier.pinchZoom(onZoomChange: (Float) -> Unit): Modifier =
