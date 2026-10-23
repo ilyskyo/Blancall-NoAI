@@ -85,7 +85,7 @@ fun WelcomeScreen(
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                "不是清空，是召回。",
+                stringResource(com.ilyskyo.blancall.R.string.welcome_tagline),
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center
@@ -95,30 +95,31 @@ fun WelcomeScreen(
 
             // ── 完全离线介绍 ──
             Text(
-                "Blancall 完全运行在本地，不联网。不收集、传输或共享你的任何个人信息。",
+                stringResource(com.ilyskyo.blancall.R.string.welcome_privacy_body),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface,
                 textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(12.dp))
             Text(
-                "软件由 ilyskyo 开发，向你免费提供。",
+                stringResource(com.ilyskyo.blancall.R.string.welcome_developer),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface,
                 textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(12.dp))
             Text(
-                "如果帮助到了你，欢迎",
+                stringResource(com.ilyskyo.blancall.R.string.welcome_support_prefix),
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface,
                 textAlign = TextAlign.Center
             )
             // 「点击此处支持开发者」蓝色可点
+            val supportLink = stringResource(com.ilyskyo.blancall.R.string.welcome_support_link)
             Text(
                 buildAnnotatedString {
                     withStyle(SpanStyle(color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)) {
-                        append("点击此处支持开发者")
+                        append(supportLink)
                     }
                 },
                 style = MaterialTheme.typography.bodyLarge,
@@ -139,14 +140,14 @@ fun WelcomeScreen(
                     .height(50.dp),
                 shape = RoundedCornerShape(14.dp)
             ) {
-                Text("继续", style = MaterialTheme.typography.titleMedium)
+                Text(stringResource(com.ilyskyo.blancall.R.string.continue_action), style = MaterialTheme.typography.titleMedium)
             }
 
             Spacer(Modifier.height(14.dp))
 
             // ── 隐私政策链接 + 说明（无需确认操作） ──
             Text(
-                "《隐私政策》",
+                stringResource(com.ilyskyo.blancall.R.string.welcome_privacy_link),
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier
@@ -157,7 +158,7 @@ fun WelcomeScreen(
             )
             Spacer(Modifier.height(2.dp))
             Text(
-                "供你查阅。根据《中华人民共和国个人信息保护法》，隐私政策适用于“处理自然人个人信息”的活动。本应用不收集、不传输、不共享你的任何个人信息，因此无需你对《隐私政策》进行任何确认操作。",
+                stringResource(com.ilyskyo.blancall.R.string.welcome_privacy_note),
                 style = MaterialTheme.typography.labelSmall,
                 fontSize = 10.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
@@ -175,21 +176,21 @@ fun WelcomeScreen(
             shape = RoundedCornerShape(28.dp),
             containerColor = MaterialTheme.colorScheme.surface,
             title = {
-                Text("赞赏区·本软件完全免费",
+                Text(stringResource(com.ilyskyo.blancall.R.string.donation_title),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface)
             },
             text = {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("求求了，如果可以的话，请扫码支持一下我 🥹",
+                    Text(stringResource(com.ilyskyo.blancall.R.string.welcome_donation_body),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center)
                     Spacer(Modifier.height(12.dp))
                     Image(
                         painter = painterResource(id = R.drawable.appreciation_qr),
-                        contentDescription = "赞赏二维码",
+                        contentDescription = stringResource(com.ilyskyo.blancall.R.string.donation_qr),
                         modifier = Modifier
                             .fillMaxWidth(0.6f)
                             .aspectRatio(1f),
@@ -213,12 +214,12 @@ fun WelcomeScreen(
             containerColor = MaterialTheme.colorScheme.surface,
             title = {
                 Column(Modifier.padding(top = 4.dp)) {
-                    Text("隐私政策",
+                    Text(stringResource(com.ilyskyo.blancall.R.string.privacy_policy),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurface)
                     Spacer(Modifier.height(2.dp))
-                    Text("Blancall · 数据安全与隐私保护",
+                    Text(stringResource(com.ilyskyo.blancall.R.string.privacy_dialog_subtitle),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }

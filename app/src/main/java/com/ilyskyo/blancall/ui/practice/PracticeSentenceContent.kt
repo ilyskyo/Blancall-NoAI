@@ -30,6 +30,7 @@ import com.ilyskyo.blancall.ui.common.suppressAsPalmMisTouch
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.text.input.ImeAction
@@ -203,7 +204,7 @@ internal fun SentenceClozeContent(
                         value = userAnswers[currentBlankIndex] ?: "",
                         onValueChange = { onAnswerChange(currentBlankIndex, it) },
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = "请输入被挖掉的内容",
+                        placeholder = stringResource(com.ilyskyo.blancall.R.string.practice_answer_placeholder),
                         hintChar = if (!isSubmitted) hintChars[currentBlankIndex] else null,
                         maxLines = 3,
                         minHeight = 74.dp,
@@ -219,11 +220,11 @@ internal fun SentenceClozeContent(
                         TextButton(
                             onClick = { if (currentBlankIndex > 0) currentBlankIndex-- },
                             enabled = currentBlankIndex > 0
-                        ) { Text("← 上一个") }
+                        ) { Text(stringResource(com.ilyskyo.blancall.R.string.practice_previous)) }
                         TextButton(
                             onClick = { if (currentBlankIndex < totalBlanks - 1) currentBlankIndex++ },
                             enabled = currentBlankIndex < totalBlanks - 1
-                        ) { Text("下一个 →") }
+                        ) { Text(stringResource(com.ilyskyo.blancall.R.string.practice_next)) }
                     }
                 }
             }
@@ -302,7 +303,7 @@ internal fun SentenceClozeContent(
                         value = userAnswers[currentBlankIndex] ?: "",
                         onValueChange = { onAnswerChange(currentBlankIndex, it) },
                         modifier = Modifier.fillMaxWidth(),
-                        placeholder = "请输入被挖掉的内容",
+                        placeholder = stringResource(com.ilyskyo.blancall.R.string.practice_answer_placeholder),
                         hintChar = if (!isSubmitted) hintChars[currentBlankIndex] else null,
                         maxLines = 3,
                         minHeight = 74.dp,
@@ -324,11 +325,11 @@ internal fun SentenceClozeContent(
                         TextButton(
                             onClick = { if (currentBlankIndex > 0) currentBlankIndex-- },
                             enabled = currentBlankIndex > 0
-                        ) { Text("← 上一个") }
+                        ) { Text(stringResource(com.ilyskyo.blancall.R.string.practice_previous)) }
                         TextButton(
                             onClick = { if (currentBlankIndex < totalBlanks - 1) currentBlankIndex++ },
                             enabled = currentBlankIndex < totalBlanks - 1
-                        ) { Text("下一个 →") }
+                        ) { Text(stringResource(com.ilyskyo.blancall.R.string.practice_next)) }
                     }
                 }
             }
@@ -340,7 +341,7 @@ internal fun SentenceClozeContent(
             HandwritingAnswerSheet(
                 answer = userAnswers[sheetIdx] ?: "",
                 hintChar = hintChars[sheetIdx],
-                blankLabel = "第 ${sheetIdx + 1} 空",
+                blankLabel = stringResource(com.ilyskyo.blancall.R.string.blank_label, sheetIdx + 1),
                 onAnswerChange = { onAnswerChange(sheetIdx, it) },
                 onDismissRequest = { sheetBlankIndex = null },
                 // 弹层是为**这个空**服务的，文种按这个空的答案选（可能当前焦点已不是它）
@@ -421,7 +422,8 @@ internal fun SentenceBlankInline(
 
         if (isSubmitted && checkResult != null) {
             // 提交后：紧凑显示答案与批改 + 相似度
-            val userText = answer?.takeIf { it.isNotBlank() } ?: "（未填）"
+            val userText = answer?.takeIf { it.isNotBlank() }
+                ?: stringResource(com.ilyskyo.blancall.R.string.not_filled)
             val isCorrect = checkResult.result == AnswerChecker.Result.CORRECT
             Row(verticalAlignment = Alignment.Bottom) {
                 Text(

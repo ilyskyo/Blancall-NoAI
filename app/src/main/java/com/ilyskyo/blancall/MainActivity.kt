@@ -1,4 +1,4 @@
-﻿// Copyright (c) 2026 ilyskyo
+// Copyright (c) 2026 ilyskyo
 // SPDX-License-Identifier: MIT
 
 package com.ilyskyo.blancall
@@ -39,6 +39,7 @@ import com.ilyskyo.blancall.ui.onboarding.OnboardingScreen
 import com.ilyskyo.blancall.ui.navigation.AppNavigation
 import com.ilyskyo.blancall.ui.navigation.NavigationDispatcher
 import com.ilyskyo.blancall.ui.settings.HelpScreen
+import com.ilyskyo.blancall.ui.settings.SettingsSessionState
 import com.ilyskyo.blancall.ui.theme.AppPrefs
 import com.ilyskyo.blancall.ui.theme.ReminderPrefs
 import com.ilyskyo.blancall.ui.theme.BlancallTheme
@@ -64,7 +65,7 @@ class MainActivity : ComponentActivity() {
             safeScheduleNext()
         } else {
             // 权限被拒：提示用户提醒功能将不可用
-            errorMessage.value = "提醒功能需要通知权限，请在系统设置中开启后返回应用"
+            errorMessage.value = getString(R.string.notification_permission_required)
         }
     }
 
@@ -91,6 +92,11 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        // 会话级界面状态复位：设置页赞赏区的「隐藏该区域」只在本次运行有效，
+        // 重新打开软件就该恢复显示。这里以 savedInstanceState == null 判定"真正的重新启动"，
+        // 系统因配置变化（主题、深色模式等）重建 Activity 时不清，免得用户刚藏好又冒出来。
+        if (savedInstanceState == null) SettingsSessionState.donationHidden = false
+
         // 安装启动屏：在 setContent 之前调用，保证第一帧即显示与主页一致的底色，消除白屏
         val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
@@ -139,7 +145,7 @@ class MainActivity : ComponentActivity() {
                 // ── 首次使用引导：开屏页 → 欢迎帮助页 → 淡出进入 ──
                 // 只出现在第一次使用（AppPrefs.firstLaunchDone 持久化标记）
                 val firstLaunchDone by AppPrefs.firstLaunchDoneFlow.collectAsState()
-                var guideStep by rememberSaveable { mutableStateOf(0) }
+                var guideStep by rememberSaveable { mutableIntStateOf(0) }
                 // 点击「开始使用 Blancall」后先播放淡出动画，再正式进入（快速利索）
                 var fadingOut by remember { mutableStateOf(false) }
 

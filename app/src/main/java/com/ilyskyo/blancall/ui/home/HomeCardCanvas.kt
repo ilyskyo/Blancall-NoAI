@@ -593,7 +593,7 @@ fun HomeCardCanvas(
                         )
                         Spacer(Modifier.width(6.dp))
                         Text(
-                            "管理最近文章",
+                            stringResource(com.ilyskyo.blancall.R.string.manage_recent_title),
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
@@ -639,7 +639,7 @@ fun HomeCardCanvas(
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        "还没有卡片，点这里添加",
+                        stringResource(com.ilyskyo.blancall.R.string.home_no_cards_hint),
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.primary,
                     )
@@ -991,7 +991,10 @@ fun HomeCardCanvas(
                                     ) {
                                         Icon(
                                             imageVector = Icons.Outlined.PushPin,
-                                            contentDescription = if (card.pinned) "取消固定" else "固定卡片",
+                                            contentDescription = stringResource(
+                                                if (card.pinned) com.ilyskyo.blancall.R.string.a11y_unpin_card
+                                                else com.ilyskyo.blancall.R.string.a11y_pin_card
+                                            ),
                                             // 已固定用主题色（一眼可辨「这张被钉住了」），未固定用深灰（白底上清晰）
                                             tint = if (card.pinned) {
                                                 MaterialTheme.colorScheme.primary
