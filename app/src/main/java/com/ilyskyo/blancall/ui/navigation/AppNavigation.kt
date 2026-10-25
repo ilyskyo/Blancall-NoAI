@@ -71,6 +71,7 @@ import com.ilyskyo.blancall.ui.common.NavRailWidth
 import com.ilyskyo.blancall.ui.home.HomeScreen
 import com.ilyskyo.blancall.ui.home.SentenceCardScreen
 import com.ilyskyo.blancall.ui.import.ImportScreen
+import com.ilyskyo.blancall.ui.import.ShareImportScreen
 import com.ilyskyo.blancall.ui.list.ListScreen
 import com.ilyskyo.blancall.ui.practice.PracticeScreen
 import com.ilyskyo.blancall.ui.cloze.CustomClozeEditScreen
@@ -78,6 +79,8 @@ import com.ilyskyo.blancall.ui.cloze.CustomClozeListScreen
 import com.ilyskyo.blancall.ui.reader.ReaderScreen
 import com.ilyskyo.blancall.ui.settings.SettingsScreen
 import com.ilyskyo.blancall.ui.settings.HelpScreen
+import com.ilyskyo.blancall.ui.settings.ContentPackScreen
+import com.ilyskyo.blancall.ui.settings.DataInterchangeScreen
 import com.ilyskyo.blancall.ui.western.WesternThoughtScreen
 import com.ilyskyo.blancall.ui.western.LibraryContentPage
 import com.ilyskyo.blancall.ui.western.PdfPreviewScreen
@@ -85,6 +88,7 @@ import com.ilyskyo.blancall.ui.statistics.OverviewScreen
 import com.ilyskyo.blancall.ui.statistics.StatisticsScreen
 import com.ilyskyo.blancall.ui.statistics.StudyFlowScreen
 import com.ilyskyo.blancall.ui.statistics.StudyTaskDetailScreen
+import com.ilyskyo.blancall.ui.statistics.MistakeNotebookScreen
 import com.ilyskyo.blancall.ui.onboarding.OnboardingScreen
 import com.ilyskyo.blancall.ui.search.SearchScreen
 import com.ilyskyo.blancall.ui.tag.TagManagerScreen
@@ -123,7 +127,8 @@ fun AppNavigation() {
         currentRoute == "home" || currentRoute?.startsWith("home/") == true -> 0
         currentRoute == "list" || currentRoute?.startsWith("list/") == true -> 1
         currentRoute == "overview" || currentRoute?.startsWith("statistics/") == true ||
-            currentRoute == "study_flow" || currentRoute?.startsWith("study_task/") == true -> 2
+            currentRoute == "study_flow" || currentRoute?.startsWith("study_task/") == true ||
+            currentRoute?.startsWith("mistakes") == true -> 2
         // 仅素材库卡片页（philo，纯 Compose）显示底部导航栏；
         // WebView 内容页（philo_content）不归 tab——隐藏玻璃条，避免液态玻璃
         // 持续折射 WebView 导致的闪烁（与 settings/reader 子页同策略）
@@ -160,6 +165,15 @@ fun AppNavigation() {
             navController.navigate(route) {
                 popUpTo("home") { inclusive = false }
             }
+        }
+    }
+
+    // ── 系统分享：Intent → 确认页（绝不静默建文章）──
+    var sharedText by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(Unit) {
+        ShareTextDispatcher.events.collect { text ->
+            sharedText = text
+            navController.navigate("share_import") { launchSingleTop = true }
         }
     }
 
@@ -390,6 +404,21 @@ fun AppNavigation() {
             ImportScreen(navController)
         }
 
+        // 系统分享 / 文本选择菜单进入的确认页
+        composable(
+            "share_import",
+            enterTransition = enterSlide,
+            exitTransition = exitSlide,
+            popExitTransition = popExitSlide,
+            popEnterTransition = popEnterSlide
+        ) {
+            ShareImportScreen(
+                navController = navController,
+                initialText = sharedText,
+                onInitialConsumed = { sharedText = null }
+            )
+        }
+
         composable(
             "list",
             enterTransition = noneTransition,
@@ -469,7 +498,7 @@ fun AppNavigation() {
         }
 
         composable(
-            route = "practice/{articleId}?mode={mode}&resume={resume}&sectionMode={sectionMode}&configId={configId}&focusSentence={focusSentence}",
+            route = "practice/{articleId}?mode={mode}&resume={resume}&sectionMode={sectionMode}&configId={configId}&focusSentence={focusSentence}&oneShot={oneShot}&budget={budget}",
             arguments = listOf(
                 navArgument("articleId") { type = NavType.LongType },
                 navArgument("mode") {
@@ -492,6 +521,16 @@ fun AppNavigation() {
                     // 句级薄弱榜直达（B3-1）：只练该句所在段；-1 = 不聚焦
                     type = NavType.IntType
                     defaultValue = -1
+                },
+                navArgument("oneShot") {
+                    // 一次性挖空 token（遮挡转练 / 错题只练这一批）；0 = 无
+                    type = NavType.LongType
+                    defaultValue = 0L
+                },
+                navArgument("budget") {
+                    // 时间预算（分钟）；0 = 无。到点只提醒收尾，不强制中断。
+                    type = NavType.IntType
+                    defaultValue = 0
                 }
             ),
             enterTransition = enterSlide,
@@ -515,9 +554,13 @@ fun AppNavigation() {
         }
 
         composable(
-            route = "cross/{articleIds}",
+            route = "cross/{articleIds}?budget={budget}",
             arguments = listOf(
-                navArgument("articleIds") { type = NavType.StringType }
+                navArgument("articleIds") { type = NavType.StringType },
+                navArgument("budget") {
+                    type = NavType.IntType
+                    defaultValue = 0
+                }
             ),
             enterTransition = enterSlide,
             exitTransition = exitSlide,
@@ -548,13 +591,25 @@ fun AppNavigation() {
             OverviewScreen(navController)
         }
 
-        // 学习任务流（数据页 -> 任务流入口）：FSRS 计划的时间线 + 暂停/恢复 + 调度调节
+        // 学习任务流：由全局统计页下拉进入，所以转场与手势同向 ——
+        // 新页从顶部向下盖住统计页，返回时向上收回；旧页保持原地（不再横向让位），
+        // 否则「下拉出来的一页」会被读成一次普通的前进导航。
         composable(
             "study_flow",
-            enterTransition = enterSlide,
-            exitTransition = exitSlide,
-            popExitTransition = popExitSlide,
-            popEnterTransition = popEnterSlide
+            enterTransition = {
+                slideInVertically(
+                    initialOffsetY = { -it },
+                    animationSpec = Motion.pageEnter()
+                )
+            },
+            exitTransition = { ExitTransition.None },
+            popExitTransition = {
+                slideOutVertically(
+                    targetOffsetY = { -it },
+                    animationSpec = Motion.pageExit()
+                )
+            },
+            popEnterTransition = { EnterTransition.None }
         ) {
             HeroEntry(this) {
                 StudyFlowScreen(navController)
@@ -648,6 +703,28 @@ fun AppNavigation() {
             HelpScreen(navController)
         }
 
+        // 内容包（设置 → 拓展功能）
+        composable(
+            "content_packs",
+            enterTransition = enterSlide,
+            exitTransition = exitSlide,
+            popExitTransition = popExitSlide,
+            popEnterTransition = popEnterSlide
+        ) {
+            ContentPackScreen(navController)
+        }
+
+        // 数据互换（JSON 导出 / CSV 导入）
+        composable(
+            "data_interchange",
+            enterTransition = enterSlide,
+            exitTransition = exitSlide,
+            popExitTransition = popExitSlide,
+            popEnterTransition = popEnterSlide
+        ) {
+            DataInterchangeScreen(navController)
+        }
+
         // 内置素材库卡片页（底部「素材库」tab 进入，同级根页面，无返回键）
         // 与 home/list/overview 一样：底部导航模式下 tab 切换无动画，直接出现
         composable(
@@ -704,6 +781,26 @@ fun AppNavigation() {
         ) { backStackEntry ->
             val articleId = backStackEntry.arguments?.getLong("articleId") ?: 0L
             StatisticsScreen(navController, articleId)
+        }
+
+        // 错题本：文章统计页 / 总览页进入；articleId=-1 表示全部文章
+        composable(
+            route = "mistakes?articleId={articleId}",
+            arguments = listOf(
+                navArgument("articleId") {
+                    type = NavType.LongType
+                    defaultValue = -1L
+                }
+            ),
+            enterTransition = enterSlide,
+            exitTransition = exitSlide,
+            popExitTransition = popExitSlide,
+            popEnterTransition = popEnterSlide
+        ) { backStackEntry ->
+            MistakeNotebookScreen(
+                navController,
+                initialArticleId = backStackEntry.arguments?.getLong("articleId") ?: -1L
+            )
         }
 
     } // close NavHost

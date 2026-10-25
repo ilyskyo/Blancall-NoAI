@@ -28,8 +28,8 @@ android {
         applicationId = "com.ilyskyo.blancall.noai"
         minSdk = 26
         targetSdk = 36
-        versionCode = 50
-        versionName = "7.5.1-NoAI"
+        versionCode = 51
+        versionName = "7.5.2-NoAI"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -170,6 +170,7 @@ dependencies {
 
     // WorkManager（每日学习提醒，已迁入版本目录）
     implementation(libs.androidx.work.runtime.ktx)
+    implementation(libs.androidx.glance.appwidget)
 
     testImplementation(libs.junit)
     // JVM 单测解析 BlancallGenerator 的 JSON 序列化（仅测试期，不进 APK）

@@ -11,7 +11,7 @@
 | 项 | 值 |
 |---|---|
 | applicationId | `com.ilyskyo.blancall.noai` |
-| versionName | `7.5.1-NoAI`（以 `app/build.gradle.kts` 为准） |
+| versionName | `7.5.2-NoAI`（以 `app/build.gradle.kts` 为准） |
 | versionCode | 50 |
 | namespace | `com.ilyskyo.blancall`（与 Pro 相同） |
 

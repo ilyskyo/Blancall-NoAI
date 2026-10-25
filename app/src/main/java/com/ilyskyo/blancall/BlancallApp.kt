@@ -9,6 +9,7 @@ import android.os.StrictMode
 import com.ilyskyo.blancall.algorithm.FsrsEngine
 import com.ilyskyo.blancall.data.repository.FsrsStateStore
 import com.ilyskyo.blancall.notification.NotificationHelper
+import com.ilyskyo.blancall.notification.PracticeLiveUpdate
 import com.ilyskyo.blancall.ui.theme.AppPrefs
 import com.ilyskyo.blancall.ui.theme.ReminderPrefs
 import com.ilyskyo.blancall.ui.theme.ThemeManager
@@ -88,6 +89,9 @@ class BlancallApp : Application() {
 
         // 通知渠道（创建幂等，重复调用安全）
         NotificationHelper.createChannel(this)
+
+        // 练习进行中通知：退后台自动存档 + Android 16 Live Updates（各家灵动岛）
+        PracticeLiveUpdate.init(this)
 
         // 后台预热 FSRS 状态单例：getInstance 内部 load() 会同步读盘，
         // 提前在后台线程触发，避免首页首帧在主线程阻塞读 fsrs_state.json。
