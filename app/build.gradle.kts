@@ -28,8 +28,8 @@ android {
         applicationId = "com.ilyskyo.blancall.noai"
         minSdk = 26
         targetSdk = 36
-        versionCode = 51
-        versionName = "7.5.2-NoAI"
+        versionCode = 52
+        versionName = "7.5.3-NoAI"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -167,6 +167,9 @@ dependencies {
     // 上游 com.qmdeve.liquidglass:core:1.0.5 已改为源码入库（见 docs/VENDOR-AndroidLiquidGlassView.md），
     // 这里只留它真正需要的那一个运行时依赖。
     implementation(libs.androidx.dynamicanimation)
+
+    // 底部导航栏液态玻璃：Kyant0 Backdrop（Compose 原生 LayerBackdrop + RuntimeShader）
+    implementation(libs.backdrop)
 
     // WorkManager（每日学习提醒，已迁入版本目录）
     implementation(libs.androidx.work.runtime.ktx)

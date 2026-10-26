@@ -176,7 +176,7 @@ fun WelcomeScreen(
             shape = RoundedCornerShape(28.dp),
             containerColor = MaterialTheme.colorScheme.surface,
             title = {
-                Text(stringResource(com.ilyskyo.blancall.R.string.donation_title),
+                Text(stringResource(com.ilyskyo.blancall.R.string.welcome_donation_title),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface)
