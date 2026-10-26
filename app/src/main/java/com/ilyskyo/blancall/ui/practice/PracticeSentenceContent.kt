@@ -71,7 +71,13 @@ internal fun SentenceClozeContent(
     onBlankFocus: (Int) -> Unit = {},
     onAnswerChange: (Int, String) -> Unit,
     /** 墨迹上报（错题回顾）：手写识别产生上屏内容时回调整次识别快照（blankIdx 已在内部绑定） */
-    onInkCommitted: ((Int, List<List<Offset>>, Int, Int) -> Unit)? = null
+    onInkCommitted: ((Int, List<List<Offset>>, Int, Int) -> Unit)? = null,
+    /**
+     * 空内被挖去的标点是否照原样显示（「标点提示」开关）。
+     * 长空可能横跨两个分句；不显示标点时，用户无从判断是一句还是两句。
+     * 只露出标点与分段，不泄露任何要默写的字。
+     */
+    showPunctuationHints: Boolean = false
 ) {
     blancall?.let { result ->
         var currentBlankIndex by remember { mutableIntStateOf(0) }
@@ -163,6 +169,7 @@ internal fun SentenceClozeContent(
                                         checkResult = checkResults[blank.index],
                                         isSubmitted = isSubmitted,
                                         hintChar = hintChars[blank.index],
+                                        showPunctuationHints = showPunctuationHints,
                                         onClick = {
                                             // 掌托守卫：手写时扶屏的手掌蹭到挖空，不应把书写板弹出来
                                             if (!suppressAsPalmMisTouch()) {
@@ -266,6 +273,7 @@ internal fun SentenceClozeContent(
                                         checkResult = checkResults[blank.index],
                                         isSubmitted = isSubmitted,
                                         hintChar = hintChars[blank.index],
+                                        showPunctuationHints = showPunctuationHints,
                                         // 笔点即书写：笔尖落在挖空上直接弹书写板，不用先手动切模式
                                         onPenTap = {
                                             currentBlankIndex = blank.index
@@ -376,6 +384,8 @@ internal fun SentenceBlankInline(
     checkResult: AnswerChecker.CheckDetail?,
     isSubmitted: Boolean,
     hintChar: Char? = null,
+    /** 空内被挖去的标点是否照原样显示（见 SentenceClozeContent 的同名参数） */
+    showPunctuationHints: Boolean = false,
     /**
      * 笔点该挖空时的动作（手机布局下弹底部书写板）。
      * 平板双栏不传：右栏本就是常驻作答区，弹层会盖住左侧原文，而默写要一边看句子一边写。
@@ -484,7 +494,14 @@ internal fun SentenceBlankInline(
             }
         } else {
             Row(verticalAlignment = Alignment.Bottom) {
-                Text("＿＿＿＿",
+                // 标点提示：把空内被挖去的标点还原成「＿＿，＿＿」这样的骨架。
+                // 空内没有标点时保持原来的占位外观，开关不会无端改变空位宽度。
+                val placeholder = if (showPunctuationHints &&
+                    BlancallGenerator.hasBlankedPunctuation(blank.originalText)
+                ) {
+                    BlancallGenerator.punctuationSkeleton(blank.originalText)
+                } else "＿＿＿＿"
+                Text(placeholder,
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                 HintGhost(if (isSubmitted) null else hintChar)

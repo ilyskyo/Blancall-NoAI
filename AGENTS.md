@@ -20,7 +20,7 @@
 ## 本工程独有
 
 - **没有** `.qoder/` 和 `.trae/` 目录（Pro 工程才有）
-- `gradle.properties` 与 Pro 侧**逐字一致**：`org.gradle.jvmargs=-Xmx1536m -Dfile.encoding=UTF-8`
+- `gradle.properties` 与 Pro 侧**逐字一致**：`org.gradle.jvmargs=-Xmx3072m -Dfile.encoding=UTF-8`
   就在本文件 `:13`。此前本条误记为「Std 没有这一行」，据实修正 —— 两版 gradle 配置的真实
   差异只有 applicationId 与 versionName（见上表），排查构建行为不一致时别按旧说法找
 - 历史 APK 在 `apk-output/`，另有一份归档在 `D:\_asm_std\apk-output\`

@@ -47,6 +47,12 @@ target_include_directories(blancall_hccr PRIVATE "${CMAKE_SOURCE_DIR}")
 # 无需在此重复声明。
 target_link_libraries(blancall_hccr ncnn)
 
+# 16 KB page size：NDK r27 默认仍按 4 KB 对齐 LOAD 段；targetSdk 37 起
+# 16KB 设备要求 native 库可加载，显式指定最大/公共页大小。
+target_link_options(blancall_hccr PRIVATE
+    "-Wl,-z,max-page-size=16384"
+    "-Wl,-z,common-page-size=16384")
+
 # ncnn 静态库里含 Vulkan 相关目标文件，其中引用了 dlopen 等 libdl 符号；
 # Android 上 libdl 已并入 libc，但显式链接可避免部分 NDK 版本的可见性问题。
 find_library(dl_lib dl)
