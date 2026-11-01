@@ -19,11 +19,14 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
+import com.ilyskyo.blancall.ui.common.AppIcon
+import com.ilyskyo.blancall.ui.common.AppIconKind
 import com.ilyskyo.blancall.ui.common.Motion
 import com.ilyskyo.blancall.ui.common.MotionFade
 import com.ilyskyo.blancall.ui.common.BackButton
@@ -46,7 +49,7 @@ fun HelpScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .widthIn(max = 600.dp)
-                .padding(horizontal = 20.dp, vertical = 20.dp)
+                .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 20.dp)
         ) {
             if (welcomeMode) {
                 // 欢迎引导：无返回按钮（引导页底部有「开始使用」按钮）
@@ -85,9 +88,14 @@ fun HelpScreen(
                     .verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
+                // ── 0. 顶部流程图示 + 共通数据 ──
+                // 先给骨架（哪几步、怎么串），再给细节（下面原有的折叠段落）。
+                HelpFlowOverviewCard()
+                HelpSharedDataCard()
+                Spacer(Modifier.height(6.dp))
+
                 // ── 1. 开始练习 ──
                 HelpSection(
-                    emoji = "🚀",
                     title = stringResource(com.ilyskyo.blancall.R.string.help_002),
                     expandedContent = {
                         Text(
@@ -117,7 +125,6 @@ fun HelpScreen(
 
                 // ── 句子卡片（每日一句） ──
                 HelpSection(
-                    emoji = "💬",
                     title = stringResource(com.ilyskyo.blancall.R.string.help_018),
                     expandedContent = {
                         Text(
@@ -136,7 +143,6 @@ fun HelpScreen(
 
                 // ── 2. 练习模式介绍 ──
                 HelpSection(
-                    emoji = "📋",
                     title = stringResource(com.ilyskyo.blancall.R.string.help_026),
                     expandedContent = {
                         Text(
@@ -146,42 +152,36 @@ fun HelpScreen(
                         )
                         Spacer(Modifier.height(10.dp))
                         InfoCard(
-                            emoji = "📝",
                             title = stringResource(com.ilyskyo.blancall.R.string.help_028),
                             desc = stringResource(com.ilyskyo.blancall.R.string.help_029),
                             footer = stringResource(com.ilyskyo.blancall.R.string.help_030)
                         )
                         Spacer(Modifier.height(10.dp))
                         InfoCard(
-                            emoji = "🔤",
                             title = stringResource(com.ilyskyo.blancall.R.string.help_031),
                             desc = stringResource(com.ilyskyo.blancall.R.string.help_032),
                             footer = stringResource(com.ilyskyo.blancall.R.string.help_033)
                         )
                         Spacer(Modifier.height(10.dp))
                         InfoCard(
-                            emoji = "✍️",
                             title = stringResource(com.ilyskyo.blancall.R.string.help_034),
                             desc = stringResource(com.ilyskyo.blancall.R.string.help_035),
                             footer = stringResource(com.ilyskyo.blancall.R.string.help_036)
                         )
                         Spacer(Modifier.height(10.dp))
                         InfoCard(
-                            emoji = "🧩",
                             title = stringResource(com.ilyskyo.blancall.R.string.help_037),
                             desc = stringResource(com.ilyskyo.blancall.R.string.help_038),
                             footer = stringResource(com.ilyskyo.blancall.R.string.help_039)
                         )
                         Spacer(Modifier.height(10.dp))
                         InfoCard(
-                            emoji = "🔀",
                             title = stringResource(com.ilyskyo.blancall.R.string.help_040),
                             desc = stringResource(com.ilyskyo.blancall.R.string.help_041),
                             footer = stringResource(com.ilyskyo.blancall.R.string.help_042)
                         )
                         Spacer(Modifier.height(10.dp))
                         InfoCard(
-                            emoji = "🎯",
                             title = stringResource(com.ilyskyo.blancall.R.string.help_043),
                             desc = stringResource(com.ilyskyo.blancall.R.string.help_044),
                             footer = stringResource(com.ilyskyo.blancall.R.string.help_045)
@@ -191,7 +191,6 @@ fun HelpScreen(
 
                 // ── 3. 挖空策略介绍 ──
                 HelpSection(
-                    emoji = "🎯",
                     title = stringResource(com.ilyskyo.blancall.R.string.help_046),
                     expandedContent = {
                         Text(
@@ -201,19 +200,16 @@ fun HelpScreen(
                         )
                         Spacer(Modifier.height(10.dp))
                         InfoCard(
-                            emoji = "⚖️",
                             title = stringResource(com.ilyskyo.blancall.R.string.help_048),
                             desc = stringResource(com.ilyskyo.blancall.R.string.help_049)
                         )
                         Spacer(Modifier.height(10.dp))
                         InfoCard(
-                            emoji = "🎯",
                             title = stringResource(com.ilyskyo.blancall.R.string.help_050),
                             desc = stringResource(com.ilyskyo.blancall.R.string.help_051)
                         )
                         Spacer(Modifier.height(10.dp))
                         InfoCard(
-                            emoji = "🔍",
                             title = stringResource(com.ilyskyo.blancall.R.string.help_052),
                             desc = stringResource(com.ilyskyo.blancall.R.string.help_053)
                         )
@@ -233,7 +229,6 @@ fun HelpScreen(
 
                 // ── 4. 提示功能 ──
                 HelpSection(
-                    emoji = "💡",
                     title = stringResource(com.ilyskyo.blancall.R.string.help_064),
                     expandedContent = {
                         Text(
@@ -254,7 +249,6 @@ fun HelpScreen(
 
                 // ── 5. 查看学习数据 ──
                 HelpSection(
-                    emoji = "📊",
                     title = stringResource(com.ilyskyo.blancall.R.string.help_074),
                     expandedContent = {
                         SubTitle(stringResource(com.ilyskyo.blancall.R.string.help_075))
@@ -278,7 +272,6 @@ fun HelpScreen(
 
                 // ── 6. 学习建议 ──
                 HelpSection(
-                    emoji = "📖",
                     title = stringResource(com.ilyskyo.blancall.R.string.help_090),
                     expandedContent = {
                         Text(
@@ -313,7 +306,6 @@ fun HelpScreen(
 
                 // ── 7. 操作小贴士（完整操作手册） ──
                 HelpSection(
-                    emoji = "🛠️",
                     title = stringResource(com.ilyskyo.blancall.R.string.help_105),
                     expandedContent = {
                         Text(
@@ -408,7 +400,6 @@ fun HelpScreen(
 
 @Composable
 private fun HelpSection(
-    emoji: String,
     title: String,
     expandedContent: @Composable ColumnScope.() -> Unit
 ) {
@@ -434,24 +425,34 @@ private fun HelpSection(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Text(emoji, style = MaterialTheme.typography.titleMedium)
-                        Spacer(Modifier.width(10.dp))
-                        Text(
-                            title,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            // 自绘色条代替 emoji：图标语言统一走 AppIcon / 形状，不引排版符号
+                            Box(
+                                modifier = Modifier
+                                    .size(width = 3.dp, height = 14.dp)
+                                    .background(
+                                        MaterialTheme.colorScheme.primary,
+                                        RoundedCornerShape(2.dp)
+                                    )
+                            )
+                            Spacer(Modifier.width(10.dp))
+                            Text(
+                                title,
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                        AppIcon(
+                            AppIconKind.ChevronRight,
+                            modifier = Modifier
+                                .size(18.dp)
+                                .graphicsLayer { rotationZ = if (expanded) 90f else 0f },
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
-                    }
-                    Text(
-                        if (expanded) "▾" else "▸",
-                        style = MaterialTheme.typography.titleSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
                 }
             }
 
@@ -604,7 +605,6 @@ private fun FlowTag(
 
 @Composable
 private fun InfoCard(
-    emoji: String,
     title: String,
     desc: String,
     footer: String? = null
@@ -617,12 +617,6 @@ private fun InfoCard(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.Top
         ) {
-            Text(
-                emoji,
-                style = MaterialTheme.typography.titleMedium,
-                modifier = Modifier.padding(top = 2.dp)
-            )
-            Spacer(Modifier.width(10.dp))
             Column {
                 Text(
                     title,

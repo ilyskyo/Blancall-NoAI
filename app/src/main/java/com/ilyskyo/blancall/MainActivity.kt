@@ -19,6 +19,7 @@ import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.ui.platform.LocalView
 import com.ilyskyo.blancall.ui.common.Motion
 import com.ilyskyo.blancall.ui.common.MotionFade
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.SnackbarHost
@@ -30,6 +31,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import androidx.navigation.compose.rememberNavController
 import com.ilyskyo.blancall.notification.NotificationHelper
 import com.ilyskyo.blancall.notification.PracticeLiveUpdate
@@ -45,6 +47,8 @@ import com.ilyskyo.blancall.ui.settings.SettingsSessionState
 import com.ilyskyo.blancall.ui.theme.AppPrefs
 import com.ilyskyo.blancall.ui.theme.ReminderPrefs
 import com.ilyskyo.blancall.ui.theme.BlancallTheme
+import com.ilyskyo.blancall.ui.theme.AppearanceStore
+import com.ilyskyo.blancall.ui.theme.ThemeMode
 import kotlin.system.exitProcess
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -63,8 +67,8 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            // 权限已授予，调度提醒（WorkManager 未初始化等异常场景不应崩 App）
-            safeScheduleNext()
+            // 权限已授予，补调度提醒（WorkManager 未初始化等异常场景不应崩 App）
+            safeScheduleIfMissing()
         } else {
             // 权限被拒：提示用户提醒功能将不可用
             errorMessage.value = getString(R.string.notification_permission_required)
@@ -81,9 +85,17 @@ class MainActivity : ComponentActivity() {
     /** 启动屏最长滞留时间：兜底放行，宁可闪一下也不要把用户永久关在启动屏里 */
     private val keepOnScreenMaxMs = 1_500L
 
-    /** 安全调度提醒：捕获 WorkManager 未初始化等异常，避免主流程崩溃 */
-    private fun safeScheduleNext() {
-        runCatching { ReminderWorker.scheduleNext(this) }
+    /**
+     * 安全补调度：捕获 WorkManager 未初始化等异常，避免主流程崩溃。
+     *
+     * 这里刻意用 [ReminderWorker.scheduleIfMissing] 而不是 REPLACE 重排：
+     * 回到前台时若有一条被系统推迟、尚未执行的当日提醒，直接重排会把它改成下一次，
+     * 当天这次就静默消失了（20:00 的提醒被 Doze 推到 20:30，用户一开 App 就丢）。
+     */
+    private fun safeScheduleIfMissing() {
+        lifecycleScope.launch {
+            runCatching { ReminderWorker.scheduleIfMissing(this@MainActivity) }
+        }
     }
 
     @OptIn(ExperimentalMaterial3WindowSizeClassApi::class)
@@ -93,11 +105,39 @@ class MainActivity : ComponentActivity() {
         super.attachBaseContext(AppLocale.wrap(newBase))
     }
 
+    /**
+     * 按 App 内明暗偏好挑一版启动底色。
+     *
+     * 为什么不能只靠资源限定符：`windowBackground` 在 Compose 读到偏好之前就已生效，
+     * `values-night` 只跟系统夜间走。于是「手动深色 + 系统浅色」必闪白帧，
+     * 「手动浅色 + 系统夜间」必闪黑帧 —— 两个方向都得在运行时 setTheme 解决。
+     */
+    private fun applySplashTheme() {
+        val mode = AppearanceStore.state.value.themeMode
+        val systemDark = (resources.configuration.uiMode and
+            android.content.res.Configuration.UI_MODE_NIGHT_MASK) ==
+            android.content.res.Configuration.UI_MODE_NIGHT_YES
+        val dark = when (mode) {
+            ThemeMode.SYSTEM -> systemDark
+            ThemeMode.DARK -> true
+            ThemeMode.LIGHT -> false
+        }
+        setTheme(
+            if (dark) R.style.Theme_Blancall_Splash_Dark
+            else R.style.Theme_Blancall_Splash_Light
+        )
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         // 会话级界面状态复位：设置页赞赏区的「隐藏该区域」只在本次运行有效，
         // 重新打开软件就该恢复显示。这里以 savedInstanceState == null 判定"真正的重新启动"，
         // 系统因配置变化（主题、深色模式等）重建 Activity 时不清，免得用户刚藏好又冒出来。
         if (savedInstanceState == null) SettingsSessionState.donationHidden = false
+
+        // 启动底色按**App 内**明暗偏好先定好：windowBackground 在 Compose 读到偏好
+        // 之前就已经生效，资源限定符只跟「系统夜间」走 —— 手动深色 + 系统浅色时
+        // 冷启动会先闪一帧白。setTheme 必须在 super.onCreate 之前。
+        applySplashTheme()
 
         // 安装启动屏：在 setContent 之前调用，保证第一帧即显示与主页一致的底色，消除白屏
         val splash = installSplashScreen()
@@ -232,7 +272,7 @@ class MainActivity : ComponentActivity() {
         super.onResume()
         // 用户可能在系统设置中重新开启了通知权限，回到 App 时补调度
         if (ReminderPrefs.enabled && hasNotificationPermission()) {
-            safeScheduleNext()
+            safeScheduleIfMissing()
         }
     }
 
@@ -301,12 +341,12 @@ class MainActivity : ComponentActivity() {
             ) {
                 notificationPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
             } else {
-                // 权限已有，直接调度
-                safeScheduleNext()
+                // 权限已有，补调度
+                safeScheduleIfMissing()
             }
         } else {
             // Android 12 及以下无需动态权限
-            safeScheduleNext()
+            safeScheduleIfMissing()
         }
     }
 

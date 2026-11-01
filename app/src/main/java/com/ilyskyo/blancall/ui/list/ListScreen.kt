@@ -13,7 +13,6 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.AnimatedVisibility
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.PredictiveBackHandler
 
 import android.util.Log
@@ -105,11 +104,10 @@ import java.util.Locale
 @Composable
 fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
     val listAnchor = rememberCoachAnchor()
-    // 根 tab 页面：返回键 = 退出应用（与「数据」「素材库」tab 平级语义一致，绝不 pop 回上一 tab/首页）
-    val rootBackContext = LocalContext.current
-    BackHandler {
-        (rootBackContext as? android.app.Activity)?.finish()
-    }
+    // 根 tab 的「返回＝退出应用」只在 AppNavigation 注册一处（见那边的 BackHandler）。
+    // 这里曾经也有一份，旧版走 OnBackPressedDispatcher 时重复注册无害；
+    // activity 1.13 起 BackHandler 改投 NavigationEventDispatcher（与 NavHost 同一套），
+    // 多注册一份会改变手势/返回的响应顺序，转场中途还可能抢在 NavHost 前面直接 finish。
     val articleViewModel: ArticleViewModel = viewModel()
     val articles by articleViewModel.articles.collectAsState()
     // 文章列表按"新添加在前"排列：创建时间倒序，同时间按 id 倒序（id 单调递增，兜底旧数据无 createdAt）
@@ -147,11 +145,14 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
     // FSRS 状态后台加载：首帧先渲染（无状态=未开始），加载完成后刷新，避免进入列表时同步读文件卡顿
     var fsrsStates by remember { mutableStateOf(fsrsStore.allStates()) }
     var pausedArticleIds by remember { mutableStateOf(fsrsStore.pausedArticleIds()) }
+    // 计划成员表（v3）：还没练过但已加入计划的文章，角标要显示「待开始」而不是空白
+    var enrolledIds by remember { mutableStateOf(fsrsStore.enrolledIds()) }
     val fsrsRevision by fsrsStore.revision.collectAsState()
     LaunchedEffect(fsrsRevision) {
         fsrsStore.awaitLoaded()
         fsrsStates = fsrsStore.allStates()
         pausedArticleIds = fsrsStore.pausedArticleIds()
+        enrolledIds = fsrsStore.enrolledIds()
     }
     // 列表逐篇的复习状态也要看用户选的复习计划：与首页同一条映射、同一个参数（ReviewTemplate.fromId），
     // 否则会出现「统计页说今天到期、列表说已完成」这种两屏互相打脸。
@@ -162,7 +163,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
     // 初值空表只影响首帧的一瞬，数据到达后列表自动刷新。
     val reviewStatusByArticle by produceState<Map<Long, EbbinghausScheduler.ReviewStatus>>(
         initialValue = emptyMap(),
-        recordsByArticle, fsrsStates, reviewTemplate, pausedArticleIds,
+        recordsByArticle, fsrsStates, reviewTemplate, pausedArticleIds, enrolledIds,
     ) {
         value = withContext(Dispatchers.Default) {
             sortedArticles.associate { article ->
@@ -171,6 +172,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                     recordsByArticle[article.id] ?: emptyList(),
                     reviewTemplate,
                     paused = article.id in pausedArticleIds,
+                    inPlan = article.id in enrolledIds,
                 )
             }
         }
@@ -272,7 +274,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                 // 大屏放宽上限：原先固定 600dp 上限在平板上会白白浪费一半横向空间，
                 // 卡片网格本就可以多列铺开。窄屏仍由 max 上限自然约束（<600dp 时等于铺满）。
                 .widthIn(max = if (LocalIsLargeScreen) GridMaxWidth else 600.dp)
-                .padding(horizontal = 20.dp, vertical = 20.dp)
+                .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 20.dp)
         ) {
         CoachMark(
             coachKey = "list_long_press_multi",
@@ -334,6 +336,18 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                         }
                     } else {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                // 搜索入口：搜索是内容页的高频动作，不能只藏在首页。
+                                                GlassButton(
+                                                    onClick = { navController.navigate("search") },
+                                                    modifier = Modifier.height(40.dp)
+                                                ) {
+                                                    AppIcon(
+                                                        kind = AppIconKind.SearchHint,
+                                                        modifier = Modifier.size(18.dp),
+                                                        tint = MaterialTheme.colorScheme.onSurface,
+                                                        contentDescription = stringResource(com.ilyskyo.blancall.R.string.search),
+                                                    )
+                                                }
                                                 // 与首页右上角同款磨砂玻璃风格
                                                 GlassButton(
                                                     onClick = { navController.navigate("import") },
@@ -490,6 +504,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                                     if (article.id == filteredArticles.firstOrNull()?.id) Modifier.coachAnchor(listAnchor) else Modifier
                                 ),
                                 tags = chipTagsByArticle[article.id].orEmpty(),
+                                onTagClick = { tagId -> navController.navigate("tag/$tagId") },
                                 dateFormat = dateFormat,
                                 reviewStatus = reviewStatusByArticle[article.id]
                                     ?: EbbinghausScheduler.ReviewStatus.NOT_STARTED,
@@ -543,6 +558,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                                     if (article.id == filteredArticles.firstOrNull()?.id) Modifier.coachAnchor(listAnchor) else Modifier
                                 ),
                                 tags = chipTagsByArticle[article.id].orEmpty(),
+                                onTagClick = { tagId -> navController.navigate("tag/$tagId") },
                                 dateFormat = dateFormat,
                                 reviewStatus = reviewStatusByArticle[article.id]
                                     ?: EbbinghausScheduler.ReviewStatus.NOT_STARTED,
@@ -754,6 +770,7 @@ private fun ArticleCard(
     modifier: Modifier = Modifier,
     /** 已绑定标签（卡片左上角徽标；最多 2 枚 + 「+N」） */
     tags: List<TagChipUi> = emptyList(),
+    onTagClick: ((Long) -> Unit)? = null,
     dateFormat: SimpleDateFormat,
     reviewStatus: EbbinghausScheduler.ReviewStatus = EbbinghausScheduler.ReviewStatus.NOT_STARTED,
     onClick: () -> Unit,
@@ -765,6 +782,9 @@ private fun ArticleCard(
 ) {
     val statusText = when (val s = reviewStatus) {
         is EbbinghausScheduler.ReviewStatus.NOT_STARTED -> null
+        // 已加入计划、还没练：不能是空白（首页和任务流都已经把它当今天的任务了）
+        is EbbinghausScheduler.ReviewStatus.PLANNED ->
+            stringResource(com.ilyskyo.blancall.R.string.plan_todo) to MaterialTheme.colorScheme.secondary
         is EbbinghausScheduler.ReviewStatus.DUE -> stringResource(com.ilyskyo.blancall.R.string.to_review) to MaterialTheme.colorScheme.error
         is EbbinghausScheduler.ReviewStatus.PENDING -> pluralStringResource(com.ilyskyo.blancall.R.plurals.review_in_days, s.daysLeft, s.daysLeft) to MaterialTheme.colorScheme.outline
         is EbbinghausScheduler.ReviewStatus.COMPLETED -> stringResource(com.ilyskyo.blancall.R.string.mastered) to MaterialTheme.colorScheme.primary
@@ -786,7 +806,7 @@ private fun ArticleCard(
         Column(modifier = Modifier.padding(16.dp)) {
             // 标签徽标：卡片左上角（标题上方独立一行；不换行，不遮挡既有元素）
             if (tags.isNotEmpty()) {
-                TagChipRow(tags = tags, maxChips = 2)
+                TagChipRow(tags = tags, maxChips = 2, onTagClick = onTagClick)
                 Spacer(modifier = Modifier.height(4.dp))
             }
             Row(

@@ -11,8 +11,8 @@
 | 项 | 值 |
 |---|---|
 | applicationId | `com.ilyskyo.blancall.noai` |
-| versionName | `7.5.2-NoAI`（以 `app/build.gradle.kts` 为准） |
-| versionCode | 50 |
+| versionName | `7.6.0-NoAI`（以 `app/build.gradle.kts` 为准） |
+| versionCode | 53 |
 | namespace | `com.ilyskyo.blancall`（与 Pro 相同） |
 
 与 `Blancall Pro` 的 gradle 差异只有 applicationId 和 versionName 两行。
