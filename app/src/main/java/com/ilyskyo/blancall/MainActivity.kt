@@ -274,6 +274,11 @@ class MainActivity : ComponentActivity() {
         if (ReminderPrefs.enabled && hasNotificationPermission()) {
             safeScheduleIfMissing()
         }
+        lifecycleScope.launch {
+            runCatching {
+                com.ilyskyo.blancall.widget.BlancallWidgetRefresh.request(this@MainActivity)
+            }
+        }
     }
 
     override fun onNewIntent(intent: android.content.Intent) {
@@ -297,6 +302,8 @@ class MainActivity : ComponentActivity() {
         if (intent.type != null && !intent.type.orEmpty().startsWith("text/")) return
         val text = intent.getCharSequenceExtra(android.content.Intent.EXTRA_TEXT)?.toString()
             ?: intent.getCharSequenceExtra(android.content.Intent.EXTRA_PROCESS_TEXT)?.toString()
+        intent.removeExtra(android.content.Intent.EXTRA_TEXT)
+        intent.removeExtra(android.content.Intent.EXTRA_PROCESS_TEXT)
         if (!text.isNullOrBlank()) ShareTextDispatcher.submit(text)
     }
 
@@ -306,6 +313,8 @@ class MainActivity : ComponentActivity() {
     private fun handleNotificationIntent(intent: android.content.Intent?) {
         val navAction = intent?.getStringExtra(NotificationHelper.EXTRA_NAV_ACTION) ?: return
         val articleId = intent.getLongExtra(NotificationHelper.EXTRA_ARTICLE_ID, -1L)
+        intent.removeExtra(NotificationHelper.EXTRA_NAV_ACTION)
+        intent.removeExtra(NotificationHelper.EXTRA_ARTICLE_ID)
 
         // 应用还停在同一个练习页（通知就是退后台时挂上的）：点击只是把任务带回前台。
         // 此时再 navigate 会在返回栈上压一层一模一样的练习页，返回键要按两次才出得去。

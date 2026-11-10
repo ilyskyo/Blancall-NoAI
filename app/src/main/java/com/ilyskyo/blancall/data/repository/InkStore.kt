@@ -149,7 +149,7 @@ class InkStore(private val dir: File) {
             files.forEach { f ->
                 val payload = runCatching { parsePayload(f.readText(), fallbackRecordId(f.name)) }
                     .getOrNull()
-                if (payload?.articleId == articleId) f.delete()
+                if (payload?.articleId == articleId) AtomicFiles.deleteWithCompanions(f)
             }
         } catch (e: Exception) {
             Log.w(TAG, "按文章清理墨迹失败", e)
@@ -159,7 +159,7 @@ class InkStore(private val dir: File) {
     /** 清空全部墨迹存档（设置页「清空已存的错题墨迹」）。失败只记日志。 */
     fun clearAll() {
         try {
-            listInkFiles()?.forEach { it.delete() }
+            listInkFiles()?.forEach { AtomicFiles.deleteWithCompanions(it) }
         } catch (e: Exception) {
             Log.w(TAG, "清空墨迹失败", e)
         }
@@ -175,7 +175,7 @@ class InkStore(private val dir: File) {
             if (files.size <= maxFiles) return
             files.sortedBy { it.name.removeSuffix(FILE_SUFFIX).toLongOrNull() ?: Long.MAX_VALUE }
                 .take(files.size - maxFiles)
-                .forEach { it.delete() }
+                .forEach { AtomicFiles.deleteWithCompanions(it) }
         } catch (e: Exception) {
             Log.w(TAG, "墨迹清理失败", e)
         }

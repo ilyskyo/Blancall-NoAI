@@ -7,7 +7,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import com.ilyskyo.blancall.ui.common.AppIcon
@@ -29,6 +28,7 @@ import com.ilyskyo.blancall.ui.handwriting.AnswerInputField
 import com.ilyskyo.blancall.ui.common.penTapToHandwriting
 import com.ilyskyo.blancall.ui.common.pressClick
 import com.ilyskyo.blancall.ui.theme.AppPrefs
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import com.ilyskyo.blancall.ui.viewmodel.BlankCountWarning
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
@@ -92,7 +92,7 @@ internal fun WordClozeContent(
                     Text(sentence.text, style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onBackground)
                 } else {
-                    GlassCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(16.dp)) {
+                    GlassCard(modifier = Modifier.fillMaxWidth(), shape = SmoothRoundedCornerShape(16.dp)) {
                         Column(Modifier.padding(12.dp)) {
                             Text(sentence.text, style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onBackground)
@@ -218,7 +218,7 @@ internal fun BlankCard(
                 onPenActivate?.invoke()
             }
             .then(if (activatable) Modifier.pressClick { onActivate?.invoke() } else Modifier),
-        shape = RoundedCornerShape(10.dp),
+        shape = SmoothRoundedCornerShape(10.dp),
         colors = CardDefaults.cardColors(
             containerColor = when {
                 isSubmitted && checkDetail?.result == AnswerChecker.Result.CORRECT -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
@@ -388,7 +388,7 @@ internal fun BlankCountWarningBanner(
 ) {
     GlassCard(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(10.dp),
+        shape = SmoothRoundedCornerShape(10.dp),
         containerColor = MaterialTheme.colorScheme.secondaryContainer,
         containerAlpha = 0.7f
     ) {

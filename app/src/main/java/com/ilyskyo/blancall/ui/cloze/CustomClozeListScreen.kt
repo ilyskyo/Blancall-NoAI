@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -59,6 +58,7 @@ import com.ilyskyo.blancall.ui.common.GlassMenuItem
 import com.ilyskyo.blancall.ui.common.rememberConfirmHaptic
 import com.ilyskyo.blancall.ui.common.PressTier
 import com.ilyskyo.blancall.ui.common.combinedPress
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -159,7 +159,7 @@ fun CustomClozeListScreen(
                             navController.navigate("custom_cloze_edit/$articleId")
                         }
                     },
-                    shape = RoundedCornerShape(10.dp)
+                    shape = SmoothRoundedCornerShape(10.dp)
                 ) {
                     Text(stringResource(com.ilyskyo.blancall.R.string.new_short))
                 }
@@ -197,7 +197,7 @@ fun CustomClozeListScreen(
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(SmoothRoundedCornerShape(12.dp))
                                 .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.06f))
                                 .combinedPress(
                                     tier = PressTier.Card,
@@ -223,7 +223,7 @@ fun CustomClozeListScreen(
                                             .fillMaxWidth()
                                             // 首张配置卡的锚点：长按菜单指引圈只圈第一张（圈整块列表等于没圈）
                                             .then(if (idx == 0) Modifier.coachAnchor(listAnchor) else Modifier)
-                                            .clip(RoundedCornerShape(12.dp))
+                                            .clip(SmoothRoundedCornerShape(12.dp))
                                             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
                                             .combinedPress(
                                                 tier = PressTier.Card,
@@ -318,7 +318,7 @@ fun CustomClozeListScreen(
                     value = renameText,
                     onValueChange = { renameText = it },
                     singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
+                    shape = SmoothRoundedCornerShape(10.dp),
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
                         unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)

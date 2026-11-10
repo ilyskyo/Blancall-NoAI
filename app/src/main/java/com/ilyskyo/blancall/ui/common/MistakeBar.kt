@@ -15,7 +15,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -35,6 +34,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.ilyskyo.blancall.R
 import com.ilyskyo.blancall.ui.theme.Macaron
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 
 /**
  * 错误类型分布条形图（公共组件）。
@@ -124,7 +124,7 @@ private fun MistakeRow(label: String, count: Int, total: Int, color: Color) {
             modifier = Modifier
                 .weight(1f)
                 .height(14.dp)
-                .clip(RoundedCornerShape(6.dp))
+                .clip(SmoothRoundedCornerShape(6.dp))
                 .background(MaterialTheme.colorScheme.surfaceVariant)
         ) {
             Box(

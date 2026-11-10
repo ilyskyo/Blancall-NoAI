@@ -17,7 +17,6 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items as gridItems
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -66,6 +65,7 @@ import com.ilyskyo.blancall.ui.common.StatItem
 import com.ilyskyo.blancall.ui.common.pressClick
 import com.ilyskyo.blancall.ui.handwriting.InkThumbnail
 import com.ilyskyo.blancall.ui.theme.AppPrefs
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import java.text.SimpleDateFormat
 import java.util.*
 import kotlinx.coroutines.Dispatchers
@@ -88,15 +88,24 @@ fun StatisticsScreen(navController: NavController, articleId: Long) {
     val studiedDays = remember(records) {
         records.mapTo(mutableSetOf()) { com.ilyskyo.blancall.algorithm.DayBucket.localDate(it.timestamp) }
     }
-    val streakDays = remember(studiedDays) {
-        com.ilyskyo.blancall.algorithm.DayBucket.consecutiveDays(studiedDays, java.time.LocalDate.now())
+    // 单篇页也要跨午夜换天：旧实现只在组合时读一次 LocalDate.now()，
+    // 停在页面上过零点后「今日/连续天数」仍是昨天的。
+    var todayKey by remember { mutableStateOf(java.time.LocalDate.now()) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            kotlinx.coroutines.delay(60_000)
+            todayKey = java.time.LocalDate.now()
+        }
+    }
+    val streakDays = remember(studiedDays, todayKey) {
+        com.ilyskyo.blancall.algorithm.DayBucket.consecutiveDays(studiedDays, todayKey)
     }
     val longestStreak = remember(studiedDays) {
         com.ilyskyo.blancall.algorithm.DayBucket.longestRun(studiedDays)
     }
 
     // ── 基础统计：单遍聚合（B1-1，口径与单测都在 StatsRepository）──
-    val stats = remember(records) { StatsRepository.aggregateArticle(records) }
+    val stats = remember(records, todayKey) { StatsRepository.aggregateArticle(records, todayKey) }
 
     // 该文章累计阅读时长（秒，沉浸阅读模式记录）
     val readingSeconds = remember(articleId) { AppPrefs.getReadingSeconds(articleId) }
@@ -270,7 +279,7 @@ fun StatisticsScreen(navController: NavController, articleId: Long) {
                 contentPadding = PaddingValues(bottom = 120.dp)
             ) {
         // ═══════ 统计总览卡片（仪表盘 + 连续天数 + 趋势） ═══════
-        item {
+        item(key = "stats_overview") {
             AnimatedStatCard {
                 GlassCard(
                     // 清新马卡龙：薰衣草淡彩卡面
@@ -340,7 +349,7 @@ fun StatisticsScreen(navController: NavController, articleId: Long) {
 
         // ═══════ 每日练习趋势 ═══════
         if (stats.totalPractices > 0) {
-            item {
+            item(key = "stats_trend") {
                 AnimatedStatCard {
                     GlassCard {
                         Column(Modifier.padding(16.dp)) {
@@ -357,7 +366,7 @@ fun StatisticsScreen(navController: NavController, articleId: Long) {
 
         // ═══════ 模式对比（含反向默写） ═══════
         if (stats.sentenceCount > 0 || stats.wordCount > 0 || stats.reverseCount > 0) {
-            item {
+            item(key = "stats_modes") {
                 AnimatedStatCard {
                     GlassCard {
                         Column(Modifier.padding(16.dp)) {
@@ -396,7 +405,7 @@ fun StatisticsScreen(navController: NavController, articleId: Long) {
 
         // ═══════ 错误类型分布 ═══════
         if (stats.totalMistakes > 0) {
-            item {
+            item(key = "stats_mistakes") {
                 AnimatedStatCard {
                     GlassCard {
                         Column(Modifier.padding(16.dp)) {
@@ -421,7 +430,7 @@ fun StatisticsScreen(navController: NavController, articleId: Long) {
         // ═══════ 记忆热力图 ═══════
         heatmapData?.let { heatmap ->
             if (heatmap.sentences.isNotEmpty()) {
-                item {
+                item(key = "stats_heatmap") {
                     AnimatedStatCard {
                         StatisticsHeatmapCard(heatmap)
                     }
@@ -431,7 +440,7 @@ fun StatisticsScreen(navController: NavController, articleId: Long) {
 
         // ═══════ 最常写错的句子（B3-1）═══════
         if (weakSentences.isNotEmpty()) {
-            item {
+            item(key = "stats_weak_sentences") {
                 AnimatedStatCard {
                     WeakSentencesCard(
                         rows = weakSentences,
@@ -448,7 +457,7 @@ fun StatisticsScreen(navController: NavController, articleId: Long) {
 
         // ═══════ 真实复习轨迹（复习日志的读取方）═══════
         reviewSeries?.let { series ->
-            item {
+            item(key = "stats_review_timeline") {
                 AnimatedStatCard {
                     ReviewTimelineCard(series = series)
                 }
@@ -456,7 +465,7 @@ fun StatisticsScreen(navController: NavController, articleId: Long) {
         }
 
         // ═══════ 练习历史标题 + 筛选 chips ═══════
-        item {
+        item(key = "stats_history_header") {
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -501,7 +510,7 @@ fun StatisticsScreen(navController: NavController, articleId: Long) {
 
         // ═══════ 记录列表 ═══════
         if (records.isEmpty()) {
-            item {
+            item(key = "stats_history_empty") {
                 GlassCard(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         stringResource(com.ilyskyo.blancall.R.string.no_practice_history),
@@ -512,7 +521,7 @@ fun StatisticsScreen(navController: NavController, articleId: Long) {
                 }
             }
         } else if (filteredRecords.isEmpty()) {
-            item {
+            item(key = "stats_history_filtered_empty") {
                 GlassCard(modifier = Modifier.fillMaxWidth()) {
                     Text(
                         stringResource(com.ilyskyo.blancall.R.string.no_records_in_mode),
@@ -599,7 +608,9 @@ fun StatisticsScreen(navController: NavController, articleId: Long) {
 // ── 卡片入场动画包装 ──
 @Composable
 private fun AnimatedStatCard(content: @Composable () -> Unit) {
-    var played by remember { mutableStateOf(false) }
+    // rememberSaveable：卡片滚出屏幕后 LazyColumn 会回收子树，普通 remember 会归零，
+    // 滚回来时整张卡重新淡入一遍（OverviewScreen 的同类卡片早已这样修过）。
+    var played by rememberSaveable { mutableStateOf(false) }
     LaunchedEffect(Unit) { played = true }
     val progress by animateFloatAsState(
         targetValue = if (played) 1f else 0f,
@@ -659,7 +670,7 @@ private fun ReviewTimelineCard(series: ReviewTimeline.Series) {
                     modifier = Modifier.weight(1f)
                 )
                 Surface(
-                    shape = RoundedCornerShape(6.dp),
+                    shape = SmoothRoundedCornerShape(6.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
                 ) {
                     Text(
@@ -780,7 +791,7 @@ private fun RecordCard(
         Column(Modifier.padding(14.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Surface(
-                    shape = RoundedCornerShape(6.dp),
+                    shape = SmoothRoundedCornerShape(6.dp),
                     color = Macaron.info().accent.copy(alpha = 0.15f)
                 ) {
                     Text(
@@ -840,7 +851,7 @@ private fun RecordCard(
                         val batches = inkByBlank[m.blankIndex]
                         if (!batches.isNullOrEmpty()) {
                             Surface(
-                                shape = RoundedCornerShape(6.dp),
+                                shape = SmoothRoundedCornerShape(6.dp),
                                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -1022,7 +1033,7 @@ private fun WeakSentenceRow(
         modifier = Modifier
             .fillMaxWidth()
             // 高亮底色只铺到这一行，且随 glow 淡回透明 —— 静态列表里只有变过的那行亮
-            .clip(RoundedCornerShape(8.dp))
+            .clip(SmoothRoundedCornerShape(8.dp))
             .background(accent.copy(alpha = 0.14f * glow))
             .pressClick { onDrill() }
             .padding(horizontal = 6.dp, vertical = 3.dp),
@@ -1122,14 +1133,14 @@ private fun StatisticsHeatmapCard(heatmap: MemoryHeatmap.HeatmapData) {
                                     .border(
                                         1.dp,
                                         MaterialTheme.colorScheme.outlineVariant,
-                                        RoundedCornerShape(2.dp)
+                                        SmoothRoundedCornerShape(2.dp)
                                     )
                             )
                         } else {
                             Box(
                                 modifier = Modifier
                                     .size(10.dp)
-                                    .background(color, RoundedCornerShape(2.dp))
+                                    .background(color, SmoothRoundedCornerShape(2.dp))
                             )
                         }
                         Spacer(Modifier.width(2.dp))
@@ -1176,7 +1187,7 @@ private fun StatisticsHeatmapCard(heatmap: MemoryHeatmap.HeatmapData) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .background(bgColor, RoundedCornerShape(6.dp))
+                        .background(bgColor, SmoothRoundedCornerShape(6.dp))
                         .padding(horizontal = 8.dp, vertical = 5.dp),
                     verticalAlignment = Alignment.Top
                 ) {
@@ -1185,7 +1196,7 @@ private fun StatisticsHeatmapCard(heatmap: MemoryHeatmap.HeatmapData) {
                             modifier = Modifier
                                 .width(3.dp)
                                 .heightIn(min = 18.dp)
-                                .background(sentence.heatColor, RoundedCornerShape(2.dp))
+                                .background(sentence.heatColor, SmoothRoundedCornerShape(2.dp))
                         )
                         Spacer(Modifier.width(8.dp))
                     }

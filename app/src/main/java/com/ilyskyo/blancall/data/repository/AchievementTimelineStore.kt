@@ -60,7 +60,12 @@ class AchievementTimelineStore private constructor(private val file: File) {
             }
             if (bak.exists()) {
                 try {
-                    cache = parse(JSONObject(bak.readText()))
+                    val root = JSONObject(bak.readText())
+                    val newer = StoreVersion.isFromNewerApp(root.optInt("version", 1), CURRENT_VERSION, TAG)
+                    cache = parse(root)
+                    // 备份可用且不是更高版本才复位；更高版本仍保持只读，
+                    // 否则本次进程序内新解锁的时间戳会以旧格式写回、抹掉新字段。
+                    loadFailed = newer
                     Log.w(TAG, "主文件不可用，已从备份恢复解锁时间戳")
                     return
                 } catch (_: Exception) {

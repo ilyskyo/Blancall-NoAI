@@ -25,7 +25,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -67,6 +66,7 @@ import com.ilyskyo.blancall.ui.common.PressTier
 import com.ilyskyo.blancall.ui.common.combinedPress
 import com.ilyskyo.blancall.ui.common.pressClick
 import com.ilyskyo.blancall.ui.theme.AppPrefs
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -187,7 +187,7 @@ fun MaskConfigListScreen(
                 )
                 Button(
                     onClick = onNew,
-                    shape = RoundedCornerShape(10.dp)
+                    shape = SmoothRoundedCornerShape(10.dp)
                 ) {
                     Text(stringResource(com.ilyskyo.blancall.R.string.new_short))
                 }
@@ -228,7 +228,7 @@ fun MaskConfigListScreen(
                             color = MaterialTheme.colorScheme.primary,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(12.dp))
+                                .clip(SmoothRoundedCornerShape(12.dp))
                                 .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.06f))
                                 .combinedPress(tier = PressTier.Card, onClick = onNew)
                                 .padding(16.dp)
@@ -248,7 +248,7 @@ fun MaskConfigListScreen(
                                             .fillMaxWidth()
                                             // 首张配置卡的锚点：指引圈只圈第一张（圈整块列表等于没圈）
                                             .then(if (idx == 0) Modifier.coachAnchor(listAnchor) else Modifier)
-                                            .clip(RoundedCornerShape(12.dp))
+                                            .clip(SmoothRoundedCornerShape(12.dp))
                                             .background(
                                                 if (inUse) MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
                                                 else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
@@ -283,7 +283,7 @@ fun MaskConfigListScreen(
                                             style = MaterialTheme.typography.labelMedium,
                                             color = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier
-                                                .clip(RoundedCornerShape(8.dp))
+                                                .clip(SmoothRoundedCornerShape(8.dp))
                                                 .pressClick { onEdit(cfg.id) }
                                                 .padding(horizontal = 10.dp, vertical = 6.dp)
                                         )
@@ -335,7 +335,7 @@ fun MaskConfigListScreen(
                     value = renameText,
                     onValueChange = { renameText = it },
                     singleLine = true,
-                    shape = RoundedCornerShape(10.dp),
+                    shape = SmoothRoundedCornerShape(10.dp),
                     colors = TextFieldDefaults.colors(
                         focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
                         unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
@@ -386,12 +386,14 @@ fun MaskConfigListScreen(
                     deleteTarget = null
                     scope.launch {
                         withContext(Dispatchers.IO) { store.deleteConfig(articleId, target.id) }
-                        // 删除「使用中」配置时同步清掉本文章的指向，文章详情页 custom 粒度自然回退为无遮挡
+                        // 删除「使用中」配置时同步清掉本文章的指向并关掉遮挡：
+                        // 只清 id 时 mode 仍是 custom，正文会回落成自动长遮挡（用户刚删掉
+                        // 自己标的配置，却得到满屏自动遮块），与「回退为无遮挡」的注释相反。
                         val prefsStore = ReaderPrefsStore.getInstance(context)
                         if (loadArticleReaderPrefs(prefsStore, articleId).occlusionCustomConfigId == target.id) {
                             withContext(Dispatchers.IO) {
                                 updateArticleReaderPrefs(prefsStore, articleId) {
-                                    it.copy(occlusionCustomConfigId = -1L)
+                                    it.copy(occlusionCustomConfigId = -1L, occlusionEnabled = false)
                                 }
                             }
                         }

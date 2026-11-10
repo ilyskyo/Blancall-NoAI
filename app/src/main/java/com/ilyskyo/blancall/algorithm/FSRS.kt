@@ -124,14 +124,22 @@ object FsrsEngine {
     }
 
     /**
-     * 复习模板 → 目标留存率映射（设置页「复习频率」控制 FSRS 复习强度）：
-     * - 冲刺备考：85%（间隔短，练得勤）
+     * 复习模板 → 目标留存率映射（设置页「复习频率」控制 FSRS 复习强度）。
+     *
+     * **方向别搞反**：FSRS 的间隔是 `S / factor * (R^(1/decay) - 1)`，decay 为负，
+     * 所以 **R 越低、间隔越长**。想让用户"练得勤"必须把 R 调**高**，不是调低。
+     *
+     * 旧实现是 `sprint = 0.85 / deep = 0.95`，注释却写"冲刺 85% 间隔短" ——
+     * 结果选「冲刺备考」（最需要高频复习的场景）的人拿到的是最长间隔，
+     * 选「深度长期」的反被高频轰炸。默认 standard 把这个问题盖住了。
+     *
+     * - 冲刺备考：95%（间隔短，练得勤）
      * - 标准记忆：90%（Anki 默认，均衡）
-     * - 深度长期：95%（间隔长，要求高留存）
+     * - 深度长期：85%（间隔长，容忍更低的到期留存）
      */
     fun retentionForTemplate(templateId: String): Double = when (templateId) {
-        "sprint" -> 0.85
-        "deep" -> 0.95
+        "sprint" -> 0.95
+        "deep" -> 0.85
         else -> DEFAULT_REQUEST_RETENTION // standard 及未知值
     }
 
@@ -155,9 +163,14 @@ object FsrsEngine {
         return kotlin.math.ceil(diffMs.toDouble() / MILLIS_PER_DAY).toInt()
     }
 
-    /** 该文章是否已到复习时间 */
+    /**
+     * 该卡是否已到复习时间。
+     *
+     * `due = 0` 是「没有下一次排期」（模板跑完、无排期的新卡），不是 1970 年到期；
+     * 所有到期清单、提醒、句级聚焦都必须共用这条边界，否则完成项会被重新拉回队列。
+     */
     fun isDue(state: CardState, now: Long = System.currentTimeMillis()): Boolean =
-        state.reviewCount > 0 && now >= state.due
+        state.reviewCount > 0 && state.due > 0L && now >= state.due
 
     /**
      * 练习后更新记忆状态（核心入口）。
@@ -175,7 +188,10 @@ object FsrsEngine {
             due = now + intervalDays * MILLIS_PER_DAY,
             lastReview = now,
             reviewCount = state.reviewCount + 1,
-            lapses = state.lapses + if (rating == Rating.AGAIN) 1 else 0
+            lapses = state.lapses + if (rating == Rating.AGAIN) 1 else 0,
+            // 旧实现漏了这个字段：句子卡先评级 → 再经挖空练习写同一句时，
+            // lastRating 被清空，回看句子卡时「所选评级」高亮消失。
+            lastRating = rating.name,
         )
     }
 
@@ -201,7 +217,11 @@ object FsrsEngine {
      * 两处各写一遍迟早会漂，而漂的是"用户看到的"和"实际排的"不一致，最难被发现。
      */
     private fun nextMemory(state: CardState, rating: Rating, now: Long): Pair<Double, Double> {
-        val isNew = state.reviewCount == 0 || state.stability <= 0.0
+        val isNew = state.reviewCount == 0 ||
+            state.stability <= 0.0 || !state.stability.isFinite() ||
+            // reviewCount>0 但 lastReview=0 的旧/外部状态：elapsedDays 会变成 ~20000 天，
+            // 直接走「遗忘后复习」把稳定性推到极大。按新卡处理更安全。
+            state.lastReview <= 0L
         return if (isNew) {
             initDifficulty(rating) to initStability(rating)
         } else {

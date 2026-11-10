@@ -840,11 +840,25 @@ object FileTextExtractor {
         if (utf8Bad == 0) return Charsets.UTF_8
         if (utf8Bad.toFloat() / sample.size < 0.01f) return Charsets.UTF_8
 
+        // Big5 提前试：Big5 的双字节全部落在 GB18030 合法区间，
+        // 先试 GB18030 再返回会把繁体文本整篇解成另一批汉字（不是 U+FFFD，用户看不出是编码问题）。
+        val big5 = tryDecode(sample, "Big5")
+        val big5Bad = big5?.count { it == '\uFFFD' } ?: Int.MAX_VALUE
+
         // ── 3. 试 GB18030（覆盖简繁中文） ──
         val gb18030 = tryDecode(sample, "GB18030")
         if (gb18030 != null) {
             val gbBad = gb18030.count { it == '\uFFFD' }
-            if (gbBad < utf8Bad) return Charset.forName("GB18030")
+            if (gbBad < utf8Bad) {
+                // 两种都「可解码」时按常用字命中数择优：Big5 文本被 GB18030 解码后
+                // 大多会变成生僻字/错字，常用字得分明显更低。
+                if (big5 != null && big5Bad == 0 &&
+                    commonCjkScore(big5) > commonCjkScore(gb18030)
+                ) {
+                    return Charset.forName("Big5")
+                }
+                return Charset.forName("GB18030")
+            }
             // 比较汉字覆盖率
             val gbCjk = gb18030.count { isCjk(it) }
             val utfCjk = utf8.count { isCjk(it) }
@@ -858,12 +872,8 @@ object FileTextExtractor {
             if (gbkBad < utf8Bad) return Charset.forName("GBK")
         }
 
-        // ── 5. 试 Big5（繁体中文） ──
-        val big5 = tryDecode(sample, "Big5")
-        if (big5 != null) {
-            val big5Bad = big5.count { it == '\uFFFD' }
-            if (big5Bad == 0) return Charset.forName("Big5")
-        }
+        // ── 5. Big5 已在第 3 步与 GB18030 交叉评分；这里只兜底 ──
+        if (big5 != null && big5Bad == 0) return Charset.forName("Big5")
 
         // ── 6. 兜底 UTF-8 ──
         return Charsets.UTF_8
@@ -893,6 +903,11 @@ object FileTextExtractor {
             null
         }
     }
+
+    /** 常用汉字集：只用于「两种编码都能解码」时的择优，不参与正常路径。 */
+    private val COMMON_CJK = "\u7684\u4e00\u662f\u4e0d\u4e86\u4eba\u6211\u5728\u6709\u4ed6\u8fd9\u4e3a\u4e4b\u5927\u6765\u4ee5\u4e2a\u4e2d\u4e0a\u4eec\u5230\u8bf4\u56fd\u548c\u5730\u4e5f\u5b50\u65f6\u9053\u51fa\u800c\u8981\u4e8e\u5c31\u4e0b\u5f97\u53ef\u4f60\u5e74\u751f\u81ea\u4f1a\u90a3\u540e\u80fd\u5bf9\u7740\u4e8b\u5176\u91cc\u6240\u53bb\u884c\u8fc7\u5bb6\u5341\u7528\u53d1\u5929\u5982\u7136\u4f5c\u65b9\u6210\u8005\u591a\u65e5\u90fd\u4e09\u5c0f\u519b\u4e8c\u65e0\u540c\u4e48\u7ecf\u6cd5\u5f53\u8d77\u4e0e\u597d\u770b\u5b66\u8fdb\u79cd\u5c06\u8fd8\u5206\u6b64\u5fc3\u524d\u9762\u53c8\u5b9a\u89c1\u53ea\u4e3b\u6ca1\u516c\u4ece" // 常用汉字（转义写，避免硬编码中文棘轮）
+
+    private fun commonCjkScore(text: String): Int = text.count { it in COMMON_CJK }
 
     private fun isCjk(c: Char): Boolean {
         return c in '\u4e00'..'\u9fff' || // CJK Unified Ideographs

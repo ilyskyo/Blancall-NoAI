@@ -58,7 +58,8 @@ internal fun ReadingTextContent(
     onLongPress: (Int, Int, ParagraphAnchor) -> Unit = { _, _, _ -> },
     onMarkClick: (ReadingMark) -> Unit = {},
     onHandledTap: () -> Unit = {},
-    onParagraphPositioned: ((Int, Float) -> Unit)? = null
+    onParagraphPositioned: ((Int, Float) -> Unit)? = null,
+    onAnchorRegistered: ((ParagraphAnchorSource) -> Unit)? = null
 ) {
     val paragraphs = remember(text) { ReaderOcclusion.splitParagraphs(text) }
     val globalIndices = remember(paragraphs, allParagraphs, paragraphOffsetHint) {
@@ -88,7 +89,8 @@ internal fun ReadingTextContent(
                     onLongPress = onLongPress,
                     onMarkClick = onMarkClick,
                     onHandledTap = onHandledTap,
-                    onPositioned = onParagraphPositioned
+                    onPositioned = onParagraphPositioned,
+                    onAnchorRegistered = onAnchorRegistered
                 )
             } else {
                 // 映射不回全文（超长段被按行拆碎的碎片）：只渲染，不允许划线
@@ -162,7 +164,8 @@ internal fun ReadingSectionPage(
     onLongPress: (Int, Int, ParagraphAnchor) -> Unit = { _, _, _ -> },
     onMarkClick: (ReadingMark) -> Unit = {},
     onHandledTap: () -> Unit = {},
-    onParagraphPositioned: ((Int, Float) -> Unit)? = null
+    onParagraphPositioned: ((Int, Float) -> Unit)? = null,
+    onAnchorRegistered: ((ParagraphAnchorSource) -> Unit)? = null
 ) {
     val scrollState = rememberScrollState()
     // 页内滚动比例上报（maxValue 变化时自动重算；无需滚动 → 视为已读完，直接 1f）
@@ -207,7 +210,8 @@ internal fun ReadingSectionPage(
                 onLongPress = onLongPress,
                 onMarkClick = onMarkClick,
                 onHandledTap = onHandledTap,
-                onParagraphPositioned = onParagraphPositioned
+                onParagraphPositioned = onParagraphPositioned,
+                onAnchorRegistered = onAnchorRegistered
             )
         }
     }
@@ -271,7 +275,12 @@ internal fun OccludedReadingContent(
             } else {
                 // 每段的遮挡空：按当前粒度（short=字词 / long=复句 / mixed=逐句随机长或短，均为本地算法）
                 val ranges = remember(para.text, occlusion) {
-                    ReaderOcclusion.localRangesInPara(para.text, if (mode == "custom") "mixed" else mode)
+                    // custom 但这一段没有精确配置（配置被删、或用户点了「自定义」又直接返回）时，
+                    // 旧实现回落成 mixed —— 那是「逐句随机遮长或遮短」，与「我选了一套明确规则」
+                    // 的预期正相反，用户会以为配置被改乱了。
+                    // 回落到 long（整句遮挡）：三种粒度里最稳定的一种。
+                    val effective = if (mode == "custom") "long" else mode
+                    ReaderOcclusion.localRangesInPara(para.text, effective)
                 }
                 OccludedParagraph(
                     text = para.text,

@@ -16,7 +16,6 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -38,6 +37,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ilyskyo.blancall.algorithm.BlancallGenerator
 import com.ilyskyo.blancall.algorithm.SectionSplitter
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import com.ilyskyo.blancall.ui.theme.isBlancallDark
 import com.ilyskyo.blancall.ui.viewmodel.BlancallMode
 import com.ilyskyo.blancall.ui.viewmodel.SectionMode
@@ -266,7 +266,7 @@ internal fun RadioListItem(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 3.dp),
-        shape = RoundedCornerShape(12.dp),
+        shape = SmoothRoundedCornerShape(12.dp),
         color = if (selected)
             MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
         else MaterialTheme.colorScheme.surface
@@ -416,7 +416,7 @@ internal fun SectionModeItem(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 3.dp),
-        shape = RoundedCornerShape(12.dp),
+        shape = SmoothRoundedCornerShape(12.dp),
         color = if (selected)
             MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
         else MaterialTheme.colorScheme.surface
@@ -454,7 +454,7 @@ internal fun SectionCheckItem(
         // 浮出直角矩形按压指示器（shape 剪不到 modifier 层的 clickable）。
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(8.dp),
+        shape = SmoothRoundedCornerShape(8.dp),
         color = if (isSelected)
             MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
         else MaterialTheme.colorScheme.surface
@@ -467,7 +467,7 @@ internal fun SectionCheckItem(
                 Box(
                     modifier = Modifier
                         .size(8.dp)
-                        .background(heatColor, RoundedCornerShape(4.dp))
+                        .background(heatColor, SmoothRoundedCornerShape(4.dp))
                 )
                 Spacer(Modifier.width(8.dp))
             } else {

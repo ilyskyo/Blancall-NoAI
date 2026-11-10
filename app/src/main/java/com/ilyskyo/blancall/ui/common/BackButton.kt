@@ -62,9 +62,12 @@ fun BackButton(
         animationSpec = Motion.press(),
         label = "backButtonLift",
     )
-    Surface(
+    // 视觉仍是 40dp 的圆盘，但**触控区扩到 48dp**（平台最小可点尺寸）：
+    // 旧实现把 clickable 挂在 40dp 上，单手拇指点外圈 4dp 环带没有反应，
+    // TalkBack 的焦点框也只有 40dp。
+    Box(
         modifier = modifier
-            .size(40.dp)
+            .size(48.dp)
             .pressFeedback(
                 src,
                 PressTier.Icon,
@@ -72,26 +75,27 @@ fun BackButton(
                 dimOnPress = false,
                 hapticTier = HapticTier.Toggle,
             )
-            // 这里**不能**再加 .clip(CircleShape)：clip 挂在 Surface 外面会把 Surface
-            // 自己画的 elevation 投影裁掉（投影画在圆的外侧），结果是白页面上白圆盘
-            // 完全没有边界 —— 看着就像一颗裸箭头。v7.2.4 没有这层 clip 所以是好的；
-            // 内容裁圆交给下面 shape = CircleShape 自己做，够用。
             .clickable(interactionSource = src, indication = null, onClick = onClick)
             .semantics { contentDescription = backLabel },
-        shape = CircleShape,
-        color = if (dark) Color.White.copy(alpha = 0.14f) else Color.White,
-        shadowElevation = if (dark) 0.dp else lift.dp,
+        contentAlignment = Alignment.Center,
     ) {
-        Box(
-            modifier = Modifier.fillMaxSize(),
-            contentAlignment = Alignment.Center
+        Surface(
+            modifier = Modifier.size(40.dp),
+            shape = CircleShape,
+            color = if (dark) Color.White.copy(alpha = 0.14f) else Color.White,
+            shadowElevation = if (dark) 0.dp else lift.dp,
         ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = null,
-                tint = if (dark) Color.White else Color.Black,
-                modifier = Modifier.size(20.dp)
-            )
+            Box(
+                modifier = Modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = null,
+                    tint = if (dark) Color.White else Color.Black,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
         }
     }
 }

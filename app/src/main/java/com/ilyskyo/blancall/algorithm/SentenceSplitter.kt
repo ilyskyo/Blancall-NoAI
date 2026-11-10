@@ -106,7 +106,13 @@ object SentenceSplitter {
         if (RIGHT_PAIRED_CHARS.contains(ch)) {
             var p = index - 1
             while (p >= 0 && RIGHT_PAIRED_CHARS.contains(text[p])) p--
-            if (p >= 0 && STRONG_SENTENCE_END.contains(text[p])) {
+            // 英文句点 + 收尾引号（`He said "I am fine." Then...`）：
+            // 句点是强收句信号，但必须先排除缩写/小数，否则 `etc."` 会被误切。
+            val closesSentence = p >= 0 && (
+                STRONG_SENTENCE_END.contains(text[p]) ||
+                    (text[p] == '.' && !isAbbreviationOrDecimal(text, p))
+                )
+            if (closesSentence) {
                 val nextIndex = index + 1
                 if (nextIndex < text.length && RIGHT_PAIRED_CHARS.contains(text[nextIndex])) {
                     return false  // 链路未到末尾，延后切分

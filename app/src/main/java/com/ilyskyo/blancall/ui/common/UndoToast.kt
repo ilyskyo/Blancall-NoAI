@@ -26,9 +26,10 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 
 /** 浮条圆角：与卡片同一族的「大圆角」，但因为面积小，视觉上是一条胶囊。 */
-private val ToastShape = RoundedCornerShape(16.dp)
+private val ToastShape = SmoothRoundedCornerShape(16.dp)
 
 /**
  * 底部浮条：报告刚才发生了什么，并在可撤销时把「撤销」摆在伸手就够得着的地方。

@@ -13,7 +13,6 @@ import androidx.compose.animation.scaleOut
 import androidx.compose.animation.core.Animatable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -31,6 +30,7 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavController
 import androidx.navigation.NavOptionsBuilder
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 
 /**
  * 触点为源的页面展开转场。
@@ -278,7 +278,7 @@ fun RevealPageShell(entryId: String, content: @Composable () -> Unit) {
         modifier = Modifier
             .fillMaxSize()
             .graphicsLayer {
-                shape = RoundedCornerShape(radiusDp.value.dp)
+                shape = SmoothRoundedCornerShape(radiusDp.value.dp)
                 clip = true
             }
     ) {

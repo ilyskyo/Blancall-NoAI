@@ -122,7 +122,10 @@ object SectionSplitter {
             val contentOnly = contentLines.joinToString("\n")
             val sectionText = if (heading != null) "$heading\n$contentOnly" else contentOnly
 
-            val sentenceCount = SentenceSplitter.split(contentOnly).size.coerceAtLeast(1)
+            // 句数必须按「含标题的整段」计数：标题行在全文切句里独立成句，
+            // 旧实现只数 contentOnly，导致后面每个 startSentenceIndex 少 1，
+            // 薄弱集训按错误率选段时会整体错位到相邻段。
+            val sentenceCount = SentenceSplitter.split(sectionText).size.coerceAtLeast(1)
 
             val section = Section(
                 index = sections.size,

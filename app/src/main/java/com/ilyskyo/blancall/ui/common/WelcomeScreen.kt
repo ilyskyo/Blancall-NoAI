@@ -10,7 +10,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -29,6 +28,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ilyskyo.blancall.R
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -138,7 +138,7 @@ fun WelcomeScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(50.dp),
-                shape = RoundedCornerShape(14.dp)
+                shape = SmoothRoundedCornerShape(14.dp)
             ) {
                 Text(stringResource(com.ilyskyo.blancall.R.string.continue_action), style = MaterialTheme.typography.titleMedium)
             }
@@ -173,7 +173,7 @@ fun WelcomeScreen(
     if (showDonateDialog) {
         BlancallAlertDialog(
             onDismissRequest = { showDonateDialog = false },
-            shape = RoundedCornerShape(28.dp),
+            shape = SmoothRoundedCornerShape(28.dp),
             containerColor = MaterialTheme.colorScheme.surface,
             title = {
                 Text(stringResource(com.ilyskyo.blancall.R.string.welcome_donation_title),
@@ -210,7 +210,7 @@ fun WelcomeScreen(
     if (showLegalDialog) {
         BlancallAlertDialog(
             onDismissRequest = { showLegalDialog = false },
-            shape = RoundedCornerShape(28.dp),
+            shape = SmoothRoundedCornerShape(28.dp),
             containerColor = MaterialTheme.colorScheme.surface,
             title = {
                 Column(Modifier.padding(top = 4.dp)) {
@@ -230,7 +230,7 @@ fun WelcomeScreen(
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp))
+                            .clip(SmoothRoundedCornerShape(16.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
                             .heightIn(max = 420.dp)
                             .verticalScroll(rememberScrollState())

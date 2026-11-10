@@ -150,12 +150,15 @@ object CsvExporter {
 
     /** CSV 字段转义：含逗号/引号/换行/CN 字符时用双引号包裹，内部引号转义为两个 */
     private fun escape(field: String): String {
-        return if (field.contains(',') || field.contains('"') ||
-            field.contains('\n') || field.contains('\r')
+        // 防公式注入：Excel/WPS 会把 = + - @ 开头的单元格当公式执行。
+        // 前置单引号是电子表格的「按文本」标记；导入侧会剥掉它。
+        val safe = if (field.isNotEmpty() && field[0] in "=+-@\t\r") "'$field" else field
+        return if (safe.contains(',') || safe.contains('"') ||
+            safe.contains('\n') || safe.contains('\r')
         ) {
-            "\"" + field.replace("\"", "\"\"") + "\""
+            "\"" + safe.replace("\"", "\"\"") + "\""
         } else {
-            field
+            safe
         }
     }
 

@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -31,6 +30,7 @@ import com.ilyskyo.blancall.algorithm.ColorOps
 import com.ilyskyo.blancall.algorithm.TagOps
 import com.ilyskyo.blancall.data.model.Tag
 import com.ilyskyo.blancall.ui.common.GlassModalBottomSheet
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 
 /**
  * 标签编辑面板（新建 / 编辑共用）：名称输入 + [TagColorPicker]（色环 + 套装）+ 保存。
@@ -89,7 +89,7 @@ fun TagEditorSheet(
                 } else {
                     null
                 },
-                shape = RoundedCornerShape(10.dp),
+                shape = SmoothRoundedCornerShape(10.dp),
             )
 
             Spacer(Modifier.height(14.dp))

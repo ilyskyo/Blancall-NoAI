@@ -6,6 +6,16 @@
         <item name="android:navigationBarColor">@color/background_dark</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowBackground">@color/background_dark</item>
+        <!-- values-night 的 Theme.Blancall 是独立定义，不会继承 values 那份：
+             Activity 窗口动画与对话框主题都要在这里再写一遍。 -->
+        <item name="android:windowAnimationStyle">@style/BlancallWindowAnimationNone</item>
+        <item name="android:dialogTheme">@style/Theme.Blancall.Dialog</item>
+    </style>
+
+    <!-- 与 values/themes.xml 的对话框主题同义，只差深浅色基底 -->
+    <style name="Theme.Blancall.Dialog" parent="@android:style/Theme.Material.Dialog">
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:dialogTheme">@style/Theme.Blancall.Dialog</item>
     </style>
 
 </resources>

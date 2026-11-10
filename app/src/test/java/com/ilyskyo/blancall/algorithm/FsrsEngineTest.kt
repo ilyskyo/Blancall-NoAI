@@ -67,6 +67,15 @@ class FsrsEngineTest {
     }
 
     @Test
+    fun `due 为零表示没有下次排期而不是到期`() {
+        val completed = FsrsEngine.CardState(reviewCount = 3, due = 0L, lastReview = now - day)
+        val scheduled = FsrsEngine.CardState(reviewCount = 1, due = now - 1L, lastReview = now - day)
+
+        assertTrue(!FsrsEngine.isDue(completed, now))
+        assertTrue(FsrsEngine.isDue(scheduled, now))
+    }
+
+    @Test
     fun `gradeFromSimilarity 满分轻松零分忘记`() {
         assertEquals(FsrsEngine.Rating.EASY, FsrsEngine.gradeFromSimilarity(1.0f))
         assertEquals(FsrsEngine.Rating.AGAIN, FsrsEngine.gradeFromSimilarity(0.0f))

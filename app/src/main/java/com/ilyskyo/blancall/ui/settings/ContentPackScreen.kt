@@ -463,7 +463,7 @@ internal suspend fun buildPackBatchItems(
         repo.allArticles.first().mapTo(HashSet()) { ContentFingerprint.md5Hex(it.content) }
     }.getOrElse { HashSet() }
     return pack.entries.mapIndexedNotNull { index, meta ->
-        val body = store.readEntry(pack.id, index) ?: return@mapIndexedNotNull null
+        val body = store.readEntry(pack, index) ?: return@mapIndexedNotNull null
         BatchImportItem(
             key = index.toString(),
             title = meta.title,
@@ -494,24 +494,25 @@ internal suspend fun importPackSelection(
     var imported = 0
     var skipped = 0
     val articleIds = mutableListOf<Long>()
+    val toInsert = mutableListOf<Article>()
     indices.sorted().forEach { index ->
         val meta = pack.entries.getOrNull(index)
-        val body = store.readEntry(pack.id, index)
+        val body = store.readEntry(pack, index)
         if (meta == null || body == null) {
             skipped++
         } else if (!existingHashes.add(ContentFingerprint.md5Hex(body))) {
             skipped++
         } else {
-            val newId = runCatching {
-                repo.insert(Article(title = meta.title, content = body, author = meta.author))
-            }.getOrNull()
-            if (newId != null) {
-                imported++
-                articleIds += newId
-            } else {
-                skipped++
-            }
+            toInsert += Article(title = meta.title, content = body, author = meta.author)
         }
+    }
+    if (toInsert.isNotEmpty()) {
+        val newIds = runCatching { repo.insertAll(toInsert) }.getOrElse { emptyList() }
+        imported += newIds.size
+        articleIds += newIds
+        // 批量插入是一次整库写盘；失败时整批不回滚内存之外的部分，
+        // 用返回数量如实计算 skipped（调用方只拿它做 Toast，不会误报成功）。
+        skipped += toInsert.size - newIds.size
     }
     return BatchImportResult(imported, skipped, articleIds)
 }

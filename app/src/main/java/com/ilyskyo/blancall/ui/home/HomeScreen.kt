@@ -11,12 +11,12 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import com.ilyskyo.blancall.ui.theme.isBlancallDark
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.animation.AnimatedVisibility
@@ -64,9 +64,12 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
+import kotlin.math.abs
+import kotlin.math.cos
+import kotlin.math.sin
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -153,6 +156,13 @@ fun HomeScreen(
 ) {
     val articleViewModel: ArticleViewModel = viewModel()
     val articles by articleViewModel.articles.collectAsState()
+    // 文章库异步读盘：就绪前 articles 恒为空，不能把它当成真实空态（否则冷启动
+    // 会闪「没有文章/没有句子」，句子卡还会把用户送到导入页）。
+    var articlesReady by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) {
+        articleViewModel.awaitLoaded()
+        articlesReady = true
+    }
     val context = LocalContext.current
     val recordRepo = remember { RecordRepository.getInstance(context.filesDir.resolve("records.json").absolutePath) }
     val allRecords by recordRepo.records.collectAsState()
@@ -308,10 +318,15 @@ fun HomeScreen(
     //  ② 先 awaitLoaded() 再比对——记录是异步读盘的，先见空列表再变真实值，直接比对会把历史练习当成「刚做完」。
     LaunchedEffect(Unit) {
         recordRepo.awaitLoaded()
-        if (homeCards.any { it.type == HomeLayoutStore.CardType.STATS }) return@LaunchedEffect
         val practices = recordRepo.records.value.size
         val baseline = AppPrefs.statsPopupBaseline()
-        if (baseline >= 0 && practices > baseline) showStatsPopup = true
+        // 有 STATS 卡时只是不展示，但基线必须继续推进：
+        // 旧实现直接 return，用户练 5 次后删掉 STATS 卡，会立刻误弹「刚练完」。
+        if (!homeCards.any { it.type == HomeLayoutStore.CardType.STATS } &&
+            baseline >= 0 && practices > baseline
+        ) {
+            showStatsPopup = true
+        }
         AppPrefs.setStatsPopupBaseline(practices)
     }
     // 已有「学习数据」卡片（信息已在首页常驻）/ 进入编辑态：收起弹窗
@@ -339,10 +354,8 @@ fun HomeScreen(
     val tagData by tagStore.data.collectAsState()
     // 首帧 priming：TagStore 的内存快照初始为空，首页不读盘就永远不显示标签
     // （设置/搜索/句子卡都会自行 priming，首页原先漏了这一步）。
-    LaunchedEffect(Unit) {
-        withContext(Dispatchers.IO) { tagStore.snapshot() }
-    }
-    // 首次进入 priming：IO 读盘 → 发布 StateFlow（跨页面改动即时反映）
+    // 只读一次：这里原本并排写了两条同样的 LaunchedEffect，第二次读盘的结果发布时
+    // 会让 chipTagsByArticle 整张表重建、首页跟着重组一遍。
     LaunchedEffect(Unit) { withContext(Dispatchers.IO) { tagStore.snapshot() } }
     val chipTagsByArticle = remember(tagData) {
         TagOps.tagsByArticle(tagData).mapValues { (_, list) -> list.toChipUis() }
@@ -437,9 +450,11 @@ fun HomeScreen(
     }
 
     // 静态部分按数据变化重算；分钟 tick 只重跑时间相关计数（不在 tick 里重扫记录）
+    // sentenceStates 必须在 key 里：它是独立的 mutableState，body 直接读它算计划。
+    // 漏掉它时，句子卡评完返回首页，prepared 不会重算 —— 「今天要练的任务」还挂着刚练过的句子。
     val prepared = remember(
         articles, allRecords, fsrsStates, fsrsEnrolled, pauses, reviewTemplate,
-        rawResumables, sentenceUi?.key,
+        rawResumables, sentenceUi?.key, sentenceStates,
     ) {
         StudyCoach.prepare(
             StudyCoach.Source(
@@ -507,7 +522,7 @@ fun HomeScreen(
     AnimatedOverlayPresence(visible = showSaveSuccessDialog) {
         BlancallAlertDialog(
             onDismissRequest = { showSaveSuccessDialog = false },
-            shape = RoundedCornerShape(28.dp),
+            shape = SmoothRoundedCornerShape(28.dp),
             textBottomSpacing = 0.dp,
             title = {
                 Row(
@@ -518,9 +533,9 @@ fun HomeScreen(
                     Box(
                         modifier = Modifier
                             .size(40.dp)
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(SmoothRoundedCornerShape(12.dp))
                             .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f))
-                            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), RoundedCornerShape(12.dp)),
+                            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), SmoothRoundedCornerShape(12.dp)),
                         contentAlignment = Alignment.Center
                     ) {
                         AppIcon(
@@ -573,7 +588,7 @@ fun HomeScreen(
                                 showModePicker = true
                             },
                             modifier = Modifier.weight(1f).height(48.dp),
-                            shape = RoundedCornerShape(14.dp)
+                            shape = SmoothRoundedCornerShape(14.dp)
                         ) {
                             Text(stringResource(com.ilyskyo.blancall.R.string.reader_start_practice))
                         }
@@ -584,7 +599,7 @@ fun HomeScreen(
                                 navController.navigate("import")
                             },
                             modifier = Modifier.weight(1f).height(48.dp),
-                            shape = RoundedCornerShape(14.dp)
+                            shape = SmoothRoundedCornerShape(14.dp)
                         ) {
                             Text(stringResource(com.ilyskyo.blancall.R.string.continue_import))
                         }
@@ -901,7 +916,9 @@ fun HomeScreen(
                             onOpenSentenceCard = { anchor ->
                                 // 空态把用户直接送到真正能解决它的地方：
                                 // 没文章 → 导入；全暂停 → 任务流恢复；其余 → 句子卡空态会解释范围。
+                                // articlesReady 之前不响应：加载中不是「没文章」。
                                 when {
+                                    !articlesReady -> Unit
                                     sentenceUi == null && articles.isEmpty() ->
                                         navController.navigate("import")
                                     sentenceUi == null && allArticlesPaused ->
@@ -1053,7 +1070,7 @@ fun HomeScreen(
                     .widthIn(max = 600.dp)
                     .fillMaxWidth()
                     .height(50.dp),
-                shape = RoundedCornerShape(16.dp),
+                shape = SmoothRoundedCornerShape(16.dp),
                 elevation = ButtonDefaults.buttonElevation(defaultElevation = 8.dp),
             ) {
                 // 系统黑体（SansSerif）：主操作按钮，不用主题的楷体/衬线体
@@ -1193,7 +1210,13 @@ fun HomeScreen(
         visible = showModePicker,
         // Rect.Zero = 无有效锚点 → 传 null 走屏幕中心伪锚点（居中弹出）
         anchorRect = practiceButtonRect.takeIf { it != Rect.Zero },
-        onDismiss = { showModePicker = false },
+        onDismiss = {
+            showModePicker = false
+            // 关闭后要停掉行锚点上报：anchorFromButton 若一直为 true，
+            // 滚动时 onGloballyPositioned 会逐帧写 practiceButtonRect，整页卡片跟着重组。
+            anchorFromButton = false
+            practiceButtonRect = Rect.Zero
+        },
         onModeSelected = { sel ->
             showModePicker = false
             if (pendingPracticeArticleId > 0) {
@@ -1209,8 +1232,8 @@ fun HomeScreen(
 }
 
 /**
- * 首页搜索栏：磨砂玻璃质感，点击进入搜索页；右侧「添加」按钮直达导入。
- * 常驻显示，不随下拉折叠；实测「添加」宽度上报给品牌栏「设置」按钮等宽对齐。
+ * 首页搜索栏：磨砂玻璃质感，点击进入搜索页；右侧为设置入口。
+ * 常驻显示，不随下拉折叠。
  */
 @Composable
 private fun HomeSearchBar(
@@ -1221,7 +1244,7 @@ private fun HomeSearchBar(
     val isDark = isBlancallDark()
     val bgAlpha = if (isDark) GLASS_ALPHA_DARK else GLASS_ALPHA_LIGHT
     val container = MaterialTheme.colorScheme.surface.copy(alpha = bgAlpha)
-    val shape = RoundedCornerShape(14.dp)
+    val shape = SmoothRoundedCornerShape(14.dp)
 
     Row(
         modifier = modifier.fillMaxWidth(),
@@ -1231,7 +1254,7 @@ private fun HomeSearchBar(
         Box(
             modifier = Modifier
                 .weight(1f)
-                .height(46.dp)
+                .height(48.dp)
                 .clip(shape)
                 .border(0.5.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f), shape)
                 .background(container)
@@ -1257,15 +1280,16 @@ private fun HomeSearchBar(
             }
         }
         Spacer(Modifier.width(10.dp))
-        // 设置按钮（占据原「添加」键的位置与尺寸）：点击进入设置页。
+        // 设置按钮：正方形 48dp（与搜索框同高，且满足图标按钮 48dp 触控口径）。
         // 首页不再有「添加」键——添加卡片由画布「＋」卡片承接。
         // 同上：semantics {} 里不能调 stringResource，先取好
         val settingsLabel = stringResource(com.ilyskyo.blancall.R.string.settings)
         GlassButton(
             onClick = { onSettings() },
             modifier = Modifier
-                .height(46.dp)
-                .semantics { contentDescription = settingsLabel }
+                .size(48.dp)
+                .semantics { contentDescription = settingsLabel },
+            contentPadding = PaddingValues(0.dp)
         ) {
             SettingsGearIcon(color = MaterialTheme.colorScheme.onSurface)
         }
@@ -1274,51 +1298,60 @@ private fun HomeSearchBar(
 
 
 /**
- * 自绘设置齿轮图标（Canvas 矢量绘制，遵循主流设计系统规范）：
- * - 描边：2px 基准（18dp 图标取 1.5dp），线段末端直角（Butt）
- * - 圆角：齿外端 1px 圆角、根部直角（"外柔内刚"）
- * - 角度：8 齿 45° 间隔（15° 倍数，与栅格 45° 辅助线平行）
- * 几何居中，规避文本字形（emoji）在不同设备的渲染偏移。
+ * 自绘设置齿轮图标（22dp、圆滑线框）：
+ * - 8 齿，齿顶/齿根各留一段圆弧，中间用 smoothstep 平滑过渡——整条轮廓没有
+ *   一个直角，小尺寸下也不会出现锯齿轮廓；
+ * - 描边 1.5dp、圆角连接，和 Logo / 手写笔同一套线描边语言；
+ * - 中心孔半径 3.0，孔大、线细，48dp 方钮里仍然轻盈。
  */
 @Composable
 private fun SettingsGearIcon(color: Color, modifier: Modifier = Modifier) {
-    Canvas(modifier = modifier.size(14.dp)) {
+    Canvas(modifier = modifier.size(22.dp)) {
+        val sc = size.minDimension / 24f          // 24 单位设计网格 → dp
         val c = center
-        val stroke = 1.4.dp.toPx()                    // 描边宽度（14dp 尺寸等比）
-        val radius = size.minDimension * 0.38f        // 环半径（描边中心线）
-        val toothW = 2.9.dp.toPx()                    // 齿宽
-        val toothH = radius * 0.42f                    // 齿长（从环外缘伸出）
-        val teeth = 8                                 // 45° 间隔
-        val toothRadius = 0.9.dp.toPx()                // 齿外端圆角（外柔内刚：外圆内方）
+        val teeth = 8
+        val period = 360f / teeth
+        val tipRadius = 9.3f * sc
+        val rootRadius = 7.3f * sc
+        val tipHalf = 9.5f                        // 齿顶圆弧半角
+        val rootHalf = 15.5f                      // 齿根圆弧半角
 
-        // 齿：Path 绘制，外端 1px 圆角、根部直角
-        for (i in 0 until teeth) {
-            rotate(degrees = (360f / teeth) * i, pivot = c) {
-                val x0 = c.x - toothW / 2f
-                val x1 = c.x + toothW / 2f
-                val yTop = c.y - radius - stroke / 2f - toothH   // 外端
-                val yBottom = c.y - radius - stroke / 2f         // 根部（环外缘）
-                val path = Path().apply {
-                    moveTo(x0, yBottom)
-                    lineTo(x0, yTop + toothRadius)
-                    quadraticTo(x0, yTop, x0 + toothRadius, yTop)
-                    lineTo(x1 - toothRadius, yTop)
-                    quadraticTo(x1, yTop, x1, yTop + toothRadius)
-                    lineTo(x1, yBottom)
-                    close()
-                }
-                drawPath(path, color)
+        fun smoothstep(t: Float): Float {
+            val x = t.coerceIn(0f, 1f)
+            return x * x * (3f - 2f * x)
+        }
+
+        fun radiusAt(deg: Float): Float {
+            val offset = ((deg + period / 2f) % period) - period / 2f
+            val u = abs(offset)
+            return when {
+                u <= tipHalf -> tipRadius
+                u >= rootHalf -> rootRadius
+                else -> tipRadius + (rootRadius - tipRadius) *
+                    smoothstep((u - tipHalf) / (rootHalf - tipHalf))
             }
         }
-        // 环：直角线段末端（Butt），规范描边
-        drawCircle(
-            color = color,
-            radius = radius,
-            center = c,
-            style = Stroke(width = stroke, cap = StrokeCap.Butt)
+
+        // 按 1.5° 采样闭合轮廓：smoothstep 在齿顶、齿根两端导数都为 0，
+        // 采样点之间不会有肉眼可见的折角
+        val steps = 240
+        val path = Path()
+        for (i in 0..steps) {
+            val deg = i * 360f / steps
+            val rad = Math.toRadians((deg - 90f).toDouble())
+            val r = radiusAt(deg)
+            val x = c.x + (r * cos(rad)).toFloat()
+            val y = c.y + (r * sin(rad)).toFloat()
+            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+        }
+        path.close()
+        val stroke = Stroke(
+            width = 1.5f * sc,
+            cap = StrokeCap.Round,
+            join = StrokeJoin.Round
         )
-        // 中心轴点
-        drawCircle(color = color, radius = 1.1.dp.toPx(), center = c)
+        drawPath(path, color = color, style = stroke)
+        drawCircle(color = color, radius = 3.0f * sc, center = c, style = stroke)
     }
 }
 
@@ -1497,7 +1530,7 @@ private fun HomeArticlePickRow(
             // 整行宽的条目**只压暗、不缩放**（PressTier.Plain）：一整行缩 3% 会同时离开
             // 左右两侧边距，读起来像布局错位。涟漪关掉，焦点/悬停由 pressFeedback 补回。
             .pressFeedback(rowSrc, PressTier.Plain)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(SmoothRoundedCornerShape(12.dp))
             .clickable(
                 interactionSource = rowSrc,
                 indication = null,
@@ -1547,7 +1580,7 @@ private fun HomeAddCardRow(label: String, desc: String, onClick: () -> Unit) {
             .fillMaxWidth()
             // 与上方「加入学习」行同一档：整行宽只压暗，不缩放；涟漪换成 pressFeedback。
             .pressFeedback(rowSrc, PressTier.Plain)
-            .clip(RoundedCornerShape(12.dp))
+            .clip(SmoothRoundedCornerShape(12.dp))
             .clickable(interactionSource = rowSrc, indication = null, onClick = onClick)
             .padding(horizontal = 4.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -1720,7 +1753,7 @@ private fun StatsPopupCard(
 ) {
     GlassCard(
         modifier = modifier,
-        shape = RoundedCornerShape(22.dp),
+        shape = SmoothRoundedCornerShape(22.dp),
         containerColor = MaterialTheme.colorScheme.surface,
         onClick = onViewDetails,
     ) {
@@ -1791,7 +1824,7 @@ private fun StatsPopupCard(
                     .fillMaxWidth()
                     .padding(end = 6.dp)
                     .height(44.dp),
-                shape = RoundedCornerShape(14.dp)
+                shape = SmoothRoundedCornerShape(14.dp)
             ) {
                 Text(stringResource(com.ilyskyo.blancall.R.string.view_details), style = MaterialTheme.typography.labelLarge)
             }

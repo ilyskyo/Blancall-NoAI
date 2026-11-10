@@ -28,7 +28,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.MaterialTheme
@@ -81,6 +80,7 @@ import com.ilyskyo.blancall.ui.common.HapticTier
 import com.ilyskyo.blancall.ui.common.rememberHaptic
 import com.ilyskyo.blancall.ui.common.PressTier
 import com.ilyskyo.blancall.ui.common.combinedPress
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -493,7 +493,7 @@ fun CustomClozeEditScreen(
                     },
                     // 未选任何挖空时置灰（无可保存内容）
                     enabled = article != null && blankCount > 0,
-                    shape = RoundedCornerShape(10.dp)
+                    shape = SmoothRoundedCornerShape(10.dp)
                 ) {
                     Text(stringResource(com.ilyskyo.blancall.R.string.save))
                 }
@@ -513,7 +513,7 @@ fun CustomClozeEditScreen(
                     color = MaterialTheme.colorScheme.onErrorContainer,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(SmoothRoundedCornerShape(10.dp))
                         .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f))
                         .padding(horizontal = 12.dp, vertical = 8.dp)
                 )
@@ -643,7 +643,7 @@ fun CustomClozeEditScreen(
                         onValueChange = { savedName = it },
                         singleLine = true,
                         placeholder = { Text(stringResource(com.ilyskyo.blancall.R.string.custom)) },
-                        shape = RoundedCornerShape(10.dp),
+                        shape = SmoothRoundedCornerShape(10.dp),
                         colors = TextFieldDefaults.colors(
                             focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
                             unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
@@ -788,7 +788,7 @@ private fun SentenceEditCard(
     Column(
         modifier = modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
+            .clip(SmoothRoundedCornerShape(12.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
             .padding(12.dp)
     ) {
@@ -829,7 +829,7 @@ private fun SentenceEditCard(
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onPrimary,
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(4.dp))
+                                    .clip(SmoothRoundedCornerShape(4.dp))
                                     .background(MaterialTheme.colorScheme.primary)
                                     .padding(horizontal = 4.dp, vertical = 1.dp)
                             )
@@ -839,7 +839,7 @@ private fun SentenceEditCard(
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier
-                                    .clip(RoundedCornerShape(6.dp))
+                                    .clip(SmoothRoundedCornerShape(6.dp))
                                     .combinedPress(tier = PressTier.Icon, onClick = { onToggle(token.range) })
                                     .padding(horizontal = 2.dp, vertical = 4.dp)
                             )
@@ -854,7 +854,7 @@ private fun SentenceEditCard(
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
+                                .clip(SmoothRoundedCornerShape(10.dp))
                                 .background(MaterialTheme.colorScheme.surfaceVariant)
                                 .combinedPress(tier = PressTier.Card, onClick = { onToggle(token.range) })
                                 .padding(10.dp)
@@ -864,12 +864,12 @@ private fun SentenceEditCard(
                     selectedNow -> {
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
+                                .clip(SmoothRoundedCornerShape(6.dp))
                                 .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.14f))
                                 .border(
                                     1.dp,
                                     MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
-                                    RoundedCornerShape(6.dp)
+                                    SmoothRoundedCornerShape(6.dp)
                                 )
                                 .combinedPress(tier = PressTier.Icon, onClick = { onToggle(token.range) }, onLongClick = { confirmHaptic(); onExplode() })
                                 .padding(horizontal = 8.dp, vertical = 4.dp),
@@ -891,7 +891,7 @@ private fun SentenceEditCard(
                             lineHeight = 20.sp,
                             color = MaterialTheme.colorScheme.onSurface,
                             modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
+                                .clip(SmoothRoundedCornerShape(6.dp))
                                 .combinedPress(
                                     tier = PressTier.Icon,
                                     onClick = { onToggle(token.range) },

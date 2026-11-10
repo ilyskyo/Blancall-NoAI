@@ -19,9 +19,15 @@ class ArticleRepository(filePath: String) {
 
     suspend fun insert(article: Article): Long = storage.insert(article)
 
+    /** 批量插入：一次整库写盘，供内容包/批量导入使用。 */
+    suspend fun insertAll(articles: List<Article>): List<Long> = storage.insertAll(articles)
+
     suspend fun update(article: Article) = storage.update(article)
 
     suspend fun delete(article: Article) = storage.delete(article)
+
+    /** 批量删除：一次整库写盘，供多选删除使用。 */
+    suspend fun deleteAll(ids: Set<Long>) = storage.deleteAll(ids)
 
     /** 备份导入后重载（B1-3）：转发到底层存储；等待首载并串行化写盘 */
     suspend fun reload() = storage.reload()

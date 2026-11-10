@@ -24,6 +24,7 @@ import com.ilyskyo.blancall.ui.common.MotionFade
 import com.ilyskyo.blancall.ui.common.stateSwap
 import androidx.compose.ui.input.pointer.util.VelocityTracker
 import androidx.compose.ui.platform.LocalDensity
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import kotlin.math.abs
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -31,7 +32,6 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -75,6 +75,7 @@ import com.ilyskyo.blancall.algorithm.AnswerChecker
 import com.ilyskyo.blancall.algorithm.BlancallGenerator
 import com.ilyskyo.blancall.data.repository.CustomClozeStore
 import com.ilyskyo.blancall.data.repository.OneShotCloze
+import com.ilyskyo.blancall.data.repository.ReviewSource
 import com.ilyskyo.blancall.ui.theme.AppPrefs
 import com.ilyskyo.blancall.ui.common.BackButton
 import com.ilyskyo.blancall.ui.common.CoachMark
@@ -117,6 +118,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
     val resumed by vm.resumed.collectAsStateWithLifecycle()
     val loadFailed by vm.loadFailed.collectAsStateWithLifecycle()
     val totalBlanks by vm.totalBlanks.collectAsStateWithLifecycle()
+    val dueCoverage by vm.dueCoverage.collectAsStateWithLifecycle()
 
     // 这两个值来自导航参数，而不是 Composable 形参：
     // 9 个形参 + 默认值会触发当前 Compose 编译器生成一段被 ART 拒绝的字节码
@@ -124,6 +126,9 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
     // 读取既避开该缺陷，也让 cross/practice 两条路由共用同一个入口。
     val launchOneShotToken = navController.currentBackStackEntry?.arguments?.getLong("oneShot") ?: 0L
     val launchBudgetMinutes = navController.currentBackStackEntry?.arguments?.getInt("budget") ?: 0
+    // 使用引导进入时，模式选择卡上补一句「先选模式、再拖标题」：刚进来时标题还不可拖，
+    // 不说明的话用户会以为引导说错了
+    val guideHint = navController.currentBackStackEntry?.arguments?.getBoolean("guide") ?: false
 
     val wordBlankCount by vm.wordBlankCount.collectAsStateWithLifecycle()
 
@@ -217,8 +222,11 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
         // 两条来源共用同一段应用逻辑：
         // - configId：落盘的长期配置（自定义挖空列表进入）；
         // - oneShot：遮挡转练 / 错题只练这一批生成的一次性快照（内存，进程死亡即失效）。
+        var oneShotSource = ReviewSource.OTHER
         val cfg = if (launchOneShotToken > 0L) {
-            OneShotCloze.take(articleId, launchOneShotToken)?.config
+            val pending = OneShotCloze.take(articleId, launchOneShotToken)
+            oneShotSource = pending?.source ?: ReviewSource.OTHER
+            pending?.config
         } else if (initialConfigId > 0L) {
             // 配置读取放 IO 线程；按 (articleId, configId) 双键精确读取（不跨文章串篇）
             withContext(Dispatchers.IO) {
@@ -229,7 +237,8 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
             null
         }
         if (cfg != null) {
-            if (vm.startCustomPractice(cfg)) {
+            val source = if (launchOneShotToken > 0L) oneShotSource else ReviewSource.CUSTOM_CLOZE
+            if (vm.startCustomPractice(cfg, source)) {
                 modeSelected = true
             } else {
                 // 配置与当前文章内容不匹配（文章被修改变短等）：已自动回退随机生成，仅提示
@@ -325,6 +334,12 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
     }
     val filledCount by remember(userAnswers) {
         derivedStateOf { userAnswers.values.count { it.isNotBlank() } }
+    }
+    val reverseTypedChars by remember(dictationInput) {
+        derivedStateOf { dictationInput.count { !it.isWhitespace() } }
+    }
+    val reverseExpectedChars by remember(dictationResult) {
+        derivedStateOf { dictationResult?.clauses?.sumOf { c -> c.count { !it.isWhitespace() } } ?: 0 }
     }
     val showHint by vm.showHint.collectAsStateWithLifecycle()
     val hintPreview = stringResource(
@@ -799,7 +814,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
         if (isCrossMode && crossArticleTitles.size > 1) {
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(8.dp),
+                shape = SmoothRoundedCornerShape(8.dp),
                 color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.5f)
             ) {
                 Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
@@ -829,17 +844,21 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
         }
 
         // ── 进度条（沉浸模式下隐藏；未选好模式时不显示，避免提前出现填空进度）──
-        if (!immersiveMode && !isSubmitted && modeSelected && totalBlanks > 0) {
+        if (!immersiveMode && !isSubmitted && modeSelected &&
+            (if (mode == BlancallMode.REVERSE) reverseExpectedChars > 0 else totalBlanks > 0)
+        ) {
+            val progressFilled = if (mode == BlancallMode.REVERSE) reverseTypedChars else filledCount
+            val progressTotal = if (mode == BlancallMode.REVERSE) reverseExpectedChars else totalBlanks
             Row(Modifier.fillMaxWidth().padding(vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                 LinearProgressIndicator(
-                    progress = { filledCount.toFloat() / totalBlanks },
+                    progress = { if (progressTotal > 0) progressFilled.toFloat() / progressTotal else 0f },
                     modifier = Modifier.weight(1f).height(6.dp),
                     color = MaterialTheme.colorScheme.primary,
                     trackColor = MaterialTheme.colorScheme.surfaceVariant,
                 )
                 Spacer(Modifier.width(10.dp))
                 Text(
-                    "${filledCount}/${totalBlanks}",
+                    "$progressFilled/$progressTotal",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = FontWeight.Medium
@@ -927,6 +946,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                     when (currentMode) {
                         BlancallMode.SENTENCE -> SentenceClozeContent(
                             blancall = sentenceCloze,
+                            showBlankLength = hintLength,
                             showPunctuationHints = hintPunctuation,
                             userAnswers = userAnswers,
                             checkResults = checkResults,
@@ -935,6 +955,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                             crossSourceInfo = crossSourceInfo,
                             weakHints = weakHintCount,
                             strongHints = strongHintCount,
+                            coverage = dueCoverage,
                             onViewArticleData = viewArticleData,
                             onBlankFocus = { vm.ensureHintTimer(it) },
                             onAnswerChange = { i, a -> vm.updateAnswer(i, a) },
@@ -1013,7 +1034,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
         ) {
             GlassCard(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(24.dp),
+                shape = SmoothRoundedCornerShape(24.dp),
                 // 浮层叠在内容页上，用菜单级不透明度，避免底层文字透出影响可读性
                 containerColor = MaterialTheme.colorScheme.surface,
                 containerAlpha = if (isBlancallDark()) GLASS_ALPHA_DARK else GLASS_MENU_ALPHA_LIGHT
@@ -1079,6 +1100,15 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                                     onClick = { showCrossCustomSheet = true }
                                 )
                             }
+                        }
+
+                        if (guideHint) {
+                            Spacer(Modifier.height(12.dp))
+                            Text(
+                                stringResource(com.ilyskyo.blancall.R.string.guide_practice_pick_hint),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
                         }
                     }
             }

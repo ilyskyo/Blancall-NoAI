@@ -6,6 +6,7 @@ package com.ilyskyo.blancall.ui.import
 import com.ilyskyo.blancall.ui.common.FadeDialogWindow
 import com.ilyskyo.blancall.ui.common.AnimatedOverlayPresence
 import android.net.Uri
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import java.io.File
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -21,7 +22,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -194,9 +194,13 @@ fun ImportScreen(navController: NavController) {
                     lastFileAutoIndent = isAutoIndentFile(pickedName)
                     previewFileUri = if (isPreviewableFile(pickedName)) it else null
                     errorMessage = null
-                } catch (e: Exception) {
-                    val reason = (e as? com.ilyskyo.blancall.util.FileExtractException)
-                        ?.messageFor(context) ?: e.message.orEmpty()
+                } catch (t: Throwable) {
+                    // OutOfMemoryError 是 Error，不是 Exception：旧 catch 直接漏过 → 进程崩溃。
+                    // 解析大 PDF/TXT 时把 OOME 归入「文件过大/读取失败」的可读提示。
+                    if (t is kotlinx.coroutines.CancellationException) throw t
+                    val reason = (t as? com.ilyskyo.blancall.util.FileExtractException)
+                        ?.messageFor(context)
+                        ?: t.message.orEmpty().ifBlank { t.javaClass.simpleName }
                     errorMessage = resources.getString(
                         com.ilyskyo.blancall.R.string.import_read_failed, reason
                     )
@@ -253,7 +257,7 @@ fun ImportScreen(navController: NavController) {
                 selected = !useFileImport,
                 onClick = { useFileImport = false; fileLoaded = false; lastFileAutoIndent = true; imageNotice = null },
                 label = { Text(stringResource(com.ilyskyo.blancall.R.string.paste_text)) },
-                shape = RoundedCornerShape(8.dp),
+                shape = SmoothRoundedCornerShape(8.dp),
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
                     selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -263,7 +267,7 @@ fun ImportScreen(navController: NavController) {
                 selected = useFileImport,
                 onClick = { useFileImport = true; fileLoaded = false },
                 label = { Text(stringResource(com.ilyskyo.blancall.R.string.file_import)) },
-                shape = RoundedCornerShape(8.dp),
+                shape = SmoothRoundedCornerShape(8.dp),
                 colors = FilterChipDefaults.filterChipColors(
                     selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
                     selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
@@ -330,7 +334,7 @@ fun ImportScreen(navController: NavController) {
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
                 keyboardActions = KeyboardActions(onNext = { authorFocusRequester.requestFocus() }),
-                shape = RoundedCornerShape(10.dp),
+                shape = SmoothRoundedCornerShape(10.dp),
                 colors = OutlinedTextFieldDefaults.colors(
                     focusedBorderColor = highlightFocusedBorderColor,
                     unfocusedBorderColor = highlightBorderColor,
@@ -352,7 +356,7 @@ fun ImportScreen(navController: NavController) {
                     // 粘贴文本模式下跳到内容框；文件导入模式下无内容框，忽略
                     if (!useFileImport) contentFocusRequester.requestFocus()
                 }),
-                shape = RoundedCornerShape(10.dp)
+                shape = SmoothRoundedCornerShape(10.dp)
             )
         }
 
@@ -363,11 +367,11 @@ fun ImportScreen(navController: NavController) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(10.dp))
+                .clip(SmoothRoundedCornerShape(10.dp))
                 .border(
                     1.dp,
                     MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                    RoundedCornerShape(10.dp),
+                    SmoothRoundedCornerShape(10.dp),
                 )
                 .pressClick { showTagSheet = true }
                 .padding(horizontal = 12.dp, vertical = 10.dp),
@@ -410,7 +414,7 @@ fun ImportScreen(navController: NavController) {
             Button(
                 onClick = { filePickerLauncher.launch(arrayOf("*/*")) },
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(10.dp),
+                shape = SmoothRoundedCornerShape(10.dp),
                 enabled = !isLoading
             ) {
                 if (isLoading) {
@@ -428,7 +432,7 @@ fun ImportScreen(navController: NavController) {
                 Spacer(modifier = Modifier.height(12.dp))
                 Card(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp),
+                    shape = SmoothRoundedCornerShape(10.dp),
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
                     )
@@ -528,7 +532,7 @@ fun ImportScreen(navController: NavController) {
                 onClick = { handleSaveClick(openClozeEditor = false) },
                 modifier = Modifier.weight(1f),
                 enabled = !isSaving,
-                shape = RoundedCornerShape(10.dp)
+                shape = SmoothRoundedCornerShape(10.dp)
             ) {
                 Text(stringResource(com.ilyskyo.blancall.R.string.save_only))
             }
@@ -536,7 +540,7 @@ fun ImportScreen(navController: NavController) {
                 onClick = { handleSaveClick(openClozeEditor = true) },
                 modifier = Modifier.weight(1f),
                 enabled = !isSaving,
-                shape = RoundedCornerShape(10.dp)
+                shape = SmoothRoundedCornerShape(10.dp)
             ) {
                 Text(stringResource(com.ilyskyo.blancall.R.string.save_and_cloze))
             }
@@ -563,16 +567,16 @@ fun ImportScreen(navController: NavController) {
                 showTitleSuggestionDialog = false
                 titleSuggestionDismissed = true
             },
-            shape = RoundedCornerShape(28.dp),
+            shape = SmoothRoundedCornerShape(28.dp),
             title = {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     // 标题图标
                     Box(
                         modifier = Modifier
                             .size(40.dp)
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(SmoothRoundedCornerShape(12.dp))
                             .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f))
-                            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), RoundedCornerShape(12.dp)),
+                            .border(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.15f), SmoothRoundedCornerShape(12.dp)),
                         contentAlignment = Alignment.Center
                     ) {
                         Text("📝", fontSize = 22.sp)
@@ -596,7 +600,7 @@ fun ImportScreen(navController: NavController) {
                     // 第一行预览：高亮容器内展示
                     Surface(
                         modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = SmoothRoundedCornerShape(12.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
                     ) {
                         Text(
@@ -618,7 +622,7 @@ fun ImportScreen(navController: NavController) {
                         isSaving = true
                         scope.launch { saveAndExit(firstLine, content.trim(), author.trim(), pendingOpenClozeEditor) }
                     },
-                    shape = RoundedCornerShape(14.dp)
+                    shape = SmoothRoundedCornerShape(14.dp)
                 ) {
                     Text(stringResource(com.ilyskyo.blancall.R.string.use_first_line))
                 }

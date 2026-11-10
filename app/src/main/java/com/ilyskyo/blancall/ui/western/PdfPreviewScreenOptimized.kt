@@ -24,10 +24,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.HorizontalDivider
-import androidx.compose.material3.Icon as M3Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -57,6 +54,7 @@ import com.ilyskyo.blancall.ui.common.GlassMenuDivider
 import com.ilyskyo.blancall.ui.common.GlassMenuItem
 import com.ilyskyo.blancall.ui.reader.TextContentReader
 import com.ilyskyo.blancall.ui.theme.AppPrefs
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import com.ilyskyo.blancall.util.FileTextExtractor
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -100,8 +98,11 @@ fun PdfPreviewScreenOptimized(
 
     // 解析为可读文件：已存在的绝对路径直接用，否则视为 assets 内资源并复制到缓存。
     // 高考 60 篇：单篇 pN.pdf 已合并为完整 PDF，按篇目序号定位起始页
+    // 只有素材库的相对路径才带「第 N 篇」语义；用户导入的 PDF 是缓存绝对路径，
+    // 文件名里的 p12/chap2 不能拿去套高考起始页，也不该出现上一篇/下一篇。
     val pageNum = remember(asset) {
-        Regex("p(\\d+)").find(asset)?.groupValues?.get(1)?.toIntOrNull()
+        if (asset.startsWith("/") || asset.contains("://")) null
+        else Regex("p(\\d+)").find(asset)?.groupValues?.get(1)?.toIntOrNull()
     }
     // 仅 PDF 走原版渲染（PdfRenderer）；其余可预览格式（DOCX / DOC / TXT / EPUB / HTML / RTF / MD）
     // 统一提取全文作文本预览——本地无版式渲染能力，内容完整可读
@@ -192,8 +193,10 @@ fun PdfPreviewScreenOptimized(
         val r = renderer
         val p = pdfPfd
         onDispose {
-            r?.close()
-            p?.close()
+            // 每步都 runCatching：close 会在「还有页没关」时抛异常（API ≤34），
+            // 而这里是主线程的 onDispose —— 抛出来就是闪退，且用户只是「退出预览」。
+            runCatching { r?.close() }
+            runCatching { p?.close() }
         }
     }
 
@@ -263,10 +266,11 @@ fun PdfPreviewScreenOptimized(
             if (textLoaded != null || textPages.isNotEmpty()) {
                 Box {
                     IconButton(onClick = { showMenu = true }) {
-                        M3Icon(
-                            imageVector = Icons.Filled.MoreVert,
-                            contentDescription = stringResource(com.ilyskyo.blancall.R.string.more),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                        AppIcon(
+                            kind = AppIconKind.MoreVert,
+                            modifier = Modifier.size(22.dp),
+                            tint = MaterialTheme.colorScheme.onSurface,
+                            contentDescription = stringResource(com.ilyskyo.blancall.R.string.more)
                         )
                     }
                     GlassDropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
@@ -388,14 +392,14 @@ fun PdfPreviewScreenOptimized(
                 OutlinedButton(
                     onClick = { prevAsset?.let { openSiblingPdf(it) } },
                     enabled = prevAsset != null,
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)
+                    shape = SmoothRoundedCornerShape(10.dp)
                 ) {
                     Text(stringResource(com.ilyskyo.blancall.R.string.pdf_prev))
                 }
                 OutlinedButton(
                     onClick = { nextAsset?.let { openSiblingPdf(it) } },
                     enabled = nextAsset != null,
-                    shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)
+                    shape = SmoothRoundedCornerShape(10.dp)
                 ) {
                     Text(stringResource(com.ilyskyo.blancall.R.string.pdf_next))
                 }

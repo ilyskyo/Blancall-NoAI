@@ -128,10 +128,12 @@ object AppPrefs {
     val hintContentEnabledFlow: StateFlow<Boolean> = _hintContentEnabledFlow.asStateFlow()
 
     /**
-     * 「标点提示」：把空内被挖去的标点（逗号、顿号等）按原样显示，默认关。
-     * 分句结构本身也是背诵内容；只有记不清「这一空是一句还是两句」时才需要打开。
+     * 「标点提示」：把空内被挖去的标点（逗号、顿号等）按原样显示，默认开。
+     * 默认开的原因：空可能被挖成一大段，空内不给标点就连
+     * 「这一空是一句还是五句」都看不出来，等于把断句也一起交给运气。
+     * 标点不是要默写的字，照原样显示不泄露任何答案；想要更硬的难度可在提示设置里关掉。
      */
-    private val _hintPunctuationEnabledFlow = MutableStateFlow(false)
+    private val _hintPunctuationEnabledFlow = MutableStateFlow(true)
     val hintPunctuationEnabledFlow: StateFlow<Boolean> = _hintPunctuationEnabledFlow.asStateFlow()
 
     /**
@@ -239,7 +241,7 @@ object AppPrefs {
             prefs.getFloat("sentence_tap_exit_speed", Motion.TAP_EXIT_DEFAULT_SPEED).coerceIn(0f, 1f)
         _hintLengthEnabledFlow.value = prefs.getBoolean("hint_length_enabled", true)
         _hintContentEnabledFlow.value = prefs.getBoolean("hint_content_enabled", true)
-        _hintPunctuationEnabledFlow.value = prefs.getBoolean("hint_punctuation_enabled", false)
+        _hintPunctuationEnabledFlow.value = prefs.getBoolean("hint_punctuation_enabled", true)
         _coachSeenFlow.value = prefs.getStringSet("coach_seen", emptySet()) ?: emptySet()
         _readingFontFlow.value = prefs.getFloat("reading_font", 17f).coerceIn(14f, 36f)
         _readingLineHeightFlow.value = prefs.getFloat("reading_line_height", 2.0f).coerceIn(1.4f, 2.4f)
@@ -361,9 +363,9 @@ object AppPrefs {
             }
         }
 
-    /** 空内被挖去的标点是否按原样显示（默认关） */
+    /** 空内被挖去的标点是否按原样显示（默认开） */
     var hintPunctuationEnabled: Boolean
-        get() = if (::prefs.isInitialized) prefs.getBoolean("hint_punctuation_enabled", false) else false
+        get() = if (::prefs.isInitialized) prefs.getBoolean("hint_punctuation_enabled", true) else false
         set(value) {
             if (::prefs.isInitialized) {
                 prefs.edit { putBoolean("hint_punctuation_enabled", value) }
@@ -375,6 +377,15 @@ object AppPrefs {
     fun markCoachSeen(key: String) {
         if (!::prefs.isInitialized) return
         val next = _coachSeenFlow.value + key
+        prefs.edit { putStringSet("coach_seen", next) }
+        _coachSeenFlow.value = next
+    }
+
+    /** 单条重播：把某条指引重新标为未看过，供「使用引导」逐条现场演示 */
+    fun unmarkCoachSeen(key: String) {
+        if (!::prefs.isInitialized) return
+        if (key !in _coachSeenFlow.value) return
+        val next = _coachSeenFlow.value - key
         prefs.edit { putStringSet("coach_seen", next) }
         _coachSeenFlow.value = next
     }
@@ -728,6 +739,15 @@ object AppPrefs {
     fun addReadingSeconds(articleId: Long, seconds: Long) {
         if (::prefs.isInitialized && seconds > 0) {
             prefs.edit { putLong("reading_sec_${articleId}", getReadingSeconds(articleId) + seconds) }
+        }
+    }
+
+    /** 删除某篇文章的阅读位置与累计时长（删除文章/文章 id 即将复用时调用）。 */
+    fun clearArticleReadingState(articleId: Long) {
+        if (!::prefs.isInitialized) return
+        prefs.edit {
+            remove("reading_pos_$articleId")
+            remove("reading_sec_$articleId")
         }
     }
 

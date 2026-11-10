@@ -46,6 +46,7 @@ import androidx.compose.material3.SheetValue
 import com.ilyskyo.blancall.ui.common.GlassSwitch
 import com.ilyskyo.blancall.ui.common.pressClick
 import com.ilyskyo.blancall.ui.theme.Macaron
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -236,7 +237,7 @@ internal fun ReadingSettingsSheet(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(SmoothRoundedCornerShape(14.dp))
                     .pressClick { fontsExpanded = !fontsExpanded }
                     .padding(vertical = 10.dp),
                 verticalAlignment = Alignment.CenterVertically
@@ -407,7 +408,7 @@ internal fun ReadingSettingsSheet(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
+                            .clip(SmoothRoundedCornerShape(12.dp))
                             .pressClick {
                                 importLauncher.launch(
                                     arrayOf("font/ttf", "font/otf", "application/x-font-ttf", "application/octet-stream")
@@ -525,7 +526,7 @@ internal fun ReadingSettingsSheet(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(SmoothRoundedCornerShape(14.dp))
                     .padding(vertical = 4.dp, horizontal = 4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -615,7 +616,7 @@ internal fun ReadingSettingsSheet(
                             },
                             colors = FilterChipDefaults.filterChipColors(
                                 containerColor = when {
-                                    customActive && isDark -> Color(0x334B5563)
+                                    customActive && isDark -> accent.copy(alpha = 0.18f)
                                     customActive -> accent.copy(alpha = 0.12f)
                                     else -> Color.Transparent
                                 },
@@ -668,7 +669,7 @@ internal fun ReadingSettingsSheet(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(SmoothRoundedCornerShape(14.dp))
                     // 一条都没有时也打开列表：空态里写着「长按正文即可划线」，
                     // 点一下什么都没发生（面板还关了）才是真困惑
                     .pressClick { onOpenMarks() }
@@ -704,7 +705,7 @@ internal fun ReadingSettingsSheet(
             Column(
                 Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(14.dp))
+                    .clip(SmoothRoundedCornerShape(14.dp))
                     .padding(vertical = 10.dp, horizontal = 2.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -741,7 +742,7 @@ internal fun ReadingSettingsSheet(
                     if (speedSampleSeconds > 0L) {
                         Box(
                             modifier = Modifier
-                                .clip(RoundedCornerShape(8.dp))
+                                .clip(SmoothRoundedCornerShape(8.dp))
                                 .pressClick { onResetSpeed() }
                                 .padding(horizontal = 6.dp, vertical = 2.dp)
                         ) {
@@ -778,7 +779,7 @@ internal fun FontPickerRow(
             // 选项行是整行宽 → 只压暗不缩（PressTier.Plain）；
             // 选中那格的 accent 底色由 background 画在本修饰符之后，所以淡出能盖住它。
             .pressFeedback(optionSrc, PressTier.Plain)
-            .clip(RoundedCornerShape(10.dp))
+            .clip(SmoothRoundedCornerShape(10.dp))
             .background(if (selected) accent.copy(alpha = 0.10f) else Color.Transparent)
             .clickable(interactionSource = optionSrc, indication = null, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 11.dp),

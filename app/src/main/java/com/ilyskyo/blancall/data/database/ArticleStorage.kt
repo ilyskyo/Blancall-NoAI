@@ -25,6 +25,11 @@ import java.util.concurrent.CountDownLatch
 class ArticleStorage(private val filePath: String) {
 
     private var nextId = 1L
+    // 单调 id 游标：只靠 maxId+1 时，删掉最大 id 的文章、重启后再新建会复用旧 id，
+    // 旧划线/阅读位置/记录等以 id 为键的数据就会挂到新文章上。
+    // 游标单独落盘，删除文章也不会回退。
+    private val idCursorFile = File(File(filePath).parentFile, "article_id_seq")
+    private var idCursor = 0L
     private val _articles = MutableStateFlow<List<Article>>(emptyList())
     private val fileMutex = Mutex()
     // 内存状态读改写锁，保证 insert/update/delete 的读改写整体原子，避免并发互相覆盖
@@ -35,6 +40,7 @@ class ArticleStorage(private val filePath: String) {
     val articles: Flow<List<Article>> = _articles.asStateFlow()
 
     init {
+        idCursor = readIdCursor()
         // 异步加载，避免冷启动阻塞 UI 线程；加载完成后释放门闩
         Thread {
             try {
@@ -157,6 +163,15 @@ class ArticleStorage(private val filePath: String) {
         }
     }
 
+    private fun readIdCursor(): Long =
+        runCatching { idCursorFile.readText().trim().toLong() }.getOrDefault(0L)
+
+    private fun persistIdCursor() {
+        runCatching {
+            AtomicFiles.writeTextAtomic(idCursorFile, idCursor.toString())
+        }.onFailure { Log.w("ArticleStorage", "id cursor save failed", it) }
+    }
+
     private fun loadFromFile(
         clearWhenMissing: Boolean = false,
         allowBackupRecovery: Boolean = true,
@@ -185,7 +200,7 @@ class ArticleStorage(private val filePath: String) {
             val (loaded, maxId, migrated) = parseArticles(jsonStr)
             synchronized(stateLock) {
                 _articles.value = loaded
-                nextId = maxId.coerceAtLeast(0) + 1
+                nextId = maxOf(maxId.coerceAtLeast(0), idCursor) + 1
             }
             return migrated
         } catch (e: Exception) {
@@ -203,7 +218,7 @@ class ArticleStorage(private val filePath: String) {
                         val (loaded, maxId, migrated) = parseArticles(bakStr)
                         synchronized(stateLock) {
                             _articles.value = loaded
-                            nextId = maxId.coerceAtLeast(0) + 1
+                            nextId = maxOf(maxId.coerceAtLeast(0), idCursor) + 1
                         }
                         Log.w("ArticleStorage", "已从备份文件恢复 ${loaded.size} 篇文章")
                         return migrated
@@ -256,18 +271,37 @@ class ArticleStorage(private val filePath: String) {
         return _articles.value.find { it.id == id }
     }
 
-    suspend fun insert(article: Article): Long {
+    suspend fun insert(article: Article): Long =
+        insertAll(listOf(article)).first()
+
+    /**
+     * 批量插入：只做一次整库序列化 + 一次落盘。
+     *
+     * 内容包/批量导入逐条调 [insert] 时，每篇都要全量 JSON + fsync + `.bak` 轮换，
+     * 200–500 篇会放大成数百次全量写盘。这里在同一个 fileMutex 内分配 id、
+     * 只拼一次内存列表、只写一次文件；返回与输入同序的 id。
+     */
+    suspend fun insertAll(articles: List<Article>): List<Long> {
+        if (articles.isEmpty()) return emptyList()
         awaitLoaded()
         return fileMutex.withLock {
-            val newArticle = synchronized(stateLock) {
-                val na = article.copy(id = nextId++)
-                _articles.value = _articles.value + na
-                na
+            val created = synchronized(stateLock) {
+                val out = ArrayList<Article>(articles.size)
+                for (article in articles) {
+                    val id = maxOf(nextId, idCursor + 1L)
+                    nextId = id + 1L
+                    idCursor = id
+                    out += article.copy(id = id)
+                }
+                _articles.value = _articles.value + out
+                out
             }
+            // 游标先落盘：即使随后文章库写失败，也只会跳号，不会把已用 id 再发一次。
+            persistIdCursor()
             // 内存变更与落盘同持一把锁：reload 不可能落在两者之间，
             // 否则「导入换文件 → 旧快照写回」会把刚恢复的数据覆盖。
             saveToFileLocked()
-            newArticle.id
+            created.map { it.id }
         }
     }
 
@@ -283,11 +317,15 @@ class ArticleStorage(private val filePath: String) {
         }
     }
 
-    suspend fun delete(article: Article) {
+    suspend fun delete(article: Article) = deleteAll(setOf(article.id))
+
+    /** 批量删除：一次内存过滤、一次落盘（多选删除不再逐篇全量重写）。 */
+    suspend fun deleteAll(ids: Set<Long>) {
+        if (ids.isEmpty()) return
         awaitLoaded()
         fileMutex.withLock {
             synchronized(stateLock) {
-                _articles.value = _articles.value.filter { it.id != article.id }
+                _articles.value = _articles.value.filter { it.id !in ids }
             }
             saveToFileLocked()
         }

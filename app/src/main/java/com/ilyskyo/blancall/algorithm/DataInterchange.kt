@@ -229,11 +229,11 @@ object DataInterchange {
                 }
                 c == '"' -> inQuotes = !inQuotes
                 !inQuotes && c == ',' -> {
-                    row.add(field.toString()); field.clear()
+                    row.add(stripFormulaGuard(field.toString())); field.clear()
                 }
                 !inQuotes && (c == '\n' || c == '\r') -> {
                     if (c == '\r' && i + 1 < text.length && text[i + 1] == '\n') i++
-                    row.add(field.toString()); field.clear()
+                    row.add(stripFormulaGuard(field.toString())); field.clear()
                     rows.add(row); row = ArrayList()
                 }
                 else -> field.append(c)
@@ -241,11 +241,16 @@ object DataInterchange {
             i++
         }
         if (field.isNotEmpty() || row.isNotEmpty()) {
-            row.add(field.toString())
+            row.add(stripFormulaGuard(field.toString()))
             rows.add(row)
         }
         return rows
     }
+
+    /** 撤销 CSV 导出的防公式注入前缀（`'=...` → `=...`），其余单引号原样保留。 */
+    private fun stripFormulaGuard(value: String): String =
+        if (value.length > 1 && value[0] == '\'' && value[1] in "=+-@\t\r") value.substring(1)
+        else value
 
     /** 供 CSV 导出使用：错题明细的无损列（旧版程序不认这一列，忽略即可）。 */
     fun mistakesToCsvJson(mistakes: List<MistakeDetail>): String =

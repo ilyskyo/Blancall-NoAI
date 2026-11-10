@@ -9,6 +9,9 @@
         <item name="android:windowLightStatusBar">true</item>
         <item name="android:windowBackground">@color/background_light</item>
         <item name="android:windowAnimationStyle">@style/BlancallWindowAnimationNone</item>
+        <!-- 对话框是独立 window：它的系统动画从 dialogTheme 解析，
+             上面那条 windowAnimationStyle 管不到它（详见 Theme.Blancall.Dialog）。 -->
+        <item name="android:dialogTheme">@style/Theme.Blancall.Dialog</item>
     </style>
 
     <!-- Splash 启动屏主题：应用启动时显示纯色底（与主页一致），消除白屏。 -->
@@ -34,9 +37,23 @@
         <item name="android:windowLightStatusBar">false</item>
     </style>
 
-    <!-- 窗口动画归零：Compose 接管所有转场（页面、弹窗、面板），系统窗口再挂一份
-         就会和 Compose 的动画叠成两种节奏。部分 ROM（实测华为）的默认 dialog
-         窗口动画是「从右下角推入」，app 层只能通过这里把它关掉。
+    <!-- 对话框窗口主题：只做一件事 —— 把系统给对话框窗口的进入 / 退出动画关掉。
+         Compose 的 Dialog 通过 android:dialogTheme 构造窗口；系统对话框主题在部分
+         ROM（华为 EMUI / 小米 HyperOS 等）里自带「从右下角推入」，它会叠在
+         BlancallAlertDialog 自己的居中缩放上，观感就是弹窗从屏幕角上飞出来。
+         @null 让窗口动画完全不存在，入场只剩 Compose 自己那条（居中缩放 + 淡入）。
+
+         自我声明 android:dialogTheme 是给嵌套弹窗用的：从浮层（如遮罩配置窗口）里
+         再开一层重命名 / 删除弹窗时，解析到的是本样式，不会换回系统主题。 -->
+    <style name="Theme.Blancall.Dialog" parent="@android:style/Theme.Material.Light.Dialog">
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:dialogTheme">@style/Theme.Blancall.Dialog</item>
+    </style>
+
+    <!-- 窗口动画归零（Activity 这一侧）：Compose 接管所有转场（页面、弹窗、面板），
+         系统窗口再挂一份就会和 Compose 的动画叠成两种节奏。
+         注意：Dialog / BottomSheet 是独立窗口，它们不读这一份（见上面的
+         Theme.Blancall.Dialog；M3 自己的对话框主题已经把 windowAnimationStyle 置空）。
          副作用：Activity 之间的窗口转场也归零 —— 本应用只有 MainActivity 与
          Splash 主题，页面切换全部走 Compose Navigation，正是想要的效果。 -->
     <style name="BlancallWindowAnimationNone">

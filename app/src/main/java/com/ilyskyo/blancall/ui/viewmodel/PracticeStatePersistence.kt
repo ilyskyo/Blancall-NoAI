@@ -6,6 +6,7 @@ package com.ilyskyo.blancall.ui.viewmodel
 import android.app.Application
 import androidx.lifecycle.viewModelScope
 import com.ilyskyo.blancall.algorithm.BlancallGenerator
+import com.ilyskyo.blancall.algorithm.ContentFingerprint
 import com.ilyskyo.blancall.data.model.PracticeState
 import com.ilyskyo.blancall.data.model.PracticeStatus
 import com.ilyskyo.blancall.notification.PracticeLiveUpdate
@@ -49,7 +50,9 @@ import kotlinx.coroutines.withContext
                 // 自定义练习的身份：供「继续练习」恢复后重新挂上锁定
                 configId = activeCustomConfig?.id ?: 0L,
                 // 句级聚焦会话的目标句：恢复时要按同一窗口重建锚点（见 PracticeViewModel.loadArticle）
-                focusSentence = activeFocusWindow?.focusSentence ?: -1
+                focusSentence = activeFocusWindow?.focusSentence ?: -1,
+                contentHash = ContentFingerprint.md5Hex(article.value?.content.orEmpty()),
+                startedAt = if (practiceStartTime > 0L) practiceStartTime else System.currentTimeMillis()
             )
             val file = getApplication<Application>().filesDir.resolve("practice_state_${articleId}.json")
             withContext(Dispatchers.IO) {
@@ -64,6 +67,8 @@ import kotlinx.coroutines.withContext
                 if (state.clozeJson != null) json.put("clozeJson", state.clozeJson)
                 if (state.configId > 0L) json.put("configId", state.configId)
                 if (state.focusSentence >= 0) json.put("focusSentence", state.focusSentence)
+                state.contentHash?.let { json.put("contentHash", it) }
+                if (state.startedAt > 0L) json.put("startedAt", state.startedAt)
                 val ansObj = org.json.JSONObject()
                 state.answers.forEach { (k, v) -> ansObj.put(k.toString(), v) }
                 json.put("answers", ansObj)

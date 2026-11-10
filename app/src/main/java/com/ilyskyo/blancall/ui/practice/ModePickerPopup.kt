@@ -12,10 +12,10 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import com.ilyskyo.blancall.ui.theme.isBlancallDark
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -322,7 +322,7 @@ fun AdaptiveModePicker(
                 // ambient 压轻、spot 留在下侧：要的是「底部托起一层」，不是四面发光。
                 .shadow(
                     elevation = shadowLift,
-                    shape = RoundedCornerShape(20.dp),
+                    shape = SmoothRoundedCornerShape(20.dp),
                     clip = false,
                     ambientColor = Color.Black.copy(alpha = 0.10f),
                     spotColor = Color.Black.copy(alpha = 0.22f)
@@ -339,7 +339,7 @@ fun AdaptiveModePicker(
                         }
                         // 透明度只作用在卡片本体（玻璃 + 内容），与上面那层投影彻底脱钩
                         .graphicsLayer { alpha = cardAlpha }
-                        .clip(RoundedCornerShape(20.dp))
+                        .clip(SmoothRoundedCornerShape(20.dp))
                 ) {
                     // ── 1) 玻璃底：液态玻璃（API33+）或兜底玻璃板（低版本）──
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

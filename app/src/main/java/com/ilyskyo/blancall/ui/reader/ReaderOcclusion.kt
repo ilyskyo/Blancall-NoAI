@@ -18,6 +18,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -359,6 +361,12 @@ fun OccludedParagraph(
     // 遮挡集合用 State 包裹：绘制阶段与点按处理实时读取。遮挡集合变化（编辑配置回存、
     // 遮挡模式切换）无需等待重新布局即可立即生效——避免"改了配置还画旧遮块"
     val hiddenState = rememberUpdatedState(hidden)
+    // 读屏不能把被遮住的原文念出来：整段只报「N 块遮挡」，具体揭示由视觉/点按完成。
+    val maskDescription = if (hidden.isNotEmpty()) {
+        androidx.compose.ui.res.pluralStringResource(
+            com.ilyskyo.blancall.R.plurals.mask_detail, hidden.size, hidden.size
+        )
+    } else null
     val onToggleControlsState = rememberUpdatedState(onToggleControls)
     val layoutState = remember { mutableStateOf<TextLayoutResult?>(null) }
     val density = LocalDensity.current
@@ -378,6 +386,11 @@ fun OccludedParagraph(
         style = TextStyle(textIndent = if (indent) TextIndent(firstLine = 2.em) else TextIndent()),
         modifier = Modifier
             .fillMaxWidth()
+            .then(
+                if (maskDescription != null) {
+                    Modifier.semantics { contentDescription = maskDescription }
+                } else Modifier
+            )
             .drawWithContent {
                 // 先画原文，再在其上画遮块——遮块在文字之上，才能真正不透明盖住内容。
                 drawContent()

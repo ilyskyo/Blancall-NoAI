@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -30,6 +29,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ilyskyo.blancall.R
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 
 /**
  * 「帮助与说明」顶部的全流程图。
@@ -45,7 +45,7 @@ internal fun HelpFlowOverviewCard() {
     val accent = MaterialTheme.colorScheme.primary
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        shape = SmoothRoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
     ) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {
@@ -161,7 +161,7 @@ private fun FlowConnector(accent: Color) {
 internal fun HelpSharedDataCard() {
     Surface(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
+        shape = SmoothRoundedCornerShape(16.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
     ) {
         Column(Modifier.padding(horizontal = 16.dp, vertical = 14.dp)) {

@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -43,6 +42,7 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
@@ -218,7 +218,7 @@ fun AnswerInputField(
             // 手写态（当前作答目标）：屏上显示已写内容 + 面板本身
             Surface(
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(10.dp),
+                shape = SmoothRoundedCornerShape(10.dp),
                 color = if (isError) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
                 else MaterialTheme.colorScheme.surface,
                 border = BorderStroke(
@@ -465,7 +465,7 @@ fun InlineHandwritingAnswer(
     Column(modifier = modifier.animateContentSize(Motion.contentSize())) {
         if (value.isNotEmpty()) {
             Surface(
-                shape = RoundedCornerShape(8.dp),
+                shape = SmoothRoundedCornerShape(8.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant,
                 modifier = Modifier.fillMaxWidth()
             ) {
@@ -519,7 +519,7 @@ private fun ModeSwitchChip(
     onToggle: () -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = SmoothRoundedCornerShape(14.dp),
         color = if (handwriting) MaterialTheme.colorScheme.primaryContainer
         else MaterialTheme.colorScheme.surfaceVariant,
         modifier = Modifier.clickableNoRipple(enabled = enabled) { onToggle() }
@@ -552,7 +552,7 @@ private fun ModeSwitchChip(
 @Composable
 private fun BackspaceButton(onClick: () -> Unit) {
     Surface(
-        shape = RoundedCornerShape(8.dp),
+        shape = SmoothRoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
         modifier = Modifier.clickableNoRipple { onClick() }
     ) {

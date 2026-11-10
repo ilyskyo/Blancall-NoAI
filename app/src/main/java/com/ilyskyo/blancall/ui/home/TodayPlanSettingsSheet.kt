@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -55,6 +54,7 @@ import com.ilyskyo.blancall.ui.common.GlassSwitch
 import com.ilyskyo.blancall.ui.common.Motion
 import com.ilyskyo.blancall.ui.common.pressClick
 import com.ilyskyo.blancall.ui.theme.ReminderPrefs
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import java.time.LocalDate
 
 /**
@@ -265,7 +265,7 @@ internal fun TodayPlanSettingsSheet(
                                 style = MaterialTheme.typography.labelMedium
                             )
                         },
-                        shape = RoundedCornerShape(8.dp)
+                        shape = SmoothRoundedCornerShape(8.dp)
                     )
                 }
                 val presets = listOf(5, 10, 20)
@@ -285,7 +285,7 @@ internal fun TodayPlanSettingsSheet(
                             style = MaterialTheme.typography.labelMedium
                         )
                     },
-                    shape = RoundedCornerShape(8.dp)
+                    shape = SmoothRoundedCornerShape(8.dp)
                 )
             }
 
@@ -327,7 +327,7 @@ internal fun TodayPlanSettingsSheet(
                                 style = MaterialTheme.typography.labelMedium
                             )
                         },
-                        shape = RoundedCornerShape(8.dp)
+                        shape = SmoothRoundedCornerShape(8.dp)
                     )
                 }
                 val goalPresets = listOf(1, 3, 5, 10)
@@ -347,7 +347,7 @@ internal fun TodayPlanSettingsSheet(
                             style = MaterialTheme.typography.labelMedium
                         )
                     },
-                    shape = RoundedCornerShape(8.dp)
+                    shape = SmoothRoundedCornerShape(8.dp)
                 )
             }
 

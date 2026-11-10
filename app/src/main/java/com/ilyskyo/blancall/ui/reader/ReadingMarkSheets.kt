@@ -24,7 +24,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -53,6 +52,7 @@ import com.ilyskyo.blancall.ui.common.Motion
 import com.ilyskyo.blancall.ui.common.MotionFade
 import com.ilyskyo.blancall.ui.common.BlancallAlertDialog
 import com.ilyskyo.blancall.ui.common.pressClick
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import com.ilyskyo.blancall.ui.theme.isBlancallDark
 import java.text.DateFormat
 import java.util.Date
@@ -104,7 +104,7 @@ internal fun NoteEditorDialog(
                             overflow = TextOverflow.Ellipsis,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(10.dp))
+                                .clip(SmoothRoundedCornerShape(10.dp))
                                 .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
                                 .padding(horizontal = 12.dp, vertical = 10.dp)
                         )
@@ -121,7 +121,7 @@ internal fun NoteEditorDialog(
                         },
                         minLines = 3,
                         maxLines = 6,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = SmoothRoundedCornerShape(12.dp),
                         colors = TextFieldDefaults.colors(
                             focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
                             unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
@@ -214,7 +214,7 @@ internal fun ReadingMarksSheet(
                 Column(
                     Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
+                        .clip(SmoothRoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
                         .background(if (isDark) Color(0xFF1C1C1E) else Color.White)
                         .navigationBarsPadding()
                         .pointerInput(Unit) { detectTapGestures { } }
@@ -269,7 +269,7 @@ private fun MarkRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
+            .clip(SmoothRoundedCornerShape(14.dp))
             .background(MaterialTheme.colorScheme.surface)
             .pressClick { onClick() }
             .padding(horizontal = 14.dp, vertical = 12.dp)
@@ -304,7 +304,7 @@ private fun MarkRow(
             // 删除：一个文字按钮（不用图标，避免在这个尺寸下糊）
             Box(
                 modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
+                    .clip(SmoothRoundedCornerShape(8.dp))
                     .pressClick { onDelete() }
                     .padding(horizontal = 8.dp, vertical = 4.dp)
             ) {

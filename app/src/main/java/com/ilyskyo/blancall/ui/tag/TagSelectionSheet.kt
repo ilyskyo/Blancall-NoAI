@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -48,6 +47,7 @@ import com.ilyskyo.blancall.ui.common.GlassModalBottomSheet
 import com.ilyskyo.blancall.ui.common.TagChipUi
 import com.ilyskyo.blancall.ui.common.TagDot
 import com.ilyskyo.blancall.ui.common.pressClick
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -187,7 +187,7 @@ fun TagSelectionSheet(
                     supportingText = if (createError) {
                         { Text(stringResource(R.string.tag_create_error)) }
                     } else null,
-                    shape = RoundedCornerShape(10.dp),
+                    shape = SmoothRoundedCornerShape(10.dp),
                 )
                 Spacer(Modifier.height(6.dp))
                 Row(

@@ -27,7 +27,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -82,6 +81,7 @@ import com.ilyskyo.blancall.ui.common.DonationInviteRow
 import com.ilyskyo.blancall.ui.theme.AppPrefs
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import kotlin.math.roundToInt
 import kotlinx.coroutines.delay
 
@@ -139,7 +139,7 @@ internal fun SentenceCardFace(
     }
     GlassCard(
         modifier = modifier,
-        shape = RoundedCornerShape(26.dp),
+        shape = SmoothRoundedCornerShape(26.dp),
         containerColor = MaterialTheme.colorScheme.surface,
     ) {
         Column(
@@ -152,7 +152,7 @@ internal fun SentenceCardFace(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    if (item.title.isNotBlank()) "《${item.title}》" else stringResource(com.ilyskyo.blancall.R.string.sentence_cards),
+                    if (item.title.isNotBlank()) stringResource(com.ilyskyo.blancall.R.string.sentence_source_title, item.title) else stringResource(com.ilyskyo.blancall.R.string.sentence_cards),
                     style = MaterialTheme.typography.labelSmall,
                     // 可点回原文时用主色：灰色小字看起来只是来源标注，没人会去点
                     color = if (onOpenArticle != null) {
@@ -183,7 +183,7 @@ internal fun SentenceCardFace(
                             .padding(start = 8.dp)
                             .background(
                                 MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f),
-                                RoundedCornerShape(6.dp),
+                                SmoothRoundedCornerShape(6.dp),
                             )
                             .padding(horizontal = 6.dp, vertical = 2.dp),
                     )
@@ -385,7 +385,7 @@ internal fun RatingButton(
         modifier = modifier
             .height(if (intervalLabel != null) 60.dp else 52.dp)
             .semantics { contentDescription = desc },
-        shape = RoundedCornerShape(16.dp),
+        shape = SmoothRoundedCornerShape(16.dp),
         border = BorderStroke(2.dp, selectedBorder),
         colors = ButtonDefaults.buttonColors(
             containerColor = container,
@@ -431,7 +431,7 @@ internal fun SentenceRevealButton(onClick: () -> Unit, modifier: Modifier = Modi
         modifier = modifier
             .height(60.dp)
             .semantics { contentDescription = label },
-        shape = RoundedCornerShape(16.dp),
+        shape = SmoothRoundedCornerShape(16.dp),
         colors = ButtonDefaults.buttonColors(
             containerColor = MaterialTheme.colorScheme.primary,
             contentColor = MaterialTheme.colorScheme.onPrimary,
@@ -530,7 +530,7 @@ internal fun SentenceEmptyView(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(48.dp),
-                shape = RoundedCornerShape(14.dp),
+                shape = SmoothRoundedCornerShape(14.dp),
             ) {
                 Text(primaryLabel, style = MaterialTheme.typography.labelLarge)
             }
@@ -798,7 +798,7 @@ internal fun SentenceDoneView(
                 .fillMaxWidth()
                 .height(48.dp)
                 .doneEnter(stage > 3),
-            shape = RoundedCornerShape(14.dp),
+            shape = SmoothRoundedCornerShape(14.dp),
         ) {
             Text(stringResource(com.ilyskyo.blancall.R.string.review_again), style = MaterialTheme.typography.labelLarge)
         }
@@ -810,7 +810,7 @@ internal fun SentenceDoneView(
                     .fillMaxWidth()
                     .height(48.dp)
                     .doneEnter(stage > 3),
-                shape = RoundedCornerShape(14.dp),
+                shape = SmoothRoundedCornerShape(14.dp),
             ) {
                 Text(stringResource(com.ilyskyo.blancall.R.string.continue_memory), style = MaterialTheme.typography.labelLarge)
             }
@@ -822,7 +822,7 @@ internal fun SentenceDoneView(
                 .fillMaxWidth()
                 .height(48.dp)
                 .doneEnter(stage > 3),
-            shape = RoundedCornerShape(14.dp),
+            shape = SmoothRoundedCornerShape(14.dp),
             colors = ButtonDefaults.buttonColors(
                 containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
                 contentColor = MaterialTheme.colorScheme.onSurface,

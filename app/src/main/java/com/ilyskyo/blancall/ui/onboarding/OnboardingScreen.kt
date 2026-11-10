@@ -9,6 +9,7 @@ import com.ilyskyo.blancall.ui.common.Motion
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import com.ilyskyo.blancall.ui.theme.isBlancallDark
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -25,7 +26,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -143,6 +143,10 @@ fun OnboardingScreen(
         }
     }
 
+    // 系统返回同样视为「看过」：旧实现只跳过/末页写入 onboardingSeen，
+    // 首启直接按返回会回到首页但不落盘，下次冷启动再弹一遍。
+    androidx.activity.compose.BackHandler { finish() }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -171,9 +175,9 @@ fun OnboardingScreen(
                 }
                 Surface(
                     onClick = finish,
-                    shape = RoundedCornerShape(16.dp),
+                    shape = SmoothRoundedCornerShape(16.dp),
                     color = Color.Transparent,
-                    modifier = Modifier.clip(RoundedCornerShape(16.dp))
+                    modifier = Modifier.clip(SmoothRoundedCornerShape(16.dp))
                 ) {
                     Text(
                         stringResource(com.ilyskyo.blancall.R.string.ob_skip),
@@ -234,7 +238,7 @@ fun OnboardingScreen(
                             finish()
                         }
                     },
-                    shape = RoundedCornerShape(16.dp),
+                    shape = SmoothRoundedCornerShape(16.dp),
                     color = MaterialTheme.colorScheme.primary
                 ) {
                     Text(
@@ -263,7 +267,7 @@ private fun OnboardingPageCard(
     val isDark = isBlancallDark()
     val bgAlpha = if (isDark) GLASS_ALPHA_DARK else GLASS_ALPHA_LIGHT
     val bgColor = MaterialTheme.colorScheme.surface.copy(alpha = bgAlpha)
-    val shape = RoundedCornerShape(28.dp)
+    val shape = SmoothRoundedCornerShape(28.dp)
 
     Box(modifier = modifier) {
         // 磨砂卡片底（已移除顶部高光 verticalGradient 装饰层）
@@ -283,9 +287,9 @@ private fun OnboardingPageCard(
                 Box(
                     modifier = Modifier
                         .size(124.dp)
-                        .clip(RoundedCornerShape(28.dp))
+                        .clip(SmoothRoundedCornerShape(28.dp))
                         .background(accent.copy(alpha = 0.13f))
-                        .border(1.dp, accent.copy(alpha = 0.25f), RoundedCornerShape(28.dp)),
+                        .border(1.dp, accent.copy(alpha = 0.25f), SmoothRoundedCornerShape(28.dp)),
                     contentAlignment = Alignment.Center
                 ) {
                     AppIcon(kind = page.icon, modifier = Modifier.size(58.dp), tint = accent)

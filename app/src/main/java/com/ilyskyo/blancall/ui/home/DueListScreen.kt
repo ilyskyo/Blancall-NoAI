@@ -39,8 +39,10 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.ilyskyo.blancall.R
+import com.ilyskyo.blancall.algorithm.ArticleMemoryReads
 import com.ilyskyo.blancall.algorithm.DayBucket
-import com.ilyskyo.blancall.algorithm.EbbinghausScheduler
+import com.ilyskyo.blancall.algorithm.DueListModel
+import com.ilyskyo.blancall.algorithm.MemoryModelConfig
 import com.ilyskyo.blancall.algorithm.ReviewTemplate
 import com.ilyskyo.blancall.data.model.Article
 import com.ilyskyo.blancall.data.repository.ArticleRepository
@@ -89,12 +91,14 @@ fun DueListScreen(navController: NavController) {
     val reviewTemplate = remember(reviewTemplateId) { ReviewTemplate.fromId(reviewTemplateId) }
 
     var states by remember { mutableStateOf(fsrsStore.allStates()) }
+    var sentenceStates by remember { mutableStateOf(fsrsStore.allSentenceStates()) }
     var pauses by remember { mutableStateOf(fsrsStore.pausedArticles()) }
     var enrolled by remember { mutableStateOf(fsrsStore.enrolledArticles()) }
     val fsrsRevision by fsrsStore.revision.collectAsState()
     LaunchedEffect(fsrsRevision) {
         fsrsStore.awaitLoaded()
         states = fsrsStore.allStates()
+        sentenceStates = fsrsStore.allSentenceStates()
         pauses = fsrsStore.pausedArticles()
         enrolled = fsrsStore.enrolledArticles()
     }
@@ -110,25 +114,28 @@ fun DueListScreen(navController: NavController) {
     val zone = remember { ZoneId.systemDefault() }
     val today = remember(nowTick, zone) { DayBucket.localDate(nowTick, zone) }
 
-    // 到期候选：练过的看 FSRS due；只有旧记录的按模板兜底；加入计划但没练的，到期日 = 加入时刻
-    val dueItems = remember(articles, states, pauses, enrolled, recordsByArticle, reviewTemplate, nowTick) {
-        articles.mapNotNull { article ->
-            if (article.id in pauses) return@mapNotNull null
-            val state = states[article.id]
-            val articleRecords = recordsByArticle[article.id].orEmpty()
-            val practicedByFsrs = state != null && state.reviewCount > 0
-            val practiced = practicedByFsrs || articleRecords.isNotEmpty()
-            val due = when {
-                practicedByFsrs -> state!!.due
-                article.id in enrolled -> enrolled.getValue(article.id)
-                articleRecords.isNotEmpty() ->
-                    EbbinghausScheduler.nextReviewAt(reviewTemplate, articleRecords)
-                        ?: return@mapNotNull null
-                else -> return@mapNotNull null
-            }
-            if (due > nowTick) return@mapNotNull null
-            DueRowItem(article, due, practiced)
-        }.sortedBy { it.due }
+    // 到期候选：统一走 ArticleMemoryReads；LEGACY 默认与旧逻辑同口径。
+    val summaries = remember(
+        articles, states, sentenceStates, pauses, enrolled, recordsByArticle, reviewTemplate, nowTick
+    ) {
+        ArticleMemoryReads.views(
+            articles = articles,
+            legacyStates = states,
+            sentenceStates = sentenceStates,
+            recordsByArticle = recordsByArticle,
+            template = reviewTemplate,
+            pausedArticleIds = pauses.keys,
+            enrolledAt = enrolled,
+            now = nowTick,
+            model = MemoryModelConfig.model,
+        )
+    }
+    val articleById = remember(articles) { articles.associateBy { it.id } }
+    val dueItems = remember(summaries, nowTick, articleById) {
+        DueListModel.dueItems(summaries, nowTick).mapNotNull { item ->
+            val article = articleById[item.articleId] ?: return@mapNotNull null
+            DueRowItem(article, item.due, item.practiced)
+        }
     }
 
     val overdue = remember(dueItems, today) {

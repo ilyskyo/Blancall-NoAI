@@ -34,7 +34,9 @@ import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import com.ilyskyo.blancall.MainActivity
 import com.ilyskyo.blancall.R
-import com.ilyskyo.blancall.algorithm.EbbinghausScheduler
+import com.ilyskyo.blancall.algorithm.ArticleMemory
+import com.ilyskyo.blancall.algorithm.ArticleMemoryReads
+import com.ilyskyo.blancall.algorithm.MemoryModelConfig
 import com.ilyskyo.blancall.algorithm.FsrsEngine
 import com.ilyskyo.blancall.algorithm.ReviewTemplate
 import com.ilyskyo.blancall.algorithm.SentenceSelector
@@ -134,30 +136,35 @@ class BlancallWidget : GlanceAppWidget() {
             val now = System.currentTimeMillis()
             val paused = fsrs.pausedArticleIds()
             val states = fsrs.allStates()
-            // 只计「该复习」：FSRS 到期，或只有旧记录时按模板算出的到期。
-            // 加入计划但一次没练的文章不算复习（小组件标题是「今日复习」）。
-            val dueCandidates = articles.asSequence()
-                .filter { it.id !in paused }
-                .mapNotNull { article ->
-                    val state = states[article.id]
-                    if (state != null && state.reviewCount > 0) {
-                        if (FsrsEngine.isDue(state, now)) article.id to state.due else null
-                    } else {
-                        val articleRecords = recordsByArticle[article.id].orEmpty()
-                        if (articleRecords.isEmpty()) return@mapNotNull null
-                        val due = EbbinghausScheduler.nextReviewAt(template, articleRecords)
-                            ?: return@mapNotNull null
-                        if (due <= now) article.id to due else null
-                    }
-                }
-                .toList()
-            val dueArticles = dueCandidates.size
-            val firstDue = dueCandidates.minByOrNull { it.second }?.first ?: -1L
             val sentenceStates = fsrs.allSentenceStates()
+            // 只计「该复习」：FSRS/句级到期，或只有旧记录时按模板算出的到期。
+            // 加入计划但一次没练的文章不算复习（小组件标题是「今日复习」）。
+            val summaries = ArticleMemoryReads.views(
+                articles = articles,
+                legacyStates = states,
+                sentenceStates = sentenceStates,
+                recordsByArticle = recordsByArticle,
+                template = template,
+                pausedArticleIds = paused,
+                enrolledAt = fsrs.enrolledArticles(),
+                now = now,
+                model = MemoryModelConfig.model,
+            )
+            val dueCandidates = summaries
+                .filter {
+                    it.state != ArticleMemory.ArticleState.PAUSED &&
+                        (it.state == ArticleMemory.ArticleState.DUE || it.legacyDue) &&
+                        it.earliestDue > 0L && it.earliestDue <= now
+                }
+                .sortedBy { it.earliestDue }
+                .map { it.articleId to it.earliestDue }
+            val dueArticles = dueCandidates.size
+            val firstDue = dueCandidates.firstOrNull()?.first ?: -1L
+            val articleIds = articles.mapTo(HashSet(articles.size)) { it.id }
             val dueSentences = sentenceStates.count { (key, state) ->
                 key.startsWith(SentenceSelector.SENTENCE_KEY_PREFIX) &&
                     FsrsEngine.isDue(state, now) &&
-                    SentenceSelector.articleIdOf(key) !in paused
+                    SentenceSelector.articleIdOf(key)?.let { it in articleIds && it !in paused } == true
             }
             val today = DailySentenceCoordinator.ensureToday(
                 store = SentenceCardStore.getInstance(filesDir),

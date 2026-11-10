@@ -66,6 +66,15 @@ class ReadingMarkStore private constructor(private val file: File) {
     /** 粘性危险标记：只有「成功解析主文件或备份」才清除 */
     private var loadFailed = false
 
+    /**
+     * 正文指纹（articleId → md5）。
+     *
+     * 划线坐标是「段落索引 + 段内 [a,e)」，一旦正文被编辑就整体漂移：
+     * 高亮画到别的字上、批注挂到不相干的句子后面，界面完全看不出来。
+     * 同项目的遮挡配置（MaskConfigStore）早就有 contentHash 与失配提示，这里补上同一套。
+     */
+    private val hashes = mutableMapOf<Long, String>()
+
     private var revision = 0L
     private val _revisionFlow = MutableStateFlow(0L)
 
@@ -86,6 +95,16 @@ class ReadingMarkStore private constructor(private val file: File) {
     // ── 读盘 / 写盘 ──
 
     private fun parseInto(root: JSONObject, out: MutableMap<Long, List<ReadingMark>>) {
+        hashes.clear()
+        root.optJSONObject(HASHES_KEY)?.let { obj ->
+            val hashKeys = obj.keys()
+            while (hashKeys.hasNext()) {
+                val hk = hashKeys.next()
+                val hid = hk.toLongOrNull() ?: continue
+                val hv = obj.optString(hk, "")
+                if (hv.isNotBlank()) hashes[hid] = hv
+            }
+        }
         val articles = root.optJSONObject("articles") ?: return
         val keys = articles.keys()
         while (keys.hasNext()) {
@@ -202,6 +221,10 @@ class ReadingMarkStore private constructor(private val file: File) {
                 JSONObject().apply {
                     put("version", CURRENT_VERSION)
                     put("articles", articles)
+                    // v2：正文指纹。老文件没有这个节点，读出来是空表 —— 下次进阅读模式时补写。
+                    put(HASHES_KEY, JSONObject().apply {
+                        hashes.forEach { (id, h) -> put(id.toString(), h) }
+                    })
                 }.toString()
             )
         } catch (e: Exception) {
@@ -219,6 +242,32 @@ class ReadingMarkStore private constructor(private val file: File) {
     /** 该文章的全部划线（按段落、段内起点升序）。无记录返回空表。 */
     fun getMarks(articleId: Long): List<ReadingMark> = synchronized(lock) {
         loadLocked()[articleId].orEmpty()
+    }
+
+    /**
+     * 校验正文指纹，返回 **true = 正文被改过**（此前的划线/批注可能错位）。
+     *
+     * 规则：
+     * - 这篇文章还没有任何标注 → 什么都不做（不为「进过阅读模式」写盘）；
+     * - 有标注但没有指纹记录（老数据 / 刚升级）→ 记下当前指纹，返回 false；
+     * - 有记录且不一致 → 返回 true，**不覆盖**记录（下次还能提醒）。
+     *
+     * 只在「有标注的文章」上写盘，800 篇的库里真正有划线的通常只有几篇。
+     */
+    fun checkContentHash(articleId: Long, currentHash: String): Boolean = synchronized(lock) {
+        if (loadFailed) return false
+        val map = loadLocked()
+        if (loadFailed) return false
+        val marks = map[articleId]
+        if (marks.isNullOrEmpty()) return false
+        val stored = hashes[articleId]
+        if (stored.isNullOrBlank()) {
+            hashes[articleId] = currentHash
+            writeLocked(map)
+            false
+        } else {
+            stored != currentHash
+        }
     }
 
     /**
@@ -354,9 +403,60 @@ class ReadingMarkStore private constructor(private val file: File) {
     fun removeArticle(articleId: Long) {
         synchronized(lock) {
             val map = loadLocked()
-            if (map.remove(articleId) == null) return
+            val removedMarks = map.remove(articleId) != null
+            // 指纹也必须一起删：只删 marks 时，hashes 里仍留着旧正文的 md5，
+            // id 复用后新文章第一次进阅读模式会拿旧指纹比对并误报「正文已变」。
+            val removedHash = hashes.remove(articleId) != null
+            if (!removedMarks && !removedHash) return
             writeLocked(map)
             bump()
+        }
+    }
+
+    /**
+     * 按选区裁剪纯划线（批注记录保持不动）。
+     *
+     * 旧实现按整条记录删除：相邻划线会被 [addMark] 并成一条，取消子区间时
+     * 连带删掉选区外的部分；带批注的记录更会被整条删掉且无确认。
+     * 这里只处理 `hasNote == false` 的记录：完全覆盖的删掉，部分覆盖的拆成
+     * 左右两段（左段保留原 id，右段新 id），批注记录留给批注编辑器处理。
+     *
+     * @return 实际发生变更的划线段数（供 UI 判断是否有内容被去掉）
+     */
+    fun removeBlankRange(articleId: Long, paragraph: Int, start: Int, end: Int): Int {
+        if (end <= start) return 0
+        return synchronized(lock) {
+            val map = loadLocked()
+            val list = map[articleId].orEmpty().toMutableList()
+            if (list.isEmpty()) return@synchronized 0
+            var changed = 0
+            val result = mutableListOf<ReadingMark>()
+            var nextId = (list.maxOfOrNull { it.id } ?: 0L) + 1L
+            val now = System.currentTimeMillis()
+            for (mark in list) {
+                if (mark.p != paragraph || mark.hasNote || mark.e <= start || mark.a >= end) {
+                    result += mark
+                    continue
+                }
+                changed++
+                // 左侧未被选中的部分保留；右侧同理。两侧都保留时拆成两条，
+                // 左段复用原 id（保住 createdAt 与列表顺序），右段分配新 id。
+                if (mark.a < start) {
+                    result += mark.copy(e = start, updatedAt = now)
+                }
+                if (mark.e > end) {
+                    result += mark.copy(
+                        id = if (mark.a < start) nextId++ else mark.id,
+                        a = end,
+                        updatedAt = now,
+                    )
+                }
+            }
+            if (changed == 0) return@synchronized 0
+            if (result.isEmpty()) map.remove(articleId) else map[articleId] = sorted(result)
+            writeLocked(map)
+            bump()
+            changed
         }
     }
 
@@ -365,6 +465,9 @@ class ReadingMarkStore private constructor(private val file: File) {
 
     companion object {
         private const val CURRENT_VERSION = 1
+
+        /** 正文指纹节点名；老文件没有它，读出来是空表（下次进阅读模式补写） */
+        private const val HASHES_KEY = "hashes"
 
         @Volatile private var instance: ReadingMarkStore? = null
 

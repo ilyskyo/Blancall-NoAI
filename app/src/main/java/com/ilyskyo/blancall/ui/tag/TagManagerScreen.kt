@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Checkbox
@@ -50,9 +49,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.snap
-import com.ilyskyo.blancall.ui.common.Motion
 import androidx.compose.ui.input.pointer.PointerInputScope
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.input.pointer.positionChange
@@ -82,6 +78,7 @@ import com.ilyskyo.blancall.ui.common.TagChipUi
 import com.ilyskyo.blancall.ui.common.TagDot
 import com.ilyskyo.blancall.ui.common.rememberConfirmHaptic
 import com.ilyskyo.blancall.ui.common.pressClick
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import com.ilyskyo.blancall.ui.viewmodel.ArticleViewModel
 import kotlin.math.roundToInt
 import kotlinx.coroutines.Dispatchers
@@ -136,7 +133,10 @@ fun TagManagerScreen(navController: NavController, initialTagId: Long = -1L) {
 
     // ── 拖动排序状态（行高固定：目标位 = 起点 + round(位移 / 步长)）──
     var draggingId by remember { mutableStateOf<Long?>(null) }
-    var dragOffset by remember { mutableFloatStateOf(0f) }
+    // 用 State 对象而不是 by 委托：拖动位移每帧都在变，它只在被拖那一行的
+    // graphicsLayer 里读取（绘制阶段），不能出现在列表的组合作用域里，
+    // 否则一次拖动会让整张标签表逐帧重组。
+    val dragOffset = remember { mutableFloatStateOf(0f) }
     val rowStepPx = with(LocalDensity.current) { (TAG_ROW_HEIGHT + TAG_ROW_GAP).toPx() }
     // 拖动回调在首个组合期被 pointerInput 捕获：用 rememberUpdatedState 保证读到最新标签表
     val latestTags by rememberUpdatedState(data.tags)
@@ -144,8 +144,8 @@ fun TagManagerScreen(navController: NavController, initialTagId: Long = -1L) {
     fun handleDrop() {
         val id = draggingId
         draggingId = null
-        val dy = dragOffset
-        dragOffset = 0f
+        val dy = dragOffset.floatValue
+        dragOffset.floatValue = 0f
         if (id == null) return
         val list = latestTags
         val from = list.indexOfFirst { it.id == id }
@@ -259,7 +259,7 @@ fun TagManagerScreen(navController: NavController, initialTagId: Long = -1L) {
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                         )
                         Spacer(Modifier.height(18.dp))
-                        Button(onClick = { creating = true }, shape = RoundedCornerShape(10.dp)) {
+                        Button(onClick = { creating = true }, shape = SmoothRoundedCornerShape(10.dp)) {
                             Text(stringResource(com.ilyskyo.blancall.R.string.create_first_tag))
                         }
                     }
@@ -278,22 +278,13 @@ fun TagManagerScreen(navController: NavController, initialTagId: Long = -1L) {
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f)
-                            // 拖动期间临时卸下滚动，避免与换位手势抢指针
-                            .then(
-                                if (draggingId == null) Modifier.verticalScroll(listScrollState)
-                                else Modifier
-                            ),
+                            // 拖动期间只禁用滚动，不卸下 verticalScroll：
+                            // 卸掉修饰符会让列表不再应用 listScrollState.value 的偏移，
+                            // 长列表一按手柄就跳回第 1 行，拖动落位失去视觉参照。
+                            .verticalScroll(listScrollState, enabled = draggingId == null),
                     ) {
                         data.tags.forEach { tag ->
                             val isDragging = draggingId == tag.id
-                            // 落位弹簧：拖的时候用 snap 逐帧跟住手指，松手翻成弹簧归零。
-                            // handleDrop 里 dragOffset 会被直接清零，改造前这一帧被拖的那行会瞬移到新位置
-                            // —— 其余行本来就有 animateListItem 的 placement 弹簧，只有拖的那行缺这一段。
-                            val settleY by animateFloatAsState(
-                                targetValue = if (isDragging) dragOffset else 0f,
-                                animationSpec = if (isDragging) snap() else Motion.slotSettleFloat(),
-                                label = "tagRowSettle",
-                            )
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -304,12 +295,10 @@ fun TagManagerScreen(navController: NavController, initialTagId: Long = -1L) {
                                         .fillMaxWidth()
                                         .height(TAG_ROW_HEIGHT)
                                         .graphicsLayer {
-                                            if (isDragging) {
-                                                translationY = settleY
-                                                alpha = 0.92f
-                                            }
+                                            translationY = if (isDragging) dragOffset.floatValue else 0f
+                                            alpha = if (isDragging) 0.92f else 1f
                                         },
-                                    shape = RoundedCornerShape(14.dp),
+                                    shape = SmoothRoundedCornerShape(14.dp),
                                     backdrop = false,
                                     onClick = { editing = tag },
                                     onLongClick = { menuFor = tag.id },
@@ -341,7 +330,7 @@ fun TagManagerScreen(navController: NavController, initialTagId: Long = -1L) {
                                             style = MaterialTheme.typography.labelMedium,
                                             color = MaterialTheme.colorScheme.primary,
                                             modifier = Modifier
-                                                .clip(RoundedCornerShape(8.dp))
+                                                .clip(SmoothRoundedCornerShape(8.dp))
                                                 .pressClick { managing = tag }
                                                 .padding(horizontal = 8.dp, vertical = 6.dp),
                                         )
@@ -356,9 +345,9 @@ fun TagManagerScreen(navController: NavController, initialTagId: Long = -1L) {
                                                     dragHandleAfterSlop(
                                                         onStart = {
                                                             draggingId = tag.id
-                                                            dragOffset = 0f
+                                                            dragOffset.floatValue = 0f
                                                         },
-                                                        onDelta = { d -> dragOffset += d.y },
+                                                        onDelta = { d -> dragOffset.floatValue += d.y },
                                                         onEnd = { handleDrop() },
                                                     )
                                                 },
@@ -516,7 +505,7 @@ fun TagManagerScreen(navController: NavController, initialTagId: Long = -1L) {
                                 Row(
                                     modifier = animateListItem()
                                         .fillMaxWidth()
-                                        .clip(RoundedCornerShape(10.dp))
+                                        .clip(SmoothRoundedCornerShape(10.dp))
                                         .pressClick {
                                             checked = if (on) checked - article.id else checked + article.id
                                         }

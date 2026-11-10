@@ -55,4 +55,15 @@ class SectionSplitterTest {
         val ranked = SectionSplitter.rankByErrorRate(sections, emptyMap())
         assertTrue(ranked.all { it.errorRate == 0f })
     }
+
+    @Test
+    fun `带标题段落的句数与全文切句对齐`() {
+        val text = "岳阳楼记\n庆历四年春，滕子京谪守巴陵郡。\n\n醉翁亭记\n环滁皆山也。"
+        val sections = SectionSplitter.split(text, minSectionChars = 1)
+        assertEquals(
+            "Σ sentenceCount 必须等于全文切句数，否则薄弱集训的全文索引会整体错位",
+            SentenceSplitter.split(text).size,
+            sections.sumOf { it.sentenceCount }
+        )
+    }
 }

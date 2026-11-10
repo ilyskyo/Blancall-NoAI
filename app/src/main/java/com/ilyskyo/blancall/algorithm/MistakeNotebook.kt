@@ -26,6 +26,8 @@ import com.ilyskyo.blancall.data.model.toErrorType
  */
 object MistakeNotebook {
 
+    private val WS = Regex("\\s+")
+
     /** 单次判分里的一个空（答对或答错都算一次 outcome）。 */
     data class Outcome(
         val recordId: Long,
@@ -166,7 +168,7 @@ object MistakeNotebook {
     /** 同一句 + 同一答案 = 同一处。句子文字缺失时退回索引，再缺就只按答案。 */
     internal fun identity(o: Outcome): String {
         val sentenceKey = o.sentenceText
-            .replace(Regex("\\s+"), "")
+            .replace(WS, "")
             .ifBlank { if (o.sentenceIndex >= 0) "i:${o.sentenceIndex}" else "" }
         return "${o.articleId}\u0000${o.correctAnswer.trim().lowercase()}\u0000$sentenceKey"
     }
@@ -215,11 +217,11 @@ object MistakeNotebook {
         for (e in entries) {
             if (e.articleId != articleId) continue
             val byText = e.sentenceText.takeIf { it.isNotBlank() }?.let { wanted ->
-                val normalized = wanted.replace(Regex("\\s+"), "")
-                sentences.indexOfFirst { it.replace(Regex("\\s+"), "") == normalized }
+                val normalized = wanted.replace(WS, "")
+                sentences.indexOfFirst { it.replace(WS, "") == normalized }
                     .takeIf { it >= 0 }
                     ?: sentences.indexOfFirst { s ->
-                        val ns = s.replace(Regex("\\s+"), "")
+                        val ns = s.replace(WS, "")
                         ns.contains(normalized) || normalized.contains(ns)
                     }.takeIf { it >= 0 }
             }

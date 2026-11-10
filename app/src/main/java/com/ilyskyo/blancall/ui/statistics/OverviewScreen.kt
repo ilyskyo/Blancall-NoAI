@@ -92,7 +92,10 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
 import com.ilyskyo.blancall.algorithm.AchievementManager
 import com.ilyskyo.blancall.algorithm.CsvExporter
+import com.ilyskyo.blancall.algorithm.ArticleMemoryPredictor
+import com.ilyskyo.blancall.algorithm.ArticleMemoryReads
 import com.ilyskyo.blancall.algorithm.ForgettingPredictor
+import com.ilyskyo.blancall.algorithm.MemoryModelConfig
 import com.ilyskyo.blancall.algorithm.FsrsEngine
 import com.ilyskyo.blancall.algorithm.ReviewTemplate
 import com.ilyskyo.blancall.algorithm.SentenceSelector
@@ -108,6 +111,7 @@ import com.ilyskyo.blancall.algorithm.DayBucket
 import com.ilyskyo.blancall.algorithm.RangePreset
 import com.ilyskyo.blancall.algorithm.WeaknessMath
 import com.ilyskyo.blancall.algorithm.presetRange
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import kotlinx.coroutines.delay
 import com.ilyskyo.blancall.ui.common.AmbientBackground
 import com.ilyskyo.blancall.ui.common.BackButton
@@ -469,14 +473,40 @@ fun OverviewScreen(navController: NavController, onBack: (() -> Unit)? = null) {
         enrolled = fsrsStore.enrolledArticles()
         fsrsReady = true
     }
-    val predictions = remember(articles, allRecords, template, fsrsStates, pausedArticleIds) {
-        ForgettingPredictor.predict(articles, allRecords, template, fsrsStates, pausedArticleIds)
+    // nowTick 必须进 key：predict() 内部自己取 System.currentTimeMillis()，
+    // 旧实现只随数据变化重算，页面跨午夜后「今天到期」不会升级成「已逾期」。
+    val predictions = remember(
+        articles, allRecords, template, fsrsStates, sentenceStates, pausedArticleIds, enrolled, nowTick
+    ) {
+        if (MemoryModelConfig.model == ArticleMemoryReads.Model.SENTENCE_PROJECTION) {
+            ArticleMemoryPredictor.predict(
+                articles = articles,
+                allRecords = allRecords,
+                template = template,
+                legacyStates = fsrsStates,
+                sentenceStates = sentenceStates,
+                pausedIds = pausedArticleIds,
+                enrolledAt = enrolled,
+                now = nowTick,
+            )
+        } else {
+            ForgettingPredictor.predict(articles, allRecords, template, fsrsStates, pausedArticleIds)
+        }
     }
     val dueSoonAll = remember(predictions) { ForgettingPredictor.dueSoon(predictions) }
     val dueSoon = remember(dueSoonAll) { dueSoonAll.take(5) }
-    // 「这条结论是 FSRS 算的还是模板估的」——判据与 ForgettingPredictor 走哪条分支用的是同一个条件
-    // （有 FSRS 状态且 reviewCount>0 才是自适应调度），不在这里另立一套口径。
-    val adaptiveIds = remember(fsrsStates) { fsrsStates.filterValues { it.reviewCount > 0 }.keys }
+    // LEGACY：篇级 FSRS 状态才算自适应；PROJECTION：有句级状态的也算。
+    val adaptiveIds = remember(fsrsStates, sentenceStates) {
+        val ids = fsrsStates.filterValues { it.reviewCount > 0 }.keys.toMutableSet()
+        if (MemoryModelConfig.model == ArticleMemoryReads.Model.SENTENCE_PROJECTION) {
+            sentenceStates.forEach { (key, state) ->
+                if (state.reviewCount > 0) {
+                    SentenceSelector.articleIdOf(key)?.let(ids::add)
+                }
+            }
+        }
+        ids
+    }
 
     // ── 句子记忆统计：取自句子级 FSRS 状态，留存率口径与文章一致（同函数同参数）──
     val sentenceStats = remember(sentenceStates, nowTick, pausedArticleIds) {
@@ -1362,7 +1392,12 @@ fun OverviewScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                                                 color = MaterialTheme.colorScheme.onSurface)
                                             Spacer(Modifier.height(10.dp))
                                             val trend = stats.recentRate - stats.olderRate
+                                            // 近 7 天一条练习都没有时，recentRate 会被算成 0f。
+                                            // 直接拿来比就是把「没数据」当成「全错」—— 用户休假回来
+                                            // 第一屏看到「下降 80%」。这里必须单独一条分支。
                                             val trendText = when {
+                                                stats.recentCount == 0 ->
+                                                    stringResource(com.ilyskyo.blancall.R.string.trend_no_recent)
                                                 trend > 0.05f -> stringResource(
                                                     com.ilyskyo.blancall.R.string.trend_up, (trend * 100).toInt()
                                                 )
@@ -1672,13 +1707,13 @@ private fun TagStatRow(
         modifier = Modifier
             .fillMaxWidth()
             .height(6.dp)
-            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(3.dp))
+            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), SmoothRoundedCornerShape(3.dp))
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth(fraction)
                 .fillMaxHeight()
-                .background(barColor, RoundedCornerShape(3.dp))
+                .background(barColor, SmoothRoundedCornerShape(3.dp))
         )
     }
 }
@@ -2014,7 +2049,7 @@ private fun TodayGoalCard(
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(8.dp)
-                    .clip(RoundedCornerShape(4.dp)),
+                    .clip(SmoothRoundedCornerShape(4.dp)),
                 color = if (achieved) MaterialTheme.colorScheme.tertiary
                 else MaterialTheme.colorScheme.primary,
                 trackColor = MaterialTheme.colorScheme.surfaceVariant
@@ -2040,7 +2075,7 @@ private fun TodayGoalCard(
                         selected = goal == g,
                         onClick = { onGoalChange(g) },
                         label = { AdaptiveChipLabel(stringResource(com.ilyskyo.blancall.R.string.goal_count_chip, g)) },
-                        shape = RoundedCornerShape(8.dp)
+                        shape = SmoothRoundedCornerShape(8.dp)
                     )
                 }
                 // 自定义目标：已自定义时按钮显示实际次数
@@ -2056,7 +2091,7 @@ private fun TodayGoalCard(
                             else stringResource(com.ilyskyo.blancall.R.string.goal_count_chip, goal)
                         )
                     },
-                    shape = RoundedCornerShape(8.dp)
+                    shape = SmoothRoundedCornerShape(8.dp)
                 )
             }
         }
@@ -2219,7 +2254,7 @@ private fun ForgettingPredictionCard(
                         }
                         Spacer(Modifier.width(8.dp))
                         Surface(
-                            shape = RoundedCornerShape(6.dp),
+                            shape = SmoothRoundedCornerShape(6.dp),
                             color = badgeColor.copy(alpha = 0.15f)
                         ) {
                             Text(
@@ -2243,6 +2278,7 @@ private fun ForgettingPredictionCard(
                             MemoryDecayChart(
                                 decayCurve = p.decayCurve,
                                 retentionRate = p.retentionRate,
+                                weakestCurve = p.weakestCurve,
                                 modifier = Modifier.fillMaxWidth()
                             )
                             Spacer(Modifier.height(6.dp))
@@ -2472,7 +2508,7 @@ private fun AchievementGridCard(
                         color = colors.primary,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(8.dp))
+                            .clip(SmoothRoundedCornerShape(8.dp))
                             .background(colors.primaryContainer.copy(alpha = 0.30f))
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
@@ -2593,7 +2629,7 @@ private fun AchievementBadgeItem(
     Column(
         modifier = Modifier
             .width(72.dp)
-            .clip(RoundedCornerShape(8.dp))
+            .clip(SmoothRoundedCornerShape(8.dp))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -2644,7 +2680,7 @@ private fun AchievementBadgeItem(
                 modifier = Modifier
                     .width(52.dp)
                     .height(3.dp)
-                    .clip(RoundedCornerShape(2.dp)),
+                    .clip(SmoothRoundedCornerShape(2.dp)),
                 color = c.primary.copy(alpha = 0.6f),
                 trackColor = c.surfaceVariant
             )

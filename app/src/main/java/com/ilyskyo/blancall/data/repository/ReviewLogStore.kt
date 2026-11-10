@@ -8,6 +8,25 @@ import com.ilyskyo.blancall.util.AtomicFiles
 import org.json.JSONObject
 import java.io.File
 
+/** 复习事件的来源入口：日志带 `src` 后，才能审计「这个句级状态是谁写的」。 */
+enum class ReviewSource(val wire: String) {
+    ARTICLE("article"),
+    SENTENCE_CLOZE("sentence_cloze"),
+    CROSS_SENTENCE_CLOZE("cross_sentence_cloze"),
+    DICTATION("dictation"),
+    CROSS_DICTATION("cross_dictation"),
+    SENTENCE_CARD("sentence_card"),
+    CUSTOM_CLOZE("custom_cloze"),
+    MISTAKE_DRILL("mistake_drill"),
+    MASK_TO_CLOZE("mask_to_cloze"),
+    OTHER("other");
+
+    companion object {
+        fun fromWire(value: String?): ReviewSource =
+            entries.firstOrNull { it.wire == value } ?: OTHER
+    }
+}
+
 /**
  * 复习事件日志（B3-4）：per-card 的 FSRS 复习事件流。
  *
@@ -18,10 +37,12 @@ import java.io.File
  *
  * ## 形态
  * JSONL 追加（O(1)，走 [AtomicFiles.appendTextLine]），一行一个事件：
- * `{"v":1,"key":"s:12:ab12…","ts":…,"rating":3,"elapsedMs":…,"d":…,"s":…,"due":…,"reps":…,"lapses":…}`
+ * `{"v":2,"key":"s:12:ab12…","ts":…,"rating":3,"elapsedMs":…,"src":"sentence_cloze","rid":…,"d":…,"s":…,"due":…,"reps":…,"lapses":…}`
  * - `key`：与 [FsrsStateStore] 同一命名空间（`s:<articleId>:<hash16>` / `a:<articleId>`）
  * - `rating`：1=AGAIN 2=HARD 3=GOOD 4=EASY（[FsrsEngine.Rating.value]）
  * - `elapsedMs`：本次复习距上一次复习的间隔（0 = 首次）
+ * - `src`：哪条练习入口写的（见 [ReviewSource]）；旧 v1 行没有，读取为 OTHER
+ * - `rid`：对应 PracticeRecord id，0 = 句子卡/旧数据等无记录来源
  * - `d/s/due/reps/lapses`：复习**之后**的状态快照（拟合得到输入与结果）
  *
  * ## 格式版本
@@ -37,8 +58,8 @@ import java.io.File
  */
 internal object ReviewLogStore {
 
-    /** 行格式版本；未来字段不兼容改动时递增。 */
-    const val FORMAT_VERSION = 1
+    /** 行格式版本；v2 新增 src/rid，读取侧兼容 v1。 */
+    const val FORMAT_VERSION = 2
 
     /** 日志文件名（filesDir 根） */
     const val FILE_NAME = "fsrs_reviews.jsonl"
@@ -53,6 +74,8 @@ internal object ReviewLogStore {
         val rating: Int,
         val elapsedMs: Long,
         val state: FsrsEngine.CardState,
+        val source: ReviewSource = ReviewSource.OTHER,
+        val recordId: Long = 0L,
     )
 
     /**
@@ -68,9 +91,11 @@ internal object ReviewLogStore {
         elapsedMs: Long,
         state: FsrsEngine.CardState,
         maxBytes: Long = MAX_BYTES,
+        source: ReviewSource = ReviewSource.OTHER,
+        recordId: Long = 0L,
     ): Boolean = appendAll(
         file,
-        listOf(ReviewEvent(key, ts, rating, elapsedMs, state)),
+        listOf(ReviewEvent(key, ts, rating, elapsedMs, state, source, recordId)),
         maxBytes
     )
 
@@ -100,6 +125,8 @@ internal object ReviewLogStore {
         .put("ts", event.ts)
         .put("rating", event.rating)
         .put("elapsedMs", event.elapsedMs)
+        .put("src", event.source.wire)
+        .put("rid", event.recordId)
         .put("d", event.state.difficulty)
         .put("s", event.state.stability)
         .put("due", event.state.due)
@@ -149,6 +176,8 @@ internal object ReviewLogStore {
                         reviewCount = obj.optInt("reps", 0),
                         lapses = obj.optInt("lapses", 0),
                     ),
+                    source = ReviewSource.fromWire(obj.optString("src")),
+                    recordId = obj.optLong("rid", 0L),
                 )
             )
         }

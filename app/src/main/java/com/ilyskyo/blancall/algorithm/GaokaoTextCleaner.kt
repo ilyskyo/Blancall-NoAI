@@ -125,7 +125,7 @@ class GaokaoTextCleaner {
     /**
      * 清理文本内容（去除注释）
      */
-    private fun cleanText(text: String, textType: GaokaoTextType): CleaningResult {
+    internal fun cleanText(text: String, textType: GaokaoTextType): CleaningResult {
         val removedAnnotations = mutableListOf<String>()
         var cleanedText = text
 
@@ -145,8 +145,11 @@ class GaokaoTextCleaner {
             }
         }
 
-        // 后处理：清理多余空白和格式
-        cleanedText = postProcessText(cleanedText)
+        // 后处理：清理多余空白和格式。
+        // 诗词/文言靠「每句一行」承载结构，必须保留换行；
+        // 现代文与混合文本多是 PDF 提取得来的硬折行，折成空格反而更接近原意。
+        val keepLineBreaks = textType == GaokaoTextType.POETRY || textType == GaokaoTextType.CLASSICAL
+        cleanedText = postProcessText(cleanedText, keepLineBreaks)
 
         // 计算清理置信度
         val confidence = calculateConfidence(text, cleanedText, removedAnnotations.size)
@@ -205,9 +208,12 @@ class GaokaoTextCleaner {
         var cleaned = text
         
         // 移除诗词注释
+        // 每条都必须成对收尾：少一个闭合符时（旧写法 `［[^］］*` 就没有闭合的 ］），
+        // 正则从 `［` 一路吃到文末，把后文整段删掉，只留下一个孤立的 `］`。
         val annotationPatterns = listOf(
-            "\\([^)]*\\)",           // 圆括号注释
-            "［[^］］*",           // 方括号注释
+            "\\([^)]*\\)",           // 圆括号注释（半角）
+            "（[^）]*）",             // 圆括号注释（全角）—— 中文语料里这才是常态
+            "［[^］]*］",           // 方括号注释
             "【[^】]*】",           // 方头括号注释
             "注[^：]*：[^；]*;?",   // 注释标记
         )
@@ -222,8 +228,10 @@ class GaokaoTextCleaner {
             }
         }
         
-        // 移除作者和朝代信息（保留诗词正文）
-        cleaned = cleaned.replace(Regex("[^\\n]*\\s*[作者|朝代|简介][^\\n]*\\n"), "")
+        // 移除作者和朝代信息（保留诗词正文）。
+        // 旧写法 `[作者|朝代|简介]` 是字符类：任意一行含「代/作/者/简/介」就被整行删掉
+        // （「江山代有才人出」直接丢句），必须写成非捕获组。
+        cleaned = cleaned.replace(Regex("[^\\n]*(?:作者|朝代|简介)[^\\n]*\\n"), "")
         
         // 移除页码
         cleaned = cleaned.replace(Regex("\\s*[第]?\\d+\\s*[页]"), "")
@@ -275,22 +283,25 @@ class GaokaoTextCleaner {
     /**
      * 后处理文本
      */
-    private fun postProcessText(text: String): String {
-        var processed = text
-        
-        // 清理多余空白
-        processed = processed.replace(Regex("\\s+"), " ")
-        
-        // 清理空行
-        processed = processed.replace(Regex("\\n\\s*\\n"), "\n")
-        
-        // 移除首尾空白
-        processed = processed.trim()
-        
-        // 确保段落之间有适当间隔
-        processed = processed.replace(Regex("\\n([\\s\\S]*?)\\n"), "\n$1\n")
-        
-        return processed
+    /**
+     * 收尾：折叠行内多余空白、压缩空行、去掉首尾空白。
+     *
+     * [keepLineBreaks] = true 时**保留换行**（诗词/文言）：它们靠"每句一行"承载结构，
+     * 旧实现一句 `Regex("\\s+") → " "` 把整篇折成一段，行序线索全丢，
+     * 后面针对 `\n` 的两条规则也成了死代码。
+     */
+    private fun postProcessText(text: String, keepLineBreaks: Boolean): String {
+        var processed = text.replace("\r\n", "\n").replace('\r', '\n')
+
+        processed = if (keepLineBreaks) {
+            // 只折行内空白（半角空格 / 制表 / 全角空格 / 不换行空格）
+            processed.replace(Regex("[ \\t\\u00A0\\u3000]+"), " ")
+                .replace(Regex("\\n{2,}"), "\n")
+        } else {
+            processed.replace(Regex("\\s+"), " ")
+        }
+
+        return processed.trim()
     }
 
     /**
@@ -338,7 +349,9 @@ class GaokaoTextCleaner {
         for (pattern in titlePatterns) {
             val matcher = pattern.toPattern().matcher(text)
             if (matcher.find()) {
-                val title = matcher.group(1) ?: matcher.group()
+                // 只有第一个 Pattern 有捕获组；后两个没有，直接 group(1) 会抛
+                // IndexOutOfBoundsException（首行兜底也走这里）。
+                val title = if (matcher.groupCount() >= 1) matcher.group(1) else matcher.group()
                 return title.trim().take(50) // 限制标题长度
             }
         }

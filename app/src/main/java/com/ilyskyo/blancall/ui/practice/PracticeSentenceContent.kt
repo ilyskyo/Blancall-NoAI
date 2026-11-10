@@ -16,7 +16,6 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.*
@@ -29,9 +28,11 @@ import com.ilyskyo.blancall.ui.common.TwoPaneMinHeightDp
 import com.ilyskyo.blancall.ui.common.TwoPaneMinWidthDp
 import com.ilyskyo.blancall.ui.common.suppressAsPalmMisTouch
 import com.ilyskyo.blancall.ui.common.DonationInviteRow
-import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
@@ -49,6 +50,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.ilyskyo.blancall.ui.theme.AppPrefs
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -63,6 +65,7 @@ internal fun SentenceClozeContent(
     crossSourceInfo: List<CrossTextReview.SourceInfo> = emptyList(),
     weakHints: Int = 0,
     strongHints: Int = 0,
+    coverage: com.ilyskyo.blancall.algorithm.PracticeCoverage? = null,
     analysis: String? = null,
     analysisLoading: Boolean = false,
     analysisError: Boolean = false,
@@ -72,6 +75,12 @@ internal fun SentenceClozeContent(
     onAnswerChange: (Int, String) -> Unit,
     /** 墨迹上报（错题回顾）：手写识别产生上屏内容时回调整次识别快照（blankIdx 已在内部绑定） */
     onInkCommitted: ((Int, List<List<Offset>>, Int, Int) -> Unit)? = null,
+    /**
+     * 是否在每个空位旁标出「这一空几个字」。
+     * 它与「内容提示」是两件事：长度是**结构线索**（该背多长），内容提示才是答案线索。
+     * 有人在背长句时只想要前者 —— 知道自己漏了两个字，但不想被喂字。
+     */
+    showBlankLength: Boolean = false,
     /**
      * 空内被挖去的标点是否照原样显示（「标点提示」开关）。
      * 长空可能横跨两个分句；不显示标点时，用户无从判断是一句还是两句。
@@ -83,6 +92,13 @@ internal fun SentenceClozeContent(
         var currentBlankIndex by remember { mutableIntStateOf(0) }
         val blanks = result.blanks
         val totalBlanks = blanks.size
+        // 切换策略/段落/自定义配置会重新生成 cloze，空数可能从 40 缩到 12。
+        // currentBlankIndex 若保持 19，输入框会绑定到界面上不存在的空号：
+        // 进度可 >100%、正文无回显、提交遍历不到。这里随总空数收敛。
+        LaunchedEffect(totalBlanks) {
+            currentBlankIndex = if (totalBlanks <= 0) 0
+            else currentBlankIndex.coerceIn(0, totalBlanks - 1)
+        }
         // 手写态下点挖空 → 弹出底部书写板（就地书写）。null = 未打开
         var sheetBlankIndex by remember { mutableStateOf<Int?>(null) }
         val handwritingMode by AppPrefs.handwritingInputEnabledFlow.collectAsStateWithLifecycle()
@@ -118,10 +134,13 @@ internal fun SentenceClozeContent(
         // ② 必须同时看高度：手机横屏宽度常达标（900dp），但高度只有 400dp 左右，
         //    右栏「输入区 + 手写板(≥140dp) + 切换 + 上一空/下一空」约 280dp 会被挤出可视区，
         //    表现为「书写板看不见/点不到」。只看宽度是错的。
-        val config = LocalConfiguration.current
+        val density = LocalDensity.current
+        val containerSize = LocalWindowInfo.current.containerSize
+        val screenWidthDp = with(density) { containerSize.width.toDp().value }
+        val screenHeightDp = with(density) { containerSize.height.toDp().value }
         val contentWidthDp =
-            config.screenWidthDp - (if (LocalIsLargeScreen) NavRailWidth.value.toInt() else 0)
-        val isWide = contentWidthDp >= TwoPaneMinWidthDp && config.screenHeightDp >= TwoPaneMinHeightDp
+            screenWidthDp - (if (LocalIsLargeScreen) NavRailWidth.value else 0f)
+        val isWide = contentWidthDp >= TwoPaneMinWidthDp && screenHeightDp >= TwoPaneMinHeightDp
 
         // 当前作答目标的文种：按**该空的标准答案**自动选模型
         // （含 CJK → 汉字模型；纯拉丁 → EMNIST 英语模型）。
@@ -169,6 +188,8 @@ internal fun SentenceClozeContent(
                                         checkResult = checkResults[blank.index],
                                         isSubmitted = isSubmitted,
                                         hintChar = hintChars[blank.index],
+                                        lengthHint = if (showBlankLength && !isSubmitted)
+                                            blank.originalText.length.takeIf { it > 0 } else null,
                                         showPunctuationHints = showPunctuationHints,
                                         onClick = {
                                             // 掌托守卫：手写时扶屏的手掌蹭到挖空，不应把书写板弹出来
@@ -246,7 +267,15 @@ internal fun SentenceClozeContent(
                 ) {
                     // 提交后顶部展示评分卡
                     if (isSubmitted) {
-                        item(key = "score") { BlancallScoreCard(checkResults, onViewArticleData, weakHints, strongHints) }
+                        item(key = "score") {
+                            BlancallScoreCard(
+                                checkResults = checkResults,
+                                onViewArticleData = onViewArticleData,
+                                weakHints = weakHints,
+                                strongHints = strongHints,
+                                coverage = coverage,
+                            )
+                        }
                         // 交卷后的赞赏入口：刚看到分数，注意力已经落在结果上，
                         // 所以只放一行无强调的文字（形态与门控理由见 ui/common/DonationInvite.kt）。
                         item(key = "donation_invite") { DonationInviteRow(slot = "score_card") }
@@ -273,6 +302,8 @@ internal fun SentenceClozeContent(
                                         checkResult = checkResults[blank.index],
                                         isSubmitted = isSubmitted,
                                         hintChar = hintChars[blank.index],
+                                        lengthHint = if (showBlankLength && !isSubmitted)
+                                            blank.originalText.length.takeIf { it > 0 } else null,
                                         showPunctuationHints = showPunctuationHints,
                                         // 笔点即书写：笔尖落在挖空上直接弹书写板，不用先手动切模式
                                         onPenTap = {
@@ -384,6 +415,8 @@ internal fun SentenceBlankInline(
     checkResult: AnswerChecker.CheckDetail?,
     isSubmitted: Boolean,
     hintChar: Char? = null,
+    /** 这一空有几个字（null = 不显示）。只作为长度线索，不泄露任何字。 */
+    lengthHint: Int? = null,
     /** 空内被挖去的标点是否照原样显示（见 SentenceClozeContent 的同名参数） */
     showPunctuationHints: Boolean = false,
     /**
@@ -403,7 +436,7 @@ internal fun SentenceBlankInline(
             // ① 「当前挖空」的选中底色变成圆角（原来是与圆角按键不一致的直角灰块）；
             // ② clickable 的按压/悬停指示器被裁成圆角 —— 指示器绘制在该节点边界内，
             //    链上若不先 clip，圆角控件上就会浮出一个直角矩形（真机复现过）。
-            .clip(RoundedCornerShape(6.dp))
+            .clip(SmoothRoundedCornerShape(6.dp))
             .then(
                 if (isCurrent && !isSubmitted)
                     Modifier.background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f))
@@ -433,6 +466,18 @@ internal fun SentenceBlankInline(
             )
         }
         Spacer(Modifier.width(4.dp))
+        // 字数提示：紧贴序号，用最弱的一级文字 —— 它回答"要背多少"，不该比句子本身显眼
+        if (!isSubmitted && lengthHint != null) {
+            Text(
+                pluralStringResource(
+                    com.ilyskyo.blancall.R.plurals.hint_length_badge,
+                    lengthHint, lengthHint
+                ),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+            )
+            Spacer(Modifier.width(4.dp))
+        }
 
         if (isSubmitted && checkResult != null) {
             // 提交后：紧凑显示答案与批改 + 相似度
@@ -528,8 +573,8 @@ private fun sentenceErrorLabel(result: AnswerChecker.Result): String = stringRes
 @Composable
 internal fun HintGhost(
     hintChar: Char?,
-    show: Boolean = true,
     modifier: Modifier = Modifier,
+    show: Boolean = true,
     /** 字号随宿主走：输入框内用 bodyMedium，弹层答案回显用 titleMedium（否则提示字会比答案小一号）。 */
     textStyle: TextStyle = MaterialTheme.typography.bodyMedium
 ) {
@@ -575,7 +620,7 @@ internal fun HintOutlinedField(
 ) {
     Surface(
         modifier = modifier,
-        shape = RoundedCornerShape(10.dp),
+        shape = SmoothRoundedCornerShape(10.dp),
         color = if (isError) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
         else MaterialTheme.colorScheme.surface,
         border = BorderStroke(

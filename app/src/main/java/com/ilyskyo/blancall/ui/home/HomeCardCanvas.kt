@@ -29,7 +29,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.Close
@@ -41,6 +40,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.VectorConverter
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -86,6 +86,7 @@ import com.ilyskyo.blancall.ui.common.pressFeedback
 import com.ilyskyo.blancall.ui.common.rememberConfirmHaptic
 import com.ilyskyo.blancall.ui.common.coachAnchor
 import com.ilyskyo.blancall.ui.common.pressClick
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 import kotlin.math.floor
@@ -186,8 +187,10 @@ private const val EDIT_MODE_LONG_PRESS_MS = 600L
  * 保证控件白钮在拖动/缩放中始终与卡片像素级对齐。
  */
 private data class CardGeo(
-    val x: Dp,
-    val y: Dp,
+    // 槽位坐标存 State 而不是 Dp：换格弹簧每帧都在变，读取放在 graphicsLayer 里
+    // 只触发那一层重绘；若在这里解包成 Dp，整个卡片循环会跟着逐帧重组。
+    val x: State<Dp>,
+    val y: State<Dp>,
     val width: Dp,
     val height: Dp,
     val colSpan: Int,
@@ -724,12 +727,19 @@ fun HomeCardCanvas(
     // 拖动时每个 move 只改 State/绘相位，不再让整块画布（所有卡片）每帧重组。
     var dragCardId by remember { mutableStateOf<String?>(null) }
     var dragTarget by remember { mutableStateOf(Offset.Zero) }
+    // 拖出量归谁消费：**必须按卡片 id 隔离**，否则所有卡片的 graphicsLayer 都叠加同一个
+    // dragAnim，拖一张等于拖整页。松手后 dragCardId 立刻清空，但回弹弹簧还要播到 0 ——
+    // 归属要撑到弹簧结束，否则抬手那一帧卡片从手指处瞬移回格子（丢掉拖出量）。
+    var dragOffsetOwnerId by remember { mutableStateOf<String?>(null) }
     val dragAnim = remember { Animatable(Offset.Zero, Offset.VectorConverter) }
     LaunchedEffect(dragCardId) {
-        if (dragCardId != null) {
+        val id = dragCardId
+        if (id != null) {
+            dragOffsetOwnerId = id
             snapshotFlow { dragTarget }.collect { dragAnim.snapTo(it) }
         } else {
             dragAnim.animateTo(Offset.Zero, Motion.slotSettleOffset())
+            dragOffsetOwnerId = null
         }
     }
     var resizeCardId by remember { mutableStateOf<String?>(null) }
@@ -807,7 +817,7 @@ fun HomeCardCanvas(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .clip(RoundedCornerShape(18.dp))
+                    .clip(SmoothRoundedCornerShape(18.dp))
                     .pressClick { cbAdd() }
                     .padding(vertical = 28.dp),
                 contentAlignment = Alignment.Center,
@@ -863,26 +873,25 @@ fun HomeCardCanvas(
                         val slotX = cellPitch * slot[1].toFloat()
                         val slotY = ROW_UNIT * slot[0].toFloat()
                         // 槽位：换格交给弹簧（改造前是两条互不相干的 220ms 定时补间）
-                        val animX by animateDpAsState(
+                        // 不在这里解包（by），保持 State 形态交给绘制阶段读
+                        val animX = animateDpAsState(
                             targetValue = slotX,
                             animationSpec = Motion.slotTravel(),
                             label = "cardSlotX",
                         )
-                        val animY by animateDpAsState(
+                        val animY = animateDpAsState(
                             targetValue = slotY,
                             animationSpec = Motion.slotTravel(),
                             label = "cardSlotY",
                         )
                         // 拖出量不再参与组合期几何：由 graphicsLayer 读取 dragAnim，
                         // 松手后同一根二维弹簧把 X/Y 一起弹回 0（见 dragAnim 的 LaunchedEffect）。
-                        val x = animX
-                        val y = animY
 
                         val w = cellW * colSpan.toFloat() +
                             COLUMN_GAP * (colSpan - 1).toFloat()
                         val h = ROW_UNIT * rowSpan.toFloat()
 
-                        geoMap[card.id] = CardGeo(x, y, w, h, colSpan, rowSpan, isDragging, isResizing)
+                        geoMap[card.id] = CardGeo(animX, animY, w, h, colSpan, rowSpan, isDragging, isResizing)
                     }
                 }
 
@@ -934,8 +943,13 @@ fun HomeCardCanvas(
                                 // 槽位弹簧与拖出量每帧都在改它 → 每帧重跑一遍 placement。
                                 // translation 只动绘相位，拖动与落位期间卡片不再逐帧重排。
                                 .graphicsLayer {
-                                    translationX = geo.x.toPx() + dragAnim.value.x
-                                    translationY = geo.y.toPx() + dragAnim.value.y
+                                    // 拖出量只在归属卡上生效（见 dragOffsetOwnerId）：
+                                    // 状态在绘制阶段读取，拖动中仍不触发重组。
+                                    val dragOffset =
+                                        if (dragOffsetOwnerId == card.id) dragAnim.value
+                                        else Offset.Zero
+                                    translationX = geo.x.value.toPx() + dragOffset.x
+                                    translationY = geo.y.value.toPx() + dragOffset.y
                                     scaleX = liftScale
                                     scaleY = liftScale
                                     alpha = liftAlpha * entryAlpha
@@ -1127,10 +1141,14 @@ fun HomeCardCanvas(
                                     .width(geo.width)
                                     .height(geo.height)
                                     .zIndex(if (geo.isDragging || geo.isResizing) 3f else 2f)
-                                    // 与内容层同一套 translation（两层必须逐帧一致，否则白钮会脱离卡角）
+                                    // 与内容层同一套 translation（两层必须逐帧一致，否则白钮会脱离卡角）；
+                                    // 同样只让归属卡消费拖出量，其余卡片保持原地。
                                     .graphicsLayer {
-                                        translationX = geo.x.toPx() + dragAnim.value.x
-                                        translationY = geo.y.toPx() + dragAnim.value.y
+                                        val dragOffset =
+                                            if (dragOffsetOwnerId == card.id) dragAnim.value
+                                            else Offset.Zero
+                                        translationX = geo.x.value.toPx() + dragOffset.x
+                                        translationY = geo.y.value.toPx() + dragOffset.y
                                         scaleX = controlLiftScale
                                         scaleY = controlLiftScale
                                         // 只缩放、**不设 alpha**：alpha<1 会让该层走离屏合成，

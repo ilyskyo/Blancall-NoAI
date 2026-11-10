@@ -3,6 +3,7 @@
 
 package com.ilyskyo.blancall.ui.common
 
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import com.ilyskyo.blancall.ui.theme.isBlancallDark
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -13,7 +14,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
@@ -55,7 +55,7 @@ import kotlinx.coroutines.launch
 fun GlassModalBottomSheet(
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
-    shape: Shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+    shape: Shape = SmoothRoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
     dragHandle: @Composable (() -> Unit)? = { GlassSheetGrabber() },
     scrimColor: Color = Color.Black.copy(alpha = 0.32f),
     // 可外部持有的 sheetState：调用方需要「程序化收起后再执行动作」时传入。

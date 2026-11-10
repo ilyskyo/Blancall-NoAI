@@ -9,13 +9,18 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import androidx.compose.ui.geometry.Offset
 import com.ilyskyo.blancall.algorithm.AnswerChecker
+import com.ilyskyo.blancall.algorithm.ArticleMemoryReads
+import com.ilyskyo.blancall.algorithm.MemoryModelConfig
+import com.ilyskyo.blancall.algorithm.PracticeCoverage
 import com.ilyskyo.blancall.algorithm.BlancallGenerator
 import com.ilyskyo.blancall.algorithm.CrossTextReview
 import com.ilyskyo.blancall.algorithm.DictationMistakes
 import com.ilyskyo.blancall.algorithm.DictationScorer
+import com.ilyskyo.blancall.algorithm.DictationSentenceStates
 import com.ilyskyo.blancall.algorithm.FsrsEngine
 import com.ilyskyo.blancall.algorithm.PracticeContentOps
 import com.ilyskyo.blancall.algorithm.RangeOps
+import com.ilyskyo.blancall.algorithm.RatingPolicy
 import com.ilyskyo.blancall.algorithm.SectionSplitter
 import com.ilyskyo.blancall.algorithm.SentencePracticeRatings
 import com.ilyskyo.blancall.algorithm.SentenceSplitter
@@ -34,6 +39,7 @@ import com.ilyskyo.blancall.data.repository.FsrsStateStore
 import com.ilyskyo.blancall.data.repository.InkBatch
 import com.ilyskyo.blancall.data.repository.InkStore
 import com.ilyskyo.blancall.data.repository.RecordRepository
+import com.ilyskyo.blancall.data.repository.ReviewSource
 import com.ilyskyo.blancall.ui.theme.AppPrefs
 import com.ilyskyo.blancall.ui.theme.ReminderPrefs
 import kotlinx.coroutines.Dispatchers
@@ -178,7 +184,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
         when (mode) {
             BlancallMode.SENTENCE -> s
             BlancallMode.WORD -> w
-            BlancallMode.REVERSE -> s
+            BlancallMode.REVERSE -> emptyMap()
         }
     }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyMap())
 
@@ -207,6 +213,11 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
 
     internal val _totalBlanks = MutableStateFlow(0)
     val totalBlanks: StateFlow<Int> = _totalBlanks.asStateFlow()
+
+    /** 本次练习对到期句的覆盖；LEGACY/非句子模式/段落模式为 null。 */
+    private val _dueCoverage = MutableStateFlow<PracticeCoverage?>(null)
+    val dueCoverage: StateFlow<PracticeCoverage?> = _dueCoverage.asStateFlow()
+    private var dueSentenceIndices: Set<Int> = emptySet()
 
     // 字词挖空数量（0 = 自动）
     private val _wordBlankCount = MutableStateFlow(0)
@@ -318,7 +329,8 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
     private var consecutiveCorrect = 0
 
     /** 本次练习开始时间戳，提交时用于计算 duration（毫秒）。0 表示尚未开始 */
-    private var practiceStartTime: Long = 0L
+    internal var practiceStartTime: Long = 0L
+    private var pendingResumeStartAt: Long = 0L
 
     // 跨文本联动（F7）
     private val _isCrossMode = MutableStateFlow(false)
@@ -426,6 +438,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
         _crossSourceInfo.value = emptyList()
         _crossArticleTitles.value = emptyList()
         activeCustomConfig = null
+        activeReviewSource = ReviewSource.OTHER
         _customConfigName.value = null
         _loadFailed.value = false
         // 「继续练习」是否已恢复上次挖好的空（恢复成功时跳过生成处重新生成）
@@ -470,7 +483,9 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                                 configId = json.optLong("configId", 0L),
                                 lastPracticeTime = json.optLong("lastPracticeTime", System.currentTimeMillis()),
                                 // 上次是句级聚焦会话（点一句去练）：恢复时要按同一窗口重建锚点
-                                focusSentence = json.optInt("focusSentence", -1)
+                                focusSentence = json.optInt("focusSentence", -1),
+                                contentHash = if (json.has("contentHash")) json.getString("contentHash") else null,
+                                startedAt = json.optLong("startedAt", 0L),
                             )
                         } else null
                     } catch (_: Exception) { null }
@@ -487,6 +502,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
             stopAllBlankHints()
             _weakHintCount.value = 0
             _strongHintCount.value = 0
+            strongHintedBlanks.clear()
             // 重置挖空数量为自动
             _wordBlankCount.value = 0
             // 重置段落选择
@@ -521,9 +537,28 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                         BlancallMode.REVERSE -> _dictationInput.value = savedState.dictationInput
                     }
                     _resumed.value = true
-                    // 恢复上次挖好的空（clozeJson）：直接复用上次挖空，无需重新生成/选难度
+                    if (savedState.startedAt > 0L) {
+                        practiceStartTime = savedState.startedAt
+                        pendingResumeStartAt = savedState.startedAt
+                    }
+                    val contentHashNow = com.ilyskyo.blancall.algorithm.ContentFingerprint.md5Hex(art.content)
+                    val contentHashMatches = savedState.contentHash == null ||
+                        savedState.contentHash == contentHashNow
+                    if (!contentHashMatches) {
+                        _sentenceCloze.value = null
+                        _wordCloze.value = null
+                        _dictationResult.value = null
+                        _totalBlanks.value = 0
+                        Toast.makeText(
+                            getApplication(),
+                            getApplication<Application>().getString(
+                                com.ilyskyo.blancall.R.string.cloze_hash_mismatch
+                            ),
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
                     val restored = savedState.clozeJson
-                    val restoredOk = when (restoredMode) {
+                    val restoredOk = contentHashMatches && when (restoredMode) {
                         BlancallMode.SENTENCE -> {
                             _sentenceCloze.value = restored?.let { BlancallGenerator.sentenceClozeFromJson(it) }
                             _sentenceCloze.value != null
@@ -648,6 +683,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
         _isCrossMode.value = articleIds.size > 1
         // 清理自定义练习残留（防御：同一 VM 先后加载不同来源时互不污染）
         activeCustomConfig = null
+        activeReviewSource = ReviewSource.OTHER
         _customConfigName.value = null
         _loadFailed.value = false
         // 跨文本强制全篇：句级聚焦窗口不适用
@@ -745,6 +781,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
             stopAllBlankHints()
             _weakHintCount.value = 0
             _strongHintCount.value = 0
+            strongHintedBlanks.clear()
             _wordBlankCount.value = 0
             _sectionMode.value = SectionMode.FULL
             _selectedSections.value = emptySet()
@@ -782,8 +819,9 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
             BlancallMode.WORD -> _wordCloze.value?.blanks?.size ?: 0
             BlancallMode.REVERSE -> _dictationResult.value?.clauses?.size ?: 0
         }
-        // 选定模式即开始计时（重做时重置起点）
-        practiceStartTime = System.currentTimeMillis()
+        // 选定模式即开始计时（重做时重置起点）。恢复会话的第一次 setMode 沿用保存的开始时刻。
+        practiceStartTime = pendingResumeStartAt.takeIf { it > 0L } ?: System.currentTimeMillis()
+        pendingResumeStartAt = 0L
     }
 
     fun setStrategy(newStrategy: BlancallGenerator.Strategy) {
@@ -971,8 +1009,9 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
     )
 
     private fun regenerateCloze() {
-        val content = _article.value?.content
-        if (content.isNullOrBlank()) return
+        val articleSnapshot = _article.value ?: return
+        val content = articleSnapshot.content
+        if (content.isBlank()) return
         // 自定义挖空练习进行中：禁止常规重生成覆盖自定义挖空
         // （进入练习时 loadArticle 完成阶段会调用本函数，与 startCustomPractice 存在时序竞态）
         if (activeCustomConfig != null) return
@@ -984,6 +1023,14 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
         val recordsSnapshot = articleRecords
         val strat = _strategy.value
         val classical = _classicalMode.value
+        val modeSnapshot = _mode.value
+        _dueCoverage.value = null
+        dueSentenceIndices = emptySet()
+        // 只有整篇、句子模式、投影口径才自动聚焦到期句；段落/句窗/旧口径不改生成范围。
+        val canFocusDue = MemoryModelConfig.model == ArticleMemoryReads.Model.SENTENCE_PROJECTION &&
+            modeSnapshot == BlancallMode.SENTENCE &&
+            articleSnapshot.id > 0L &&
+            effectiveContent == content
         // 取消上一次重生成，避免段落/策略快速切换时旧结果竞态覆盖
         sentenceGenerateJob?.cancel()
         wordGenerateJob?.cancel()
@@ -995,11 +1042,28 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
             var wordResult: BlancallGenerator.WordClozeResult? = null
             var dictationResult: BlancallGenerator.DictationResult? = null
             var anchors: List<Int> = emptyList()
+            val dueFocus = if (canFocusDue) {
+                withContext(Dispatchers.IO) {
+                    val store = FsrsStateStore.getInstance(
+                        getApplication<Application>().filesDir.resolve("fsrs_state.json").absolutePath
+                    )
+                    store.awaitLoaded()
+                    SentenceSelector.dueSentenceIndices(
+                        article = articleSnapshot,
+                        sentenceStates = store.allSentenceStates(),
+                    )
+                }.takeIf { it.isNotEmpty() }
+            } else {
+                null
+            }
+            dueSentenceIndices = dueFocus.orEmpty()
+            _dueCoverage.value = dueFocus?.let { PracticeCoverage(it.size, 0) }
             try {
                 withContext(Dispatchers.Default) {
                     val errorProfile = errorProfileFor(recordsSnapshot).rebasedForFocus()
                     sentenceResult = BlancallGenerator.generateSentenceCloze(
-                        effectiveContent, errorProfile = errorProfile, strategy = strat
+                        effectiveContent, errorProfile = errorProfile, strategy = strat,
+                        focusSentenceIndices = dueFocus,
                     )
                     wordResult = BlancallGenerator.generateWordCloze(
                         effectiveContent, errorProfile = errorProfile, strategy = strat, classicalMode = classical
@@ -1040,16 +1104,23 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
 
     internal var activeCustomConfig: CustomClozeStore.CustomConfig? = null
 
+    /** 当前自定义/一次性练习的来源；普通练习为 OTHER，由提交路径按模式补默认来源。 */
+    internal var activeReviewSource: ReviewSource = ReviewSource.OTHER
+
     /**
      * 用一套配置直接开始自定义练习（配置选择浮层调用）。
      * @return 是否成功应用；false = 配置与当前文章内容不匹配（已自动解除锁定并回退随机生成），
      *         调用方只需提示用户，不会进入"锁定 + 死界面"状态。
      */
-    fun startCustomPractice(config: CustomClozeStore.CustomConfig): Boolean {
+    fun startCustomPractice(
+        config: CustomClozeStore.CustomConfig,
+        source: ReviewSource = ReviewSource.CUSTOM_CLOZE,
+    ): Boolean {
         // 新会话：错题墨迹缓冲作废（同 loadArticle 的约定）
         inkBuffer.clear()
         // 先上锁再应用：拦截 loadArticle 完成阶段的在途 regenerateCloze（时序竞态）
         activeCustomConfig = config
+        activeReviewSource = source
         _customConfigName.value = config.name
         val ok = try {
             applyCustomPractice(config.blanks, config.mode)
@@ -1059,6 +1130,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
         if (!ok) {
             // 应用失败：解除锁定并回退随机生成，避免锁定 UI + 无限"正在生成挖空"
             activeCustomConfig = null
+            activeReviewSource = ReviewSource.OTHER
             _customConfigName.value = null
             regenerateCloze()
         }
@@ -1097,6 +1169,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
         dictationGenerateJob?.cancel()
 
         // 锁定 + 重做可重建的合成配置（空位已是混合内容坐标）
+        activeReviewSource = ReviewSource.CUSTOM_CLOZE
         activeCustomConfig = CustomClozeStore.CustomConfig(
             id = -1L,
             name = getApplication<Application>().getString(com.ilyskyo.blancall.R.string.custom_cloze),
@@ -1124,6 +1197,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
         stopAllBlankHints()
         _weakHintCount.value = 0
         _strongHintCount.value = 0
+        strongHintedBlanks.clear()
 
         _mode.value = BlancallMode.SENTENCE
         val result = BlancallGenerator.buildCustomSentenceCloze(content, bySentence)
@@ -1176,6 +1250,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
         stopAllBlankHints()
         _weakHintCount.value = 0
         _strongHintCount.value = 0
+        strongHintedBlanks.clear()
 
         when (modeStr) {
             "SENTENCE" -> {
@@ -1241,11 +1316,11 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
         wordGenerateJob?.cancel()
         wordGenerateJob = viewModelScope.launch {
             val content = _article.value?.content ?: return@launch
+            val recordsSnapshot = articleRecords
             val secs = _sections.value
             val scope = generationScope(content, secs)
             val effectiveContent = scope.content
             _wordAnswers.value = emptyMap()
-            val recordsSnapshot = articleRecords
             val strat = _strategy.value
             val classical = _classicalMode.value
             var result: BlancallGenerator.WordClozeResult? = null
@@ -1396,9 +1471,16 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
             // 跨文练习（articleId=-1）不写进度：不同组合会互相覆盖且无法恢复，明确不支持续练
             if (articleId <= 0L) return
             val input = _dictationInput.value
+            if (input.isBlank()) return
             viewModelScope.launch { savePracticeState(articleId, emptyMap(), input) }
             return
         }
+        val answers = when (_mode.value) {
+            BlancallMode.SENTENCE -> _sentenceAnswers.value
+            BlancallMode.WORD -> _wordAnswers.value
+            BlancallMode.REVERSE -> emptyMap()
+        }
+        if (answers.values.none { it.isNotBlank() }) return
         submitInternal(partial = true)
     }
 
@@ -1459,6 +1541,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                     )
                 }
             }
+            var savedRecordId = 0L
             try {
                 // 接住返回值：错题墨迹旁路存档要用记录 id（见 saveWrongInk）
                 val saved = recordRepo.insert(
@@ -1477,6 +1560,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                         strongHints = _strongHintCount.value
                     )
                 )
+                savedRecordId = saved?.id ?: 0L
                 // 反向默写现在也有逐空错题结构（见 DictationMistakes）；墨迹缓冲仍按原样清 ——
                 // 默写没有单空位可挂笔迹，错题回顾对这一模式仍只显示文字明细
                 saveWrongInk(saved)
@@ -1487,36 +1571,41 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
             // 而 Blancall 的核心用法就是反复练同一篇，那样门槛会退化成「5 篇不同文章」。
             AppPrefs.noteDonationCompletion()
             // 更新 FSRS 记忆状态（自适应调度）
-            updateFsrsState(articleId, rating)
-            // 跨文反向默写没有文章级归属，但逐句有来源：把每一句写回自己的句子状态，
-            // 否则跨文默写同样会脱离句子卡/记忆热力图。
-            if (articleId <= 0L) {
-                val matched = checkResult.sentences.associateBy { it.matchIndex }
-                // 同一句里的多个分句合并成一次状态更新，取最差评级
-                val ratingsBySentence = LinkedHashMap<Int, FsrsEngine.Rating>()
-                originalSentences.forEachIndexed { index, text ->
-                    if (text.isBlank()) return@forEachIndexed
-                    val sentenceIdx = clauseSentenceIndices.getOrNull(index) ?: return@forEachIndexed
-                    if (sentenceIdx !in crossSentences.indices) return@forEachIndexed
-                    val check = matched[index]
-                    val clauseRating = if (check == null) {
-                        FsrsEngine.Rating.AGAIN
-                    } else {
-                        resolveRating(
-                            check.similarity,
-                            if (check.result == AnswerChecker.Result.CORRECT) 1f else 0f,
-                        )
-                    }
-                    val prev = ratingsBySentence[sentenceIdx]
-                    ratingsBySentence[sentenceIdx] = if (prev == null) clauseRating else minOf(prev, clauseRating)
-                }
-                val perSentence = ratingsBySentence.mapNotNull { (sentenceIdx, clauseRating) ->
-                    val source = crossSources.getOrNull(sentenceIdx) ?: return@mapNotNull null
-                    val text = crossSentences.getOrNull(sentenceIdx) ?: return@mapNotNull null
-                    SentenceSelector.sentenceKey(source.articleId, text) to clauseRating
-                }.toMap()
-                updateSentenceStates(perSentence)
+            val dictationSource = if (articleId > 0L) ReviewSource.DICTATION else ReviewSource.CROSS_DICTATION
+            updateFsrsState(articleId, rating, dictationSource, savedRecordId)
+            // 同篇与跨文都逐句写回：同篇以前只写篇级，句子卡永远不知道这次默写；
+            // 跨文没有篇级归属，但每一句都有来源文章。两条路径共用同一套分句映射。
+            val fullSentences = if (articleId > 0L) {
+                SentenceSplitter.split(_article.value?.content.orEmpty())
+            } else {
+                crossSentences
             }
+            val clauseToSentence = if (articleId > 0L) {
+                CrossTextReview.clauseSentenceIndices(originalSentences, fullSentences)
+            } else {
+                clauseSentenceIndices
+            }
+            val perSentence = DictationSentenceStates.build(
+                clauses = originalSentences,
+                check = checkResult,
+                sentences = fullSentences,
+                clauseToSentence = clauseToSentence,
+                sentenceKeyOf = { sentenceIdx ->
+                    val ownerId = if (articleId > 0L) {
+                        articleId
+                    } else {
+                        crossSources.getOrNull(sentenceIdx)?.articleId
+                    }
+                    if (ownerId == null) {
+                        null
+                    } else {
+                        fullSentences.getOrNull(sentenceIdx)
+                            ?.let { SentenceSelector.sentenceKey(ownerId, it) }
+                    }
+                },
+                ratingOf = { similarity, accuracy -> resolveRating(similarity, accuracy) },
+            )
+            updateSentenceStates(perSentence, dictationSource, savedRecordId)
             // 反向默写完整提交后清除进度文件
             clearPracticeState(articleId)
         }.also { it.invokeOnCompletion { _isSubmitting.value = false } }
@@ -1563,15 +1652,12 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                     }
                 } catch (_: Exception) { /* 判分异常不崩，结果为空 */ }
             }
+            if (results.isEmpty()) return@launch
             _checkResults.value = results
             _isSubmitted.value = true
-
-            // 记录今天已学习（用于连续天数统计 + 智能提醒）。
-            // 一个空都没判分时不算「今天学过」，也不入库、不写 FSRS：这种空记录会污染
-            // 总次数 / 今日目标 / 日历热力图，而 ForgettingPredictor 还把 totalBlanks==0 当 100% 正确率。
-            // 空 results 的真实来源：partial 提交时空白全部跳过、cloze 为 null、判分异常被上面吞掉。
             val graded = results.isNotEmpty()
-            if (graded) ReminderPrefs.recordStudyToday()
+            val persist = graded && !partial
+            if (persist) ReminderPrefs.recordStudyToday()
 
             // 保存练习记录（仅包含已批改的）
             val recordRepo = RecordRepository.getInstance(
@@ -1613,9 +1699,10 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                         ?.firstOrNull { it.index == blankIdx }
                         ?.sentenceIndex
                         ?.let { sentenceCloze.sentences.getOrNull(it) }
-                    BlancallMode.WORD -> wordCloze?.sentences
-                        ?.firstOrNull { s -> s.blanks.any { it == blankIdx } }
-                        ?.text
+                    BlancallMode.WORD -> wordCloze?.let { wc ->
+                        val idx = wc.sentences.indexOfFirst { s -> s.blanks.any { it == blankIdx } }
+                        if (idx >= 0) BlancallGenerator.originalWordSentence(wc, idx) else null
+                    }
                     else -> null
                 }.orEmpty()
             }
@@ -1688,9 +1775,16 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
             } else {
                 emptyList()
             }
+            _dueCoverage.value = _dueCoverage.value?.let { current ->
+                // 先汇总本次实际判分的句子，再与到期集合求交；逐句反复 firstOrNull 是 O(D×B²)。
+                val assessedSentences = results.keys.mapNotNull(blankSentenceIndex).toSet()
+                val assessed = dueSentenceIndices.count { it in assessedSentences }
+                PracticeCoverage(current.dueTotal, assessed)
+            }
+            var savedRecordId = 0L
             try {
                 // 接住返回值：错题墨迹旁路存档要用记录 id（见 saveWrongInk）
-                val saved = if (graded) recordRepo.insert(
+                val saved = if (persist) recordRepo.insert(
                     PracticeRecord(
                         articleId = articleId,
                         sourceArticleIds = if (articleId > 0L) emptyList()
@@ -1709,31 +1803,47 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                         answeredBlanks = answeredBlanks
                     )
                 ) else null
+                savedRecordId = saved?.id ?: 0L
                 saved?.let { saveWrongInk(it) }
             } catch (_: Exception) { /* 记录失败不影响主流程 */ }
             // 累计一次「完成一次练习」：赞赏邀请的门槛依据（见 ui/common/DonationInvite.kt）。
-            // 只算真正评级完成的提交（graded）；部分提交不算一次练习。
+            // 只算真正完成并落库的提交（persist）；部分提交只是保存进度。
             // 计在这里而不是评分卡里：见 submitDictation 同一处的说明。
-            if (graded) AppPrefs.noteDonationCompletion()
+            if (persist) AppPrefs.noteDonationCompletion()
+            val sessionSource = activeReviewSource.takeIf { it != ReviewSource.OTHER }
+                ?: if (articleId > 0L) ReviewSource.SENTENCE_CLOZE else ReviewSource.CROSS_SENTENCE_CLOZE
             // 更新 FSRS 记忆状态（自适应调度）
-            if (graded) updateFsrsState(articleId, rating)
+            if (persist) updateFsrsState(articleId, rating, sessionSource, savedRecordId)
             // 逐句也进 FSRS 闭环：整场练习塌成一个文章级评级时，调度器永远不知道**哪句**生疏
             // （文章级 state 照旧写，这一遍是往同一个 store 的句子命名空间里加来源）。
             // 键 = s:<articleId>:<hash16>，与每日一句同一套口径，存储层与备份格式零改动。
             // 跨文会话没有文章级归属，但每一句都有来源文章：按来源写句子级状态，
             // 否则标签/多选发起的跨文复习会完全脱离记忆调度，成为一场只会计数的练习。
-            if (graded) {
+            if (persist) {
                 val sentenceTexts = when (mode) {
                     BlancallMode.SENTENCE -> sentenceCloze?.sentences
-                    BlancallMode.WORD -> wordCloze?.sentences?.map { it.text }
+                    BlancallMode.WORD -> wordCloze?.let { wc ->
+                        wc.sentences.indices.map { BlancallGenerator.originalWordSentence(wc, it) }
+                    }
                     else -> null
                 }
                 if (sentenceTexts != null) {
                     val perSentence = SentencePracticeRatings.bySentence(
                         results.mapValues { it.value.result }, blankSentenceIndex
                     )
+                    // 强提示按句封顶：篇级 resolveRating 已有全局封顶，句级以前漏了，
+                    // 于是同一场练习里篇级被压到 HARD、句级还能拿 GOOD/EASY。
+                    val strongHintedSentences = strongHintedBlanks
+                        .mapNotNull { blankSentenceIndex(it) }
+                        .toSet()
+                    val capped = perSentence.mapValues { (sentenceIdx, rating) ->
+                        RatingPolicy.apply(
+                            rating,
+                            RatingPolicy.capFor(sessionSource, sentenceIdx in strongHintedSentences)
+                        )
+                    }
                     updateSentenceStates(
-                        perSentence.mapNotNull { (sentenceIdx, rating) ->
+                        capped.mapNotNull { (sentenceIdx, rating) ->
                             val text = sentenceTexts.getOrNull(sentenceIdx) ?: return@mapNotNull null
                             val ownerId = if (articleId > 0L) {
                                 articleId
@@ -1741,7 +1851,9 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                                 crossSources.getOrNull(sentenceIdx)?.articleId ?: return@mapNotNull null
                             }
                             SentenceSelector.sentenceKey(ownerId, text) to rating
-                        }.toMap()
+                        }.toMap(),
+                        sessionSource,
+                        savedRecordId,
                     )
                 }
             }
@@ -1753,7 +1865,7 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                 clearPracticeState(articleId)
             }
             // 桌面小组件的到期数立刻跟随本次提交（不等系统 15 分钟刷新）
-            if (graded) {
+            if (persist) {
                 com.ilyskyo.blancall.widget.BlancallWidgetRefresh.request(getApplication())
             }
         }.also { it.invokeOnCompletion { _isSubmitting.value = false } }
@@ -1798,11 +1910,13 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
         stopAllBlankHints()
         _weakHintCount.value = 0
         _strongHintCount.value = 0
+        strongHintedBlanks.clear()
         // 自定义练习重做：按配置重建挖空，不走常规重生成；
         // 配置已不适用（文章被改短等）→ 解除锁定，落回常规重做
         activeCustomConfig?.let {
             if (applyCustomPractice(it.blanks, it.mode)) return
             activeCustomConfig = null
+            activeReviewSource = ReviewSource.OTHER
             _customConfigName.value = null
         }
         val secs = _sections.value
@@ -1874,6 +1988,17 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
                     _dictationInput.value = ""
                 }
             }
+            // 挖空换了位置，答案必须一起作废。
+            //
+            // 答案 Map 的 key 是「空序号」，不是「空的身份」：换了段落 / 切了策略 / 开了古文模式，
+            // 同一序号指向的是完全不同的文字。旧实现只替换 cloze、不动答案，于是屏幕上会冒出
+            // 「自己没答过的答案」，提交后按错位的文字判分，错题本、弱点雷达、FSRS 一起污染。
+            _sentenceAnswers.value = emptyMap()
+            _wordAnswers.value = emptyMap()
+            _dictationInput.value = ""
+            _hintChars.value = emptyMap()
+            strongHintedBlanks.clear()
+            blankInputVersions.clear()
         }
         // 记录当前模式的Job
         when (_mode.value) {
@@ -1883,3 +2008,12 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
         }
     }
 }
+    /**
+     * 被「强提示自动填入」过的空下标。
+     *
+     * 这些空的答案不是用户回忆出来的：判分仍按文本走（写出来的确实是正确答案），
+     * 但**整篇评级要封顶到 HARD**（见 [resolveRating] 的 hintCeiling）。
+     * 否则干等 20 秒让系统把字填满就能拿 EASY 与最长间隔，
+     * 等于把「间隔重复」变成「等提示」。
+     */
+    internal val strongHintedBlanks = mutableSetOf<Int>()

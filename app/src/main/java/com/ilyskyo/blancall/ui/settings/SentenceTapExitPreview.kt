@@ -16,7 +16,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -38,6 +37,7 @@ import com.ilyskyo.blancall.R
 import com.ilyskyo.blancall.ui.common.Motion
 import com.ilyskyo.blancall.ui.common.PressTier
 import com.ilyskyo.blancall.ui.common.pressClick
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import kotlinx.coroutines.delay
 
 /**
@@ -85,7 +85,7 @@ fun SentenceTapExitPreview(
         modifier = modifier
             .fillMaxWidth()
             .height(104.dp)
-            .clip(RoundedCornerShape(14.dp))
+            .clip(SmoothRoundedCornerShape(14.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
             .onSizeChanged { containerHeight = it.height }
             .pressClick(tier = PressTier.Container) { replay++ },
@@ -115,7 +115,7 @@ private fun PreviewCard(
 ) {
     Surface(
         modifier = modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(12.dp),
+        shape = SmoothRoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surface,
         border = androidx.compose.foundation.BorderStroke(
             1.dp,
@@ -153,7 +153,7 @@ private fun SkeletonBar(widthFraction: Float) {
         Modifier
             .fillMaxWidth(widthFraction)
             .height(7.dp)
-            .clip(RoundedCornerShape(4.dp))
+            .clip(SmoothRoundedCornerShape(4.dp))
             .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.11f)),
     )
 }

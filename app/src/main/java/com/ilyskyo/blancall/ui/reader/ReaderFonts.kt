@@ -109,11 +109,20 @@ object ReaderFonts {
 
     private val SYSTEM_FONT_DIRS = listOf("/system/fonts")
 
+    /** 系统字体不会在进程内变化；旧实现每次打开设置都整份读取几十个字体文件。 */
+    @Volatile
+    private var systemFontCache: List<ReaderFont>? = null
+
+    /** 导入/删除字体时置空；列表很小，重建成本可控。 */
+    @Volatile
+    private var importedFontCache: List<ReaderFont>? = null
+
     /**
      * 扫描系统字体：列出 /system/fonts 下的 .ttf/.otf 单字体文件（跳过 .ttc 集合，
      * 避免 Typeface.createFromFile 无法正确加载），解析家族名仅供展示。
      */
     fun scanSystemFonts(): List<ReaderFont> {
+        systemFontCache?.let { return it }
         val result = mutableListOf<ReaderFont>()
         for (dir in SYSTEM_FONT_DIRS) {
             val d = File(dir)
@@ -128,7 +137,7 @@ object ReaderFonts {
             }
         }
         // 稳定排序，优先中文字体感知（名称含 Song/Hei/Ming 的靠前）便于用户辨识
-        return result.sortedBy { it.name.lowercase() }
+        return result.sortedBy { it.name.lowercase() }.also { systemFontCache = it }
     }
 
     /** 内部字体目录 */
@@ -143,12 +152,14 @@ object ReaderFonts {
     }
 
     /** 已导入字体（解析家族名展示，供遮挡/字体下拉复用） */
-    fun listImportedFonts(context: Context): List<ReaderFont> =
-        importedFiles(context).map { f ->
+    fun listImportedFonts(context: Context): List<ReaderFont> {
+        importedFontCache?.let { return it }
+        return importedFiles(context).map { f ->
             val name = runCatching { readFontFamilyName(f.readBytes()) }
                 .getOrDefault("").ifBlank { f.nameWithoutExtension }
             ReaderFont("imp:${f.name}", name, FontSource.IMPORTED)
-        }
+        }.also { importedFontCache = it }
+    }
 
     /**
      * 导入字体文件：校验是 TTF/OTF 后拷贝到内部目录，解析家族名。
@@ -161,6 +172,7 @@ object ReaderFonts {
         val name = readFontFamilyName(bytes).ifBlank { fileName.substringBeforeLast('.').trim().ifBlank { context.getString(R.string.font_imported_default) } }
         val target = File(fontsDir(context), UUID.randomUUID().toString() + ext)
         runCatching { target.writeBytes(bytes) }.getOrNull() ?: return null
+        importedFontCache = null
         return ReaderFont("imp:${target.name}", name, FontSource.IMPORTED)
     }
 
@@ -169,7 +181,9 @@ object ReaderFonts {
         if (!id.startsWith("imp:")) return false
         val rel = id.substringAfter("imp:")
         val f = File(fontsDir(context), rel)
-        return f.exists() && f.delete()
+        val deleted = f.exists() && f.delete()
+        if (deleted) importedFontCache = null
+        return deleted
     }
 
     /** 判断字节是否为合法 TTF/OTF（sfnt 标识 0x00010000 / 'OTTO'），用于导入校验 */

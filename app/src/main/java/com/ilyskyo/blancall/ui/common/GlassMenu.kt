@@ -10,6 +10,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import com.ilyskyo.blancall.ui.theme.isBlancallDark
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -23,7 +24,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.HorizontalDivider
@@ -65,14 +65,17 @@ fun GlassDropdownMenu(
         onDismissRequest = onDismissRequest,
         modifier = modifier,
         offset = DpOffset(0.dp, 6.dp),
-        shape = RoundedCornerShape(18.dp),
+        shape = SmoothRoundedCornerShape(18.dp),
         containerColor = Color.Transparent,
         tonalElevation = 0.dp,
         shadowElevation = 0.dp,
         border = null
     ) {
         // 宽度随屏幕自适应：宽屏仅略收窄，手机取约 55% 宽（更贴内容、不再过宽），最大 256dp、最小 200dp
-        val screenW = androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp.dp
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val screenW = with(density) {
+            androidx.compose.ui.platform.LocalWindowInfo.current.containerSize.width.toDp()
+        }
         val menuWidth = minOf(256.dp, maxOf(200.dp, screenW * 0.55f))
         GlassMenuCard(width = menuWidth, content = content)
     }
@@ -98,7 +101,7 @@ private fun GlassMenuCard(
     // 与 GlassBlur.GLASS_MENU_ALPHA_LIGHT 对齐。卡片仍保留 GLASS_ALPHA_LIGHT = 0.72 的玻璃感。
     val bgAlpha = if (isDark) 0.95f else GLASS_MENU_ALPHA_LIGHT
     val stainColor = baseColor.copy(alpha = bgAlpha)
-    val shape = RoundedCornerShape(18.dp)
+    val shape = SmoothRoundedCornerShape(18.dp)
 
     Box(
         modifier = Modifier

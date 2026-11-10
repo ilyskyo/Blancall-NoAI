@@ -87,6 +87,20 @@ enum class AppLocale(val tag: String, val nativeName: String) {
         }
 
         /**
+         * 系统从 Android 12 升到 13（或从旧备份恢复）时，旧实现只写了本地 tag，
+         * 而 33+ 的 [current] 只读框架 LocaleManager —— 用户的选择会静默回退成「跟随系统」。
+         * 启动时做一次性迁移：框架为空且本地有 tag，就把它灌进框架。
+         */
+        fun migrateLegacyTag(context: Context) {
+            if (!usesFramework) return
+            val legacy = storedTag(context)
+            if (legacy.isBlank()) return
+            if (frameworkTag(context) == null) {
+                applyApi33(context.applicationContext, legacy)
+            }
+        }
+
+        /**
          * 纯函数：把「框架里的语言」与「本地存的 tag」合成当前生效项。
          * 单独拎出来是为了能在 JVM 里测两条通道与简繁区分（没有设备也能测到分支）。
          */

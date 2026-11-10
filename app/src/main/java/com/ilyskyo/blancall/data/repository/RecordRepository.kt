@@ -199,6 +199,39 @@ class RecordRepository(private val filePath: String) {
                 if (clearWhenMissing) {
                     clearInMemory()
                     fileNeedsFullRewrite = true
+                    return
+                }
+                // 主文件缺失、但 .bak 在 —— 这是「写盘轮换中途被杀」留下的典型状态。
+                //
+                // 旧实现在这里直接 return，把用户全部练习历史读成空库；随后第一次 append
+                // 会新建一个只含新记录的文件，历史数据仍在磁盘上却永远读不回来。
+                // 备份导入语义（allowBackupRecovery=false）不适用：那时盘上那份才是唯一真相。
+                if (allowBackupRecovery) {
+                    val bak = File(filePath + ".bak")
+                    if (bak.isFile) {
+                        try {
+                            val bakStr = bak.readText()
+                            if (bakStr.isNotBlank()) {
+                                val (loaded, maxId, _) = parseFile(bakStr)
+                                if (loaded.isNotEmpty()) {
+                                    synchronized(stateLock) {
+                                        _records.value = loaded
+                                        nextId = maxId.coerceAtLeast(0) + 1
+                                        articleIndex = loaded.groupBy { it.articleId }
+                                        // 主文件不存在 ⇒ 下次落盘必须整体重建，不能 append 到空文件
+                                        fileNeedsFullRewrite = true
+                                    }
+                                    Log.w(
+                                        "RecordRepository",
+                                        "main file missing; restored ${loaded.size} records from backup",
+                                    )
+                                    return
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.e("RecordRepository", "main file missing and backup recovery failed", e)
+                        }
+                    }
                 }
                 return
             }
@@ -395,6 +428,27 @@ class RecordRepository(private val filePath: String) {
                 articleIndex = articleIndex - articleId
             }
             saveToFileLocked()
+            refreshBackupSnapshot()
+        }
+    }
+
+    /**
+     * 删除后把刚写好的主文件复制成独立 `.bak`。
+     *
+     * `saveToFileLocked` 的 `.bak` 轮换保存的是**删除前**的快照；主文件一旦丢失，
+     * 各 Store 的「主文件缺失 → 回读 .bak」会把用户刚删掉的记录复活。
+     * 删除是低频路径，这里多一次复制换「删除真的生效」。
+     */
+    private suspend fun refreshBackupSnapshot() {
+        withContext(Dispatchers.IO) {
+            runCatching {
+                val main = File(filePath)
+                val bak = File(filePath + ".bak")
+                if (main.isFile) {
+                    bak.delete()
+                    main.copyTo(bak, overwrite = true)
+                }
+            }
         }
     }
 
@@ -428,7 +482,10 @@ class RecordRepository(private val filePath: String) {
                     articleIndex = after.groupBy { it.articleId }
                 }
             }
-            if (removed > 0) saveToFileLocked()
+            if (removed > 0) {
+                saveToFileLocked()
+                refreshBackupSnapshot()
+            }
             removed
         }
     }

@@ -96,6 +96,7 @@ import com.ilyskyo.blancall.ui.common.combinedPress
 import com.ilyskyo.blancall.ui.practice.pinchZoom
 import com.ilyskyo.blancall.ui.theme.AppPrefs
 import com.ilyskyo.blancall.ui.theme.Macaron
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import com.ilyskyo.blancall.ui.theme.rememberAppIsDark
 import com.ilyskyo.blancall.ui.theme.ThemeMode
 import kotlinx.coroutines.Dispatchers
@@ -134,10 +135,23 @@ fun MaskConfigEditScreen(
     // ── 主题明暗与阅读排版（与 ReadingModeScreen 同一路由，保证"像阅读界面"）──
     val isDark = rememberAppIsDark()
     val appBeige by AppPrefs.lightBeigeBackgroundFlow.collectAsState()
-    val fontPx by AppPrefs.readingFontFlow.collectAsState()
-    val lineHeight by AppPrefs.readingLineHeightFlow.collectAsState()
-    val bgMode by AppPrefs.readingBgModeFlow.collectAsState()
-    val fontId by AppPrefs.readingFontIdFlow.collectAsState()
+    // 必须读「本文章」的阅读设置，不能读全局 AppPrefs：
+    // 编辑器显示的是 A 文章的实际排版；捏合/选色也只能写 A 的存档，
+    // 否则在编辑器里调一次字号会把 B 及所有无存档文章一起改掉。
+    val prefsStore = remember { ReaderPrefsStore.getInstance(context) }
+    var articlePrefs by remember(article.id) {
+        mutableStateOf(loadArticleReaderPrefs(prefsStore, article.id))
+    }
+    var prefsSaveSeq by remember { mutableIntStateOf(0) }
+    LaunchedEffect(prefsSaveSeq) {
+        if (prefsSaveSeq == 0) return@LaunchedEffect
+        kotlinx.coroutines.delay(400)
+        withContext(Dispatchers.IO) { prefsStore.save(article.id, articlePrefs) }
+    }
+    val fontPx = articlePrefs.fontPx
+    val lineHeight = articlePrefs.lineHeight
+    val bgMode = articlePrefs.bgMode
+    val fontId = articlePrefs.fontId
     val autoIndent by AppPrefs.autoIndentEnabledFlow.collectAsState()
     val bgColor = when {
         isDark -> Color(0xFF000000)
@@ -156,9 +170,9 @@ fun MaskConfigEditScreen(
         else -> Color(0xFF9E9E9E)
     }
     val accent = if (isDark) Color(0xFF7C9ED1) else MaterialTheme.colorScheme.primary
-    val fontFamily = remember(context, fontId) {
+    val fontFamily = remember(context, fontId, articlePrefs.fontWeight) {
         // 与阅读正文同字重，保证编辑器里的预览和进入阅读后一致
-        ReaderFonts.resolveFontFamily(context, fontId, AppPrefs.readingFontWeight)
+        ReaderFonts.resolveFontFamily(context, fontId, articlePrefs.fontWeight)
             ?: FontFamily.Default
     }
     val indent = autoIndent && article.autoIndent
@@ -180,8 +194,8 @@ fun MaskConfigEditScreen(
     // 已遮挡块（段落索引 + 段内局部区间 + 颜色索引）
     val masks = remember { mutableStateListOf<MaskConfigStore.MaskSpan>() }
     var loaded by remember { mutableStateOf(false) }
-    // 当前挡片颜色（顶部选色），与阅读设置挡片颜色互通
-    var colorIdx by rememberSaveable { mutableIntStateOf(AppPrefs.readingOcclusionColor) }
+    // 当前挡片颜色（顶部选色），与「本文章」阅读设置互通（不再写全局 AppPrefs）
+    var colorIdx by rememberSaveable { mutableIntStateOf(articlePrefs.occlusionColor) }
     var editingName by rememberSaveable { mutableStateOf("") }
     var showSaveDialog by remember { mutableStateOf(false) }
     var savedId by rememberSaveable { mutableLongStateOf(if (configId > 0) configId else -1L) }
@@ -454,8 +468,8 @@ fun MaskConfigEditScreen(
     ) {
         Column(
             modifier = Modifier
-                .fillMaxWidth()
                 .widthIn(max = 640.dp)
+                .fillMaxWidth()
                 .align(Alignment.CenterHorizontally)
                 .padding(horizontal = 20.dp)
         ) {
@@ -498,14 +512,14 @@ fun MaskConfigEditScreen(
                     style = MaterialTheme.typography.labelLarge,
                     color = if (masks.isEmpty()) subColor.copy(alpha = 0.35f) else subColor,
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(SmoothRoundedCornerShape(8.dp))
                         .combinedPress(tier = PressTier.Icon, enabled = masks.isNotEmpty(), onClick = { clearAllMasks() })
                         .padding(horizontal = 8.dp, vertical = 8.dp)
                 )
                 Spacer(Modifier.width(4.dp))
                 Button(
                     onClick = { requestSave() },
-                    shape = RoundedCornerShape(10.dp)
+                    shape = SmoothRoundedCornerShape(10.dp)
                 ) {
                     Text(stringResource(com.ilyskyo.blancall.R.string.save))
                 }
@@ -525,7 +539,7 @@ fun MaskConfigEditScreen(
                     color = MaterialTheme.colorScheme.onErrorContainer,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(10.dp))
+                        .clip(SmoothRoundedCornerShape(10.dp))
                         .background(MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f))
                         .padding(horizontal = 12.dp, vertical = 8.dp)
                 )
@@ -551,7 +565,11 @@ fun MaskConfigEditScreen(
                                 )
                                 .combinedPress(
                                     tier = PressTier.Icon,
-                                    onClick = { colorIdx = idx; AppPrefs.readingOcclusionColor = idx }
+                                    onClick = {
+                                        colorIdx = idx
+                                        articlePrefs = articlePrefs.copy(occlusionColor = idx)
+                                        prefsSaveSeq++
+                                    }
                                 ),
                             contentAlignment = Alignment.Center
                         ) {}
@@ -577,11 +595,14 @@ fun MaskConfigEditScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    // 双指捏合调整字号（与文章详情页 / 练习页同款手势）：字号写共享的
-                    // AppPrefs.readingFont，本页用 readingFontFlow 实时渲染，捏合即所见即所得；
+                    // 双指捏合调整字号（与文章详情页 / 练习页同款手势）：只改「本文章」
+                    // 阅读设置的内存值，400ms 防抖落盘；绝不写全局 AppPrefs.readingFont。
                     // pinchZoom 从不消费单指事件，滚动交给下层 LazyColumn，互不冲突。
                     .pinchZoom { zoom ->
-                        AppPrefs.readingFont = (AppPrefs.readingFont * zoom).coerceIn(14f, 36f)
+                        articlePrefs = articlePrefs.copy(
+                            fontPx = (articlePrefs.fontPx * zoom).coerceIn(14f, 36f)
+                        )
+                        prefsSaveSeq++
                     }
             ) {
                 // 「长按句子拆词」：这是遮挡标注里唯一一个手势，且完全没有可见提示
@@ -670,7 +691,7 @@ fun MaskConfigEditScreen(
                         onValueChange = { editingName = it },
                         singleLine = true,
                         placeholder = { Text(stringResource(com.ilyskyo.blancall.R.string.custom)) },
-                        shape = RoundedCornerShape(10.dp),
+                        shape = SmoothRoundedCornerShape(10.dp),
                         colors = TextFieldDefaults.colors(
                             focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
                             unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
@@ -871,7 +892,7 @@ private fun EditableUnitParagraph(
                 // 遮挡块：同尺寸占位文本透明 + 色块背景（保持换行流式布局不变）
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
+                        .clip(SmoothRoundedCornerShape(8.dp))
                         .background(palette[masked.c.coerceIn(0, palette.lastIndex)])
                         .combinedPress(
                             tier = PressTier.Icon,

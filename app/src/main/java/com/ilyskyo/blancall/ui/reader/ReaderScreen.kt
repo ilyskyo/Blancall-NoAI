@@ -26,6 +26,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -41,6 +42,7 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import com.ilyskyo.blancall.ui.common.AppIcon
 import com.ilyskyo.blancall.ui.common.AppIconKind
 import com.ilyskyo.blancall.ui.common.LiquidGlassPageBar
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import com.ilyskyo.blancall.ui.theme.isBlancallDark
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,10 +56,14 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -76,6 +82,7 @@ import com.ilyskyo.blancall.data.repository.FsrsStateStore
 import com.ilyskyo.blancall.data.repository.RecordRepository
 import com.ilyskyo.blancall.data.repository.StatsRepository
 import com.ilyskyo.blancall.data.repository.OneShotCloze
+import com.ilyskyo.blancall.data.repository.ReviewSource
 import com.ilyskyo.blancall.data.repository.TagStore
 import com.ilyskyo.blancall.ui.common.BackButton
 import com.ilyskyo.blancall.ui.common.heroElement
@@ -99,7 +106,11 @@ import kotlin.math.ceil
 import kotlin.math.roundToInt
 
 @Composable
-fun ReaderScreen(navController: NavController, articleId: Long) {
+fun ReaderScreen(
+    navController: NavController,
+    articleId: Long,
+    startReadingMode: Boolean = false,
+) {
     val articleViewModel: ArticleViewModel = viewModel()
     val context = LocalContext.current
     val resources = LocalResources.current
@@ -111,7 +122,7 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
     // 加载失败标记：articleId 无对应文章时展示“文章不存在”而非永久转圈
     var loadFailed by remember { mutableStateOf(false) }
     var isEditing by remember { mutableStateOf(false) }
-    var readingMode by remember { mutableStateOf(false) }
+    var readingMode by rememberSaveable { mutableStateOf(startReadingMode) }
     var editTitle by remember { mutableStateOf("") }
     var editContent by remember { mutableStateOf("") }
     var editAuthor by remember { mutableStateOf("") }
@@ -255,8 +266,10 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
     ) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
+                // 先限宽再 fill：fillMaxSize 先把宽度钉成父宽，widthIn 就失效
                 .widthIn(max = 600.dp)
+                .fillMaxWidth()
+                .fillMaxHeight()
                 .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 20.dp)
         ) {
         // 顶部导航（沉浸阅读模式下隐藏）
@@ -477,7 +490,7 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
                             .fillMaxWidth()
                             .padding(bottom = 8.dp),
                         color = MaterialTheme.colorScheme.surface,
-                        shape = RoundedCornerShape(12.dp),
+                        shape = SmoothRoundedCornerShape(12.dp),
                         tonalElevation = 1.dp
                     ) {
                         Column(
@@ -528,7 +541,7 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
                                 modifier = Modifier.fillMaxWidth(),
                                 label = { Text(stringResource(com.ilyskyo.blancall.R.string.field_title)) },
                                 singleLine = true,
-                                shape = RoundedCornerShape(10.dp)
+                                shape = SmoothRoundedCornerShape(10.dp)
                             )
 
                             OutlinedTextField(
@@ -537,7 +550,7 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
                                 modifier = Modifier.fillMaxWidth(),
                                 label = { Text(stringResource(com.ilyskyo.blancall.R.string.field_author_optional)) },
                                 singleLine = true,
-                                shape = RoundedCornerShape(10.dp)
+                                shape = SmoothRoundedCornerShape(10.dp)
                             )
 
                             // ── 标签行：点击打开选择面板；标签**即时生效**，
@@ -556,11 +569,11 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
                                 Row(
                                     modifier = Modifier
                                         .weight(1f)
-                                        .clip(RoundedCornerShape(10.dp))
+                                        .clip(SmoothRoundedCornerShape(10.dp))
                                         .border(
                                             1.dp,
                                             MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
-                                            RoundedCornerShape(10.dp)
+                                            SmoothRoundedCornerShape(10.dp)
                                         )
                                         .pressClick { showTagPicker = true }
                                         .padding(horizontal = 10.dp, vertical = 8.dp),
@@ -601,7 +614,7 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
                                     .fillMaxWidth()
                                     .weight(1f),
                                 label = { Text(stringResource(com.ilyskyo.blancall.R.string.field_content)) },
-                                shape = RoundedCornerShape(10.dp)
+                                shape = SmoothRoundedCornerShape(10.dp)
                             )
 
                             Spacer(modifier = Modifier.height(10.dp))
@@ -647,8 +660,8 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
                 label = "actionBarAlpha"
             )
             val barCornerPx = with(LocalDensity.current) { 24.dp.toPx() }
-            val barShape = RoundedCornerShape(barCornerPx)
-            Box(
+            val barShape = SmoothRoundedCornerShape(barCornerPx)
+            BoxWithConstraints(
                 modifier = Modifier
                     .fillMaxWidth()
                     .graphicsLayer { alpha = barAlpha }
@@ -660,6 +673,17 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
                         clip = false
                     )
             ) {
+                val statsLabel = stringResource(com.ilyskyo.blancall.R.string.reader_stats)
+                val modeLabel = stringResource(com.ilyskyo.blancall.R.string.reader_mode)
+                val sentenceLabel = stringResource(com.ilyskyo.blancall.R.string.reader_sentence_cards)
+                val practiceLabel = stringResource(com.ilyskyo.blancall.R.string.reader_start_practice)
+                // 整排共用一个字号：逐个自适应会让长标签单独缩小（日文「読書モード」比「学習統計」多一个字），
+                // 一排里同时出现两三种字号。按真实槽宽量出「所有标签都能单行放下」的最大字号后全排统一。
+                val actionLabelSize = rememberActionLabelSize(
+                    weightedLabels = listOf(statsLabel, modeLabel, sentenceLabel, practiceLabel),
+                    compactLabel = null,
+                    rowWidth = maxWidth,
+                )
                 LiquidGlassPageBar(
                     cornerDp = 24,
                     // 纯透明无色玻璃：关闭色散（消除彩色边缘）、染色压到极低（接近导航栏般通透）
@@ -671,23 +695,24 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 6.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
+                        .padding(horizontal = ActionBarHPadding, vertical = 4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(ActionBarItemSpacing),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    GlassActionItem(stringResource(com.ilyskyo.blancall.R.string.reader_stats), Modifier.weight(1f), enabled = barVisible) {
+                    GlassActionItem(statsLabel, actionLabelSize, Modifier.weight(1f), enabled = barVisible) {
                         navController.navigate("statistics/${art.id}")
                     }
-                    GlassActionItem(stringResource(com.ilyskyo.blancall.R.string.reader_mode), Modifier.weight(1f), enabled = barVisible) {
+                    GlassActionItem(modeLabel, actionLabelSize, Modifier.weight(1f), enabled = barVisible) {
                         readingMode = true
                     }
                     // 句子卡：进入句子卡片大卡片界面（沿用既有 sentence_cards 全局入口路由；
                     // 无触点锚点时浮起转场自动回退默认动画，不会错乱）
-                    GlassActionItem(stringResource(com.ilyskyo.blancall.R.string.reader_sentence_cards), Modifier.weight(1f), enabled = barVisible) {
+                    GlassActionItem(sentenceLabel, actionLabelSize, Modifier.weight(1f), enabled = barVisible) {
                         navController.navigate("sentence_cards?articleId=${art.id}")
                     }
                     GlassActionItem(
-                        stringResource(com.ilyskyo.blancall.R.string.reader_start_practice),
+                        practiceLabel,
+                        actionLabelSize,
                         Modifier
                             .weight(1f)
                             .onGloballyPositioned { coords ->
@@ -765,7 +790,7 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
                                 },
                                 mode = "SENTENCE",
                             )
-                            val token = OneShotCloze.put(art.id, cfg)
+                            val token = OneShotCloze.put(art.id, cfg, ReviewSource.MASK_TO_CLOZE)
                             navController.navigate("practice/${art.id}?mode=SENTENCE&oneShot=$token")
                         }
                     },
@@ -870,7 +895,7 @@ fun ReaderScreen(navController: NavController, articleId: Long) {
                         .fillMaxWidth()
                         .defaultMinSize(minHeight = 400.dp),
                     label = { Text(stringResource(com.ilyskyo.blancall.R.string.field_content)) },
-                    shape = RoundedCornerShape(10.dp),
+                    shape = SmoothRoundedCornerShape(10.dp),
                     maxLines = Int.MAX_VALUE
                 )
             }
@@ -1048,13 +1073,21 @@ private fun TextStatistics.CountUnit.countPluralRes(): Int = when (this) {
     TextStatistics.CountUnit.CHARACTER -> com.ilyskyo.blancall.R.plurals.text_count_char
 }
 
+// ── 阅读页玻璃操作栏几何（量字号与真实布局共用同一组常量，避免两边各写一份后漂移）──
+private val ActionBarHPadding = 6.dp
+private val ActionBarItemSpacing = 2.dp
+private val ActionItemHPadding = 4.dp
+private val ActionCompactMinWidth = 52.dp
+private const val ActionLabelMinSp = 8f
+
 /**
- * 玻璃操作栏内的单个操作项：透明底、无涟漪克制反馈，文字居中自适应缩放。
+ * 玻璃操作栏内的单个操作项：透明底、无涟漪克制反馈，字号由整排统一给定。
  * @param emphasized true 时文字用主色（「开始练习」主 CTA）。
  */
 @Composable
 private fun GlassActionItem(
     text: String,
+    fontSize: TextUnit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
     emphasized: Boolean = false,
@@ -1071,42 +1104,76 @@ private fun GlassActionItem(
             // 顶端玻璃胶囊：涟漪换成统一的缩放＋亮度（Container 档），
             // clip 仍在 clickable 之前 —— 指示层要跟着圆角裁，否则角上冒直角灰块。
             .pressFeedback(pillSrc, PressTier.Container)
-            .clip(RoundedCornerShape(18.dp))
+            .clip(SmoothRoundedCornerShape(18.dp))
             .clickable(
                 interactionSource = pillSrc,
                 indication = null,
                 enabled = enabled,
                 onClick = onClick
             )
-            .padding(horizontal = 4.dp, vertical = 8.dp),
+            .padding(horizontal = ActionItemHPadding, vertical = 8.dp),
         contentAlignment = Alignment.Center
     ) {
         CompositionLocalProvider(LocalContentColor provides contentColor) {
-            AdaptiveButtonLabel(text)
+            Text(
+                text = text,
+                maxLines = 1,
+                overflow = TextOverflow.Clip,
+                style = MaterialTheme.typography.labelLarge.copy(fontSize = fontSize),
+            )
         }
     }
 }
 
 /**
- * 自适应单行按钮文字：正常显示时保持默认字号不变，
- * 空间不足时才逐步缩小字号（下限 8sp），保证永不换行、不超出按钮边框。
+ * 操作栏的统一字号：各标签槽宽相同但文字长短不一，
+ * 逐个自适应会让长标签单独缩小，一排里出现两三种字号。
+ * 这里按真实槽宽量出「所有标签都能单行放下」的最大字号，整排共用；
+ * 下限 [ActionLabelMinSp]，超出时由 TextOverflow.Clip 兜底（正常字号与屏幕宽度下不会触到）。
+ *
+ * @param weightedLabels 参与 weight 均分的标签，槽宽相同
+ * @param compactLabel 固定小胶囊（AI），不参与均分
+ * @param rowWidth 操作栏 Row 的总宽（含 Row 自身左右内边距）
  */
 @Composable
-private fun AdaptiveButtonLabel(text: String) {
-    val style = MaterialTheme.typography.labelLarge
-    var fontSize by remember(text) { mutableStateOf(style.fontSize) }
-    Text(
-        text = text,
-        maxLines = 1,
-        overflow = TextOverflow.Clip,
-        style = style.copy(fontSize = fontSize),
-        onTextLayout = { result ->
-            // 溢出时逐步缩小字号，直到能单行放下
-            if (result.hasVisualOverflow && fontSize.value > 8f) {
-                fontSize = (fontSize.value - 0.5f).sp
+private fun rememberActionLabelSize(
+    weightedLabels: List<String>,
+    compactLabel: String?,
+    rowWidth: Dp,
+): TextUnit {
+    val density = LocalDensity.current
+    val measurer = rememberTextMeasurer()
+    val baseStyle = MaterialTheme.typography.labelLarge
+    return remember(weightedLabels, compactLabel, rowWidth, baseStyle, measurer, density) {
+        val itemCount = weightedLabels.size + if (compactLabel != null) 1 else 0
+        val compactSpace = if (compactLabel != null) ActionCompactMinWidth else 0.dp
+        // 与 Row/GlassActionItem 的真实几何一致：扣掉 Row 内边距、项间距、AI 固定宽度后按权重均分
+        val weightedSlot = (
+            rowWidth - ActionBarHPadding * 2 - ActionBarItemSpacing * (itemCount - 1) - compactSpace
+        ) / weightedLabels.size.coerceAtLeast(1)
+        val slots = buildList {
+            weightedLabels.forEach { add(it to (weightedSlot - ActionItemHPadding * 2)) }
+            if (compactLabel != null) {
+                add(compactLabel to (ActionCompactMinWidth - ActionItemHPadding * 2))
             }
         }
-    )
+        var size = baseStyle.fontSize
+        while (size.value > ActionLabelMinSp) {
+            val style = baseStyle.copy(fontSize = size)
+            val fits = slots.all { (text, available) ->
+                val availablePx = with(density) { available.coerceAtLeast(1.dp).toPx() }
+                measurer.measure(
+                    text = AnnotatedString(text),
+                    style = style,
+                    maxLines = 1,
+                    softWrap = false,
+                ).size.width <= availablePx
+            }
+            if (fits) break
+            size = (size.value - 0.5f).sp
+        }
+        size
+    }
 }
 
 // ────────────────────────────────────────────────

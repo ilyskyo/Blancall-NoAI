@@ -34,19 +34,31 @@ import java.text.Normalizer
  */
 object TextNormalizer {
 
-    /** 中文标点（与产品里「标点不算内容」的口径一致） */
-    private val CHINESE_PUNCT = setOf(
+    /**
+     * 排版标点：**不参与**「算不算对」的比对。
+     *
+     * 背课文 / 背古诗文的场景里，多一个逗号、少一个句号都不该判错 —— 这是产品的既定口径，
+     * 不是疏漏。改这张表前先读下面的 [SEMANTIC_SYMBOLS]。
+     */
+    private val LAYOUT_PUNCT: Set<Char> = setOf(
         '，', '。', '！', '？', '；', '：', '、',
         '“', '”', '‘', '’', '（', '）', '【', '】', '《', '》',
-        '…', '—', '～', '「', '」', '『', '』',
-        '·', '﹐', '﹑'
+        '…', '—', '「', '」', '『', '』', '·', '﹐', '﹑',
+        ',', '.', '!', '?', ';', ':', '(', ')', '[', ']',
+        '"', '\'', '_', '\\'
     )
 
-    /** 英文标点与排版符号 */
-    private val ENGLISH_PUNCT = setOf(
-        ',', '.', '!', '?', ';', ':', '(', ')', '[', ']', '<', '>',
-        '"', '\'', '-', '_', '/', '\\', '|', '@', '#', '$', '%', '^', '&', '*',
-        '+', '=', '`', '~'
+    /**
+     * 语义符号：**参与**比对。
+     *
+     * 旧实现把这些一并当标点剥掉，于是「H2 + O2 → H2O」与「H2O2H2O」等价、
+     * 「50%」与「50」等价、「A+B」与「AB」等价 —— 对化学方程式、数学式、百分比、
+     * 区间这类答案等于放行错误答案。它们不是排版，是内容。
+     *
+     * `-` 不在这里：它按上下文判（见 [stripPunctAndSpace]），连字符算排版、负号算内容。
+     */
+    private val SEMANTIC_SYMBOLS: Set<Char> = setOf(
+        '+', '=', '%', '<', '>', '&', '|', '/', '*', '^', '~', '#', '@', '$'
     )
 
     /** 常见繁→简映射（覆盖高频字；完整映射需引入 OpenCC 类依赖，暂不纳入） */
@@ -100,17 +112,23 @@ object TextNormalizer {
 
     /** 标点/空白判定：展示层要说「你多了标点」时用它，别再抄一份标点表 */
     internal fun isSurfacePunctuation(c: Char): Boolean =
-        c.isWhitespace() || c in CHINESE_PUNCT || c in ENGLISH_PUNCT
+        c.isWhitespace() || c in LAYOUT_PUNCT
 
     /** 全角 ASCII → 半角 */
     private fun toHalfWidth(s: String): String {
-        return s.map { c ->
-            when {
-                c in '！'..'～' -> (c.code - 0xFEE0).toChar()
-                c == '　' -> ' '
-                else -> c
-            }
-        }.joinToString("")
+        // 逐字符 StringBuilder：旧实现 s.map{} 每个字符装箱成 Character，
+        // 判分热路径（每个空 2 次 normalize）会白产生大量临时对象。
+        val sb = StringBuilder(s.length)
+        for (c in s) {
+            sb.append(
+                when {
+                    c in '！'..'～' -> (c.code - 0xFEE0).toChar()
+                    c == '　' -> ' '
+                    else -> c
+                }
+            )
+        }
+        return sb.toString()
     }
 
     /** 繁→简 + 中文数字→阿拉伯（单遍 StringBuilder） */
@@ -123,7 +141,14 @@ object TextNormalizer {
     }
 
     /**
-     * 去标点与空白；小数点夹在数字之间时保留（「3.14」是内容而不是排版）。
+     * 去排版标点与空白；语义符号保留。
+     *
+     * 三个例外：
+     * - 小数点夹在数字之间时保留（「3.14」是内容而不是排版）；
+     * - 连字符两侧都是字母时视为排版（`well-known` = `wellknown`），
+     *   否则保留（`-5` 的负号、`3-5` 的区间都是内容）；
+     * - [SEMANTIC_SYMBOLS] 一律保留。
+     *
      * 这里的数字判断跑在繁简/数字折叠**之后**，所以中文数字被折成阿拉伯数字后同样受保护。
      */
     private fun stripPunctAndSpace(s: String): String {
@@ -131,7 +156,17 @@ object TextNormalizer {
         for (i in s.indices) {
             val c = s[i]
             if (c.isWhitespace()) continue
-            if (c in CHINESE_PUNCT || c in ENGLISH_PUNCT) {
+            if (c in SEMANTIC_SYMBOLS) {
+                sb.append(c)
+                continue
+            }
+            if (c == '-') {
+                val prevIsLetter = i > 0 && s[i - 1].isLetter()
+                val nextIsLetter = i < s.length - 1 && s[i + 1].isLetter()
+                if (!(prevIsLetter && nextIsLetter)) sb.append(c)
+                continue
+            }
+            if (c in LAYOUT_PUNCT) {
                 if (c == '.' && i > 0 && i < s.length - 1 &&
                     s[i - 1].isDigit() && s[i + 1].isDigit()
                 ) {

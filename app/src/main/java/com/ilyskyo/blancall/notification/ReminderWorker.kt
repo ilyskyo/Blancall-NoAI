@@ -14,6 +14,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkInfo
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import androidx.work.workDataOf
 import com.ilyskyo.blancall.algorithm.DayBucket
 import com.ilyskyo.blancall.algorithm.FsrsEngine
 import com.ilyskyo.blancall.algorithm.ReviewTemplate
@@ -67,9 +68,13 @@ class ReminderWorker(
                 return Result.success()
             }
 
-            // 检查今天是否在提醒日（根据频率）
-            if (!isReminderDay()) {
-                Log.d(TAG, "今天不是提醒日，直接调度下一次")
+            // 按「计划触发日」判断，而不是 Worker 实际执行日：
+            // Doze 把周一 21:30 推到周二 00:0x 时，周二不在提醒日不能把周一这次静默丢掉。
+            val scheduledDay = inputData.getString(INPUT_SCHEDULED_DAY)
+                ?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+                ?: LocalDate.now()
+            if (!isReminderDay(scheduledDay)) {
+                Log.d(TAG, "计划日不是提醒日，直接调度下一次")
                 scheduleNext(context)
                 return Result.success()
             }
@@ -341,6 +346,8 @@ class ReminderWorker(
     companion object {
         private const val TAG = "ReminderWorker"
         private const val WORK_NAME = "daily_study_reminder"
+        /** 计划触发的日历天（ISO）；Worker 被 Doze 推过午夜后仍按它判断提醒日。 */
+        private const val INPUT_SCHEDULED_DAY = "scheduled_day"
 
         /**
          * 单次最多发送条数。判定层（[ReminderPlan]）已把「一天该说几件事」收敛到很少，
@@ -376,16 +383,22 @@ class ReminderWorker(
                 return
             }
 
-            val now = LocalDateTime.now()
+            val zone = java.time.ZoneId.systemDefault()
+            val now = LocalDateTime.now(zone)
             val nextReminder = ReminderSchedule.nextAt(
                 now = now,
                 hour = ReminderPrefs.hour,
                 minute = ReminderPrefs.minute,
                 days = ReminderPrefs.reminderDays,
             )
-            val delayMillis = ChronoUnit.MILLIS.between(now, nextReminder)
+            // 必须按 ZonedDateTime/epoch 相减：LocalDateTime 的纯本地时长在 DST 切换日
+            // 与实际经过时间差 ±1 小时，20:00 的提醒会在 19:00/21:00 响。
+            val delayMillis = java.time.Duration.between(
+                now.atZone(zone), nextReminder.atZone(zone)
+            ).toMillis().coerceAtLeast(0L)
 
             val workRequest = OneTimeWorkRequestBuilder<ReminderWorker>()
+                .setInputData(workDataOf(INPUT_SCHEDULED_DAY to nextReminder.toLocalDate().toString()))
                 .setInitialDelay(delayMillis, TimeUnit.MILLISECONDS)
                 .setConstraints(
                     Constraints.Builder()

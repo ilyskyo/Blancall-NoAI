@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -38,6 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ilyskyo.blancall.data.repository.CustomClozeStore
 import com.ilyskyo.blancall.ui.common.GlassModalBottomSheet
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import androidx.compose.runtime.getValue
@@ -178,7 +178,7 @@ fun CrossCustomClozeSheet(
                 OutlinedButton(
                     onClick = onDismiss,
                     modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = SmoothRoundedCornerShape(12.dp),
                 ) {
                     Text(stringResource(com.ilyskyo.blancall.R.string.cancel))
                 }
@@ -194,7 +194,7 @@ fun CrossCustomClozeSheet(
                     },
                     modifier = Modifier.weight(1f),
                     enabled = selected.isNotEmpty(),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = SmoothRoundedCornerShape(12.dp),
                 ) {
                     Text(
                         if (selected.isEmpty()) stringResource(com.ilyskyo.blancall.R.string.reader_start_practice)

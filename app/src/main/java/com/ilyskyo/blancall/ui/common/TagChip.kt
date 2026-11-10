@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -33,6 +32,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.ilyskyo.blancall.algorithm.ColorOps
 import com.ilyskyo.blancall.data.model.Tag
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import com.ilyskyo.blancall.ui.theme.isBlancallDark
 
 /**
@@ -85,7 +85,7 @@ fun TagChipView(
         modifier = modifier
             .height(18.dp)
             .widthIn(max = 76.dp)
-            .clip(RoundedCornerShape(6.dp))
+            .clip(SmoothRoundedCornerShape(6.dp))
             .background(opaqueColor(chip.bg))
             .then(
                 if (onClick == null) Modifier
@@ -113,7 +113,7 @@ private fun OverflowChip(count: Int, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
             .height(18.dp)
-            .clip(RoundedCornerShape(6.dp))
+            .clip(SmoothRoundedCornerShape(6.dp))
             .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f))
             .padding(horizontal = 5.dp),
         contentAlignment = Alignment.Center,

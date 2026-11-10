@@ -196,4 +196,35 @@ class ReadingMarkStoreTest {
         val reopened = storeIn(dir)
         assertEquals("应从备份读回", "备份里的内容", reopened.getMarks(2).single().note)
     }
+
+    @Test
+    fun `取消子区间只裁剪纯划线 不删批注`() {
+        val store = storeIn(newDir())
+        val blank = store.addMark(1, 0, 0, 10)!!
+        val note = store.addMark(1, 0, 20, 30, note = "不能丢")!!
+        // 取消 [4,6)：左段 [0,4) 与右段 [6,10) 都在，原 id 归左段
+        val changed = store.removeBlankRange(1, 0, 4, 6)
+        assertEquals(1, changed)
+        val marks = store.getMarks(1)
+        assertEquals(3, marks.size)
+        assertEquals(0, marks.first { it.id == blank.id }.a)
+        assertEquals(4, marks.first { it.id == blank.id }.e)
+        assertTrue("右段必须保留", marks.any { it.a == 6 && it.e == 10 })
+        assertEquals("批注不能被取消划线删掉", "不能丢", marks.first { it.id == note.id }.note)
+    }
+
+    @Test
+    fun `删除文章同时清掉正文指纹`() {
+        val dir = newDir()
+        val file = File(dir, "reading_marks.json")
+        val store = storeIn(dir)
+        store.addMark(3, 0, 0, 5)
+        store.checkContentHash(3, "hash-3")
+        store.removeArticle(3)
+        val root = JSONObject(file.readText())
+        assertFalse(
+            "id 复用后旧指纹会让新文章误报正文已变",
+            root.optJSONObject("hashes")?.has("3") == true
+        )
+    }
 }

@@ -9,6 +9,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import com.ilyskyo.blancall.ui.theme.isBlancallDark
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -24,7 +25,6 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.HorizontalDivider
@@ -39,6 +39,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
@@ -89,6 +90,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 /**
@@ -116,47 +118,29 @@ fun SearchScreen(navController: NavController) {
         TagOps.tagsByArticle(tagData).mapValues { (_, list) -> list.toChipUis() }
     }
 
-    val dateFmtDash = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()) }
-    val dateFmtSlash = remember { SimpleDateFormat("yyyy/M/d", Locale.getDefault()) }
-
-    val trimmed = query.trim().lowercase(Locale.getDefault())
-    // 命中过滤：标题 / 作者 / 正文 / 标签名 / 添加日期（两种日期格式都匹配）
-    val results = remember(articles, trimmed, chipTagsByArticle) {
+    val trimmed = remember(query) { query.trim() }
+    // 全文索引（切句 + 日期串 + 小写标题/作者）只随文章表构建一次，且放后台：
+    // 旧实现首帧在主线程切分全库正文，每次按键再全库 contains + 每篇两次日期格式化，
+    // 书库一大，输入框就开始掉字。
+    val searchIndex by produceState(SearchIndex(), articles) {
+        value = withContext(Dispatchers.Default) { SearchIndex.build(articles) }
+    }
+    // 输入防抖：停止敲击 120ms 后才检索；旧结果在检索期间继续显示，避免列表闪空
+    var outcome by remember { mutableStateOf(SearchOutcome()) }
+    LaunchedEffect(searchIndex, chipTagsByArticle, trimmed) {
         if (trimmed.isEmpty()) {
-            emptyList()
-        } else {
-            articles.filter { art ->
-                val authorHit = art.author.contains(trimmed, ignoreCase = true)
-                val titleHit = art.title.contains(trimmed, ignoreCase = true)
-                val bodyHit = art.content.contains(trimmed, ignoreCase = true)
-                val tagHit = chipTagsByArticle[art.id]?.any { it.name.contains(trimmed, ignoreCase = true) } == true
-                val dateDash = dateFmtDash.format(Date(art.createdAt)).lowercase()
-                val dateSlash = dateFmtSlash.format(Date(art.createdAt)).lowercase()
-                val dateHit = dateDash.contains(trimmed) || dateSlash.contains(trimmed)
-                titleHit || authorHit || bodyHit || tagHit || dateHit
-            }.sortedByDescending { it.updatedAt }
+            outcome = SearchOutcome()
+            return@LaunchedEffect
+        }
+        if (outcome.query != trimmed) outcome = outcome.copy(searching = true)
+        delay(SEARCH_DEBOUNCE_MS)
+        outcome = withContext(Dispatchers.Default) {
+            searchArticles(searchIndex, chipTagsByArticle, trimmed)
         }
     }
-    // 句子级命中：文章结果只回答「在哪篇」，用户搜一句话时真正想找的是那一句。
-    // 句子切分只随文章表重算一次；每次输入只做包含判断。
-    val articleSentences = remember(articles) {
-        articles.map { article ->
-            article to SentenceSplitter.splitWithPositions(article.content)
-        }
-    }
-    val sentenceHits = remember(articleSentences, trimmed) {
-        if (trimmed.isEmpty()) {
-            emptyList()
-        } else {
-            articleSentences.flatMap { (article, sentences) ->
-                sentences.mapIndexedNotNull { index, sentence ->
-                    if (sentence.text.contains(trimmed, ignoreCase = true)) {
-                        SentenceHit(article, index, sentence.text)
-                    } else null
-                }
-            }.take(MAX_SENTENCE_HITS)
-        }
-    }
+    val indexReady = searchIndex.ready
+    val results = outcome.results
+    val sentenceHits = outcome.sentenceHits
 
     var pendingPracticeArticleId by remember { mutableLongStateOf(0L) }
     var practiceButtonRect by remember { mutableStateOf(Rect.Zero) }
@@ -197,7 +181,7 @@ fun SearchScreen(navController: NavController) {
             )
 
             // ── 结果区（空态不在此占位，见下方覆盖层） ──
-            if (trimmed.isNotEmpty() && (results.isNotEmpty() || sentenceHits.isNotEmpty())) {
+            if (results.isNotEmpty() || sentenceHits.isNotEmpty()) {
                 LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = androidx.compose.foundation.layout.PaddingValues(
@@ -218,15 +202,14 @@ fun SearchScreen(navController: NavController) {
                                 modifier = Modifier.padding(start = 4.dp, top = 4.dp, bottom = 4.dp),
                             )
                         }
-                        items(results, key = { "a_${it.id}" }) { article ->
+                        items(results, key = { "a_${it.article.id}" }) { row ->
                             // 结果集在每次输入后整体增减：改造前 item 出现/消失都是瞬时的，
                             // 列表像被抖了一下。入场淡入 tween + 换位弹簧 + 退场淡出（词表见 animateListItem）。
+                            val article = row.article
                             Box(modifier = animateListItem()) {
                                 SearchResultCard(
-                                    article = article,
+                                    row = row,
                                     tags = chipTagsByArticle[article.id].orEmpty(),
-                                    query = trimmed,
-                                    dateFmt = dateFmtDash,
                                     onClick = { navController.navigate("reader/${article.id}") },
                                     onTagClick = { tagId -> navController.navigate("tag/$tagId") },
                                     onPractice = {
@@ -275,7 +258,6 @@ fun SearchScreen(navController: NavController) {
                             Box(modifier = animateListItem()) {
                                 SentenceHitCard(
                                     hit = hit,
-                                    query = trimmed,
                                     onOpen = { navController.navigate("reader/${hit.article.id}") },
                                     onPractice = {
                                         navController.navigate(
@@ -292,10 +274,12 @@ fun SearchScreen(navController: NavController) {
 
         // ── 空态覆盖层：图标 + 提示文本整体的视觉中心＝页面中央 ──
         // 提示与「有结果」两副面孔原先由条件直接决定渲不渲染，切换是硬切
+        // 「检索中且还没有任何结果」不显示「无结果」，避免每次输入先闪一下空态
+        val searching = !indexReady || outcome.searching
         StateSwap(
             targetState = when {
                 trimmed.isEmpty() -> 0
-                results.isEmpty() && sentenceHits.isEmpty() -> 1
+                results.isEmpty() && sentenceHits.isEmpty() && !searching -> 1
                 else -> 2
             },
             label = "searchHintSwap",
@@ -359,7 +343,7 @@ private fun SearchField(
     // 高度与首页搜索栏一致（46dp）：OutlinedTextField 的最小高度约 56dp，在顶栏里显得「肥」。
     // 自绘容器还顺手解决了「页面底色与卡片同色时输入框整个消失」的问题（有描边）。
     Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = SmoothRoundedCornerShape(14.dp),
         color = container,
         border = androidx.compose.foundation.BorderStroke(
             0.5.dp,
@@ -404,7 +388,7 @@ private fun SearchField(
                 Box(
                     modifier = Modifier
                         .size(26.dp)
-                        .clip(RoundedCornerShape(13.dp))
+                        .clip(SmoothRoundedCornerShape(13.dp))
                         .pressClick { onQueryChange("") },
                     contentAlignment = Alignment.Center
                 ) {
@@ -423,20 +407,19 @@ private fun SearchField(
 /** 结果卡片：标题 + 标签 chips（≤2 + 「+N」）+ 命中片段 + 添加日期 */
 @Composable
 private fun SearchResultCard(
-    article: Article,
+    row: SearchResultRow,
     tags: List<TagChipUi> = emptyList(),
-    query: String,
-    dateFmt: SimpleDateFormat,
     onClick: () -> Unit,
     onTagClick: ((Long) -> Unit)? = null,
     onPractice: () -> Unit,
     onTag: () -> Unit,
     practiceModifier: Modifier = Modifier,
 ) {
+    val article = row.article
     val isDark = isBlancallDark()
     val bgAlpha = if (isDark) GLASS_ALPHA_DARK else GLASS_ALPHA_LIGHT
     val bgColor = MaterialTheme.colorScheme.surface.copy(alpha = bgAlpha)
-    val shape = RoundedCornerShape(16.dp)
+    val shape = SmoothRoundedCornerShape(16.dp)
 
     Box(
         modifier = Modifier
@@ -453,7 +436,7 @@ private fun SearchResultCard(
             // 卡片不再整块可点：父级 click 会和「开始练习 / 打标签」抢事件，
             // 真机上表现为点子按钮却打开了文章详情页。让标题与摘要各自承担「打开原文」。
             Text(
-                text = snippet(article.title, query, maxLen = 34),
+                text = row.titleSnippet,
                 style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -469,7 +452,7 @@ private fun SearchResultCard(
             }
             Spacer(Modifier.height(3.dp))
             Text(
-                text = snippet(article.content, query, maxLen = 80),
+                text = row.bodySnippet,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                 maxLines = 1,
@@ -485,7 +468,7 @@ private fun SearchResultCard(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 // stringResource 不能在 buildString 的非组合 lambda 里调，先取好整句
-                val addedOnLine = stringResource(com.ilyskyo.blancall.R.string.added_on, dateFmt.format(Date(article.createdAt)))
+                val addedOnLine = stringResource(com.ilyskyo.blancall.R.string.added_on, row.addedOnText)
                 Text(
                     text = buildString {
                         if (article.author.isNotBlank()) append(article.author.trim()).append("  ·  ")
@@ -538,14 +521,133 @@ private data class SentenceHit(
     val article: Article,
     val sentenceIndex: Int,
     val text: String,
+    val preview: String,
 )
 
 private const val MAX_SENTENCE_HITS = 40
 
+/** 检索防抖：停止输入这么久后才真正扫描，连续敲字时不排队做无用功 */
+private const val SEARCH_DEBOUNCE_MS = 120L
+
+/** 文章索引条目：匹配用的小写字段与显示用日期串都在后台预计算 */
+private class IndexedArticle(
+    val article: Article,
+    val titleLower: String,
+    val authorLower: String,
+    val addedOnText: String,
+    val dateDash: String,
+    val dateSlash: String,
+)
+
+private class IndexedSentences(
+    val article: Article,
+    val sentences: List<SentenceSplitter.SentenceWithPosition>,
+)
+
+/**
+ * 全文索引：随文章表在 Dispatchers.Default 构建一次。
+ * 句子切分是这里最贵的一步，不能留在首帧主线程。
+ */
+private class SearchIndex(
+    val entries: List<IndexedArticle> = emptyList(),
+    val sentenceEntries: List<IndexedSentences> = emptyList(),
+    val ready: Boolean = false,
+) {
+    companion object {
+        fun build(articles: List<Article>): SearchIndex {
+            val dash = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
+            val slash = SimpleDateFormat("yyyy/M/d", Locale.getDefault())
+            return SearchIndex(
+                entries = articles.map { art ->
+                    val date = Date(art.createdAt)
+                    val dashText = dash.format(date)
+                    IndexedArticle(
+                        article = art,
+                        titleLower = art.title.lowercase(Locale.getDefault()),
+                        authorLower = art.author.lowercase(Locale.getDefault()),
+                        addedOnText = dashText,
+                        dateDash = dashText.lowercase(Locale.getDefault()),
+                        dateSlash = slash.format(date).lowercase(Locale.getDefault()),
+                    )
+                },
+                sentenceEntries = articles.map { art ->
+                    IndexedSentences(art, SentenceSplitter.splitWithPositions(art.content))
+                },
+                ready = true,
+            )
+        }
+    }
+}
+
+/** 一次检索的完整产出：结果行的命中片段也在后台算好，卡片组合期不再碰全文 */
+private data class SearchOutcome(
+    val query: String = "",
+    val results: List<SearchResultRow> = emptyList(),
+    val sentenceHits: List<SentenceHit> = emptyList(),
+    val searching: Boolean = false,
+)
+
+private class SearchResultRow(
+    val article: Article,
+    val titleSnippet: String,
+    val bodySnippet: String,
+    val addedOnText: String,
+)
+
+private fun searchArticles(
+    index: SearchIndex,
+    chipTagsByArticle: Map<Long, List<TagChipUi>>,
+    query: String,
+): SearchOutcome {
+    val q = query.lowercase(Locale.getDefault())
+    // 命中过滤：标题 / 作者 / 正文 / 标签名 / 添加日期（两种日期格式都匹配）
+    val results = index.entries.asSequence()
+        .filter { e ->
+            val art = e.article
+            e.titleLower.contains(q) ||
+                e.authorLower.contains(q) ||
+                art.content.contains(q, ignoreCase = true) ||
+                chipTagsByArticle[art.id]?.any { it.name.contains(q, ignoreCase = true) } == true ||
+                e.dateDash.contains(q) ||
+                e.dateSlash.contains(q)
+        }
+        .sortedByDescending { it.article.updatedAt }
+        .map { e ->
+            SearchResultRow(
+                article = e.article,
+                titleSnippet = snippet(e.article.title, query, maxLen = 34),
+                bodySnippet = snippet(e.article.content, query, maxLen = 80),
+                addedOnText = e.addedOnText,
+            )
+        }
+        .toList()
+    // 句子级命中：文章结果只回答「在哪篇」，用户搜一句话时真正想找的是那一句
+    val sentenceHits = index.sentenceEntries.asSequence()
+        .flatMap { entry ->
+            entry.sentences.asSequence().mapIndexedNotNull { i, sentence ->
+                if (sentence.text.contains(q, ignoreCase = true)) {
+                    SentenceHit(
+                        article = entry.article,
+                        sentenceIndex = i,
+                        text = sentence.text,
+                        preview = snippet(sentence.text, query, maxLen = 110),
+                    )
+                } else null
+            }
+        }
+        .take(MAX_SENTENCE_HITS)
+        .toList()
+    return SearchOutcome(
+        query = query,
+        results = results,
+        sentenceHits = sentenceHits,
+        searching = false,
+    )
+}
+
 @Composable
 private fun SentenceHitCard(
     hit: SentenceHit,
-    query: String,
     onOpen: () -> Unit,
     onPractice: () -> Unit,
 ) {
@@ -554,7 +656,10 @@ private fun SentenceHitCard(
     ) {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
             Text(
-                text = "《${hit.article.title.ifBlank { stringResource(com.ilyskyo.blancall.R.string.untitled_article) }}》",
+                text = stringResource(
+                    com.ilyskyo.blancall.R.string.sentence_source_title,
+                    hit.article.title.ifBlank { stringResource(com.ilyskyo.blancall.R.string.untitled_article) }
+                ),
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.primary,
                 maxLines = 1,
@@ -565,7 +670,7 @@ private fun SentenceHitCard(
             )
             Spacer(Modifier.height(4.dp))
             Text(
-                text = snippet(hit.text, query, maxLen = 110),
+                text = hit.preview,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 2,
@@ -594,14 +699,17 @@ private fun SentenceHitCard(
     }
 }
 
+/** 空白折叠用的正则：常量复用，避免在每次检索/组合里重新编译 */
+private val WHITESPACE_RUN = Regex("\\s+")
+
 /** 从文本中截取命中关键词前后的上下文片段 */
 private fun snippet(text: String, query: String, maxLen: Int): String {
     // 只压平换行/连续空白，不能像旧版那样把所有空格删掉：
     // 中文没有词间空格看不出问题，英文会变成 "Learningisnot..." 一整串。
-    val flat = text.replace(Regex("\\s+"), " ").trim().takeIf { it.isNotBlank() } ?: return text
+    val flat = text.replace(WHITESPACE_RUN, " ").trim().takeIf { it.isNotBlank() } ?: return text
     val q = query.takeIf { it.isNotBlank() } ?: return flat.take(maxLen)
     val idx = flat.indexOf(q, ignoreCase = true).let { pos ->
-        if (pos >= 0) pos else flat.lowercase(Locale.getDefault()).indexOf(q)
+        if (pos >= 0) pos else flat.lowercase(Locale.getDefault()).indexOf(q.lowercase(Locale.getDefault()))
     }
     if (idx < 0) return flat.take(maxLen)
     val start = (idx - maxLen / 3).coerceAtLeast(0)

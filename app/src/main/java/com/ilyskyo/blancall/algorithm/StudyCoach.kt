@@ -226,7 +226,21 @@ object StudyCoach {
             )
         }
 
-        val items = out.take(MAX_ITEMS)
+        // 时长目标要真的参与计划：面板文案承诺「决定今日计划的总时长」。
+        // 旧实现只把 goalMinutes 放进 Input，buildPlan 完全不读，改 5/20/60 分钟
+        // 计划卡都一模一样。这里按估算时长累加，至少保留一条（否则 5 分钟目标
+        // 遇到一条 8 分钟的任务会得到空计划，用户反而不知道该做什么）。
+        val goalBudget = input.goalMinutes.coerceAtLeast(1)
+        val items = mutableListOf<Item>()
+        var estimated = 0
+        for (item in out.take(MAX_ITEMS)) {
+            if (items.isEmpty() || estimated + item.estimatedMinutes <= goalBudget) {
+                items += item
+                estimated += item.estimatedMinutes
+            } else {
+                break
+            }
+        }
         val examDays = examDaysLeft(input.now, input.examEpochDay, input.zone)
         return Plan(
             items = items,
@@ -328,31 +342,41 @@ object StudyCoach {
         val pausedIds = source.pauses.keys.filterTo(HashSet()) { it in articleIds }
         val articleById = source.articles.associateBy { it.id }
 
+        // 到期候选统一走篇级投影；LEGACY 默认与旧口径一致，切换只改 MemoryModelConfig。
+        val summaries = ArticleMemoryReads.views(
+            articles = source.articles,
+            legacyStates = source.states,
+            sentenceStates = source.sentenceStates,
+            recordsByArticle = recordsByArticle,
+            template = source.template,
+            pausedArticleIds = pausedIds,
+            enrolledAt = source.enrolled,
+            now = System.currentTimeMillis(),
+            zone = zone,
+            model = MemoryModelConfig.model,
+        ).associateBy { it.articleId }
         val dueCandidates = ArrayList<DueArticle>(source.articles.size)
         source.articles.forEach { article ->
             if (article.id in pausedIds) return@forEach
+            val summary = summaries[article.id] ?: return@forEach
+            // earliestDue = 0 表示没有下次到期（新文章/模板跑完），不进入候选。
+            if (summary.earliestDue <= 0L) return@forEach
             val records = recordsByArticle[article.id].orEmpty()
             val state = source.states[article.id]
-            val dueAt = when {
-                state != null && state.reviewCount > 0 -> state.due
-                // v3：主动加入计划、一次还没练 —— 「加入时刻」就是该开始的时间。
-                // 少了这一条，详情页加的「加入计划」就只在任务流可见，首页今日计划永远看不到它。
-                source.enrolled.containsKey(article.id) -> source.enrolled.getValue(article.id)
-                else -> EbbinghausScheduler.nextReviewAt(source.template, records) ?: return@forEach
-            }
             val last = records.maxByOrNull { it.timestamp }
             dueCandidates += DueArticle(
                 articleId = article.id,
                 title = article.title,
-                due = dueAt,
-                lastReview = state?.lastReview ?: 0L,
+                due = summary.earliestDue,
+                lastReview = state?.lastReview ?: summary.lastReview,
                 reviewCount = state?.reviewCount ?: 0,
                 lapses = state?.lapses ?: 0,
                 estimatedBlanks = last?.totalBlanks
                     ?: (article.content.length / 25).coerceIn(3, 80),
                 lastDurationMs = last?.duration ?: 0L,
                 // FSRS 状态缺失但仍有历史记录：旧版/CSV 回灌的文章也算练过
-                hasPractice = (state?.reviewCount ?: 0) > 0 || records.isNotEmpty(),
+                hasPractice = summary.learned > 0 || (state?.reviewCount ?: 0) > 0 ||
+                    records.isNotEmpty(),
             )
         }
 
@@ -388,7 +412,7 @@ object StudyCoach {
             }
             .mapNotNull { (key, state) ->
                 val articleId = SentenceSelector.articleIdOf(key) ?: return@mapNotNull null
-                if (articleId in pausedIds) return@mapNotNull null
+                if (articleId !in articleIds || articleId in pausedIds) return@mapNotNull null
                 SentenceDue(key, state.due)
             }
             .toList()

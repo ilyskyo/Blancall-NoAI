@@ -55,6 +55,36 @@ object BlancallGenerator {
         val endInSentence: Int             // 在句内的结束字符位置（exclusive）
     )
 
+    /**
+     * 句子挖空的展示文本：句内从后往前替换为 `[N] ___`。
+     *
+     * 这是「练习页正文 / PDF 试卷 / 分享图」三者共用的唯一构造。
+     * AI 路径也必须走这里；否则 displayText 是完整原文，导出时没有空位，
+     * 答案会随试卷一起发出去（同时第二页还会再列一遍答案）。
+     */
+    fun buildSentenceDisplayText(
+        sentences: List<String>,
+        blanks: List<SentenceBlankInfo>,
+    ): String {
+        val builders = sentences.map { StringBuilder(it) }.toMutableList()
+        blanks
+            .asSequence()
+            .filter { it.sentenceIndex in builders.indices }
+            .sortedWith(
+                compareByDescending<SentenceBlankInfo> { it.sentenceIndex }
+                    .thenByDescending { it.startInSentence }
+            )
+            .forEach { b ->
+                val builder = builders[b.sentenceIndex]
+                val start = b.startInSentence.coerceIn(0, builder.length)
+                val end = b.endInSentence.coerceIn(start, builder.length)
+                if (end > start) {
+                    builder.replace(start, end, "[${b.index + 1}] ___")
+                }
+            }
+        return builders.joinToString("\n") { it.toString() }
+    }
+
     data class WordClozeResult(
         val sentences: List<WordClozeSentence>,
         val blanks: List<WordBlankInfo>,
@@ -74,13 +104,114 @@ object BlancallGenerator {
         val position: Int
     )
 
+    /**
+     * 字词挖空句子的**原文**。
+     *
+     * [WordClozeSentence.text] 是已经替换成 `___` 的展示文本，不能拿去做句级 FSRS 键：
+     * 同一句在句子挖空里是原文键，在字词挖空里会变成带 `___` 的另一个键，
+     * 于是同一句出现多份记忆状态，统计与到期计数分裂。
+     * 这里按 `___` 的左右片段与 `WordBlankInfo.originalChar` 一一拼回原文；
+     * 片段数对不上（脏数据/旧格式）时退回「去掉下划线占位」，至少不会把 `___` 带进键里。
+     */
+    fun originalWordSentence(result: WordClozeResult, sentenceIndex: Int): String {
+        val sentence = result.sentences.getOrNull(sentenceIndex) ?: return ""
+        val pieces = sentence.text.split("___")
+        val originals = sentence.blanks.mapNotNull { idx ->
+            result.blanks.getOrNull(idx)?.originalChar
+        }
+        if (pieces.size - 1 != originals.size) {
+            return sentence.text.replace("___", "")
+        }
+        return buildString(sentence.text.length) {
+            for (i in pieces.indices) {
+                append(pieces[i])
+                if (i < originals.size) append(originals[i])
+            }
+        }
+    }
+
     // ========== 句子挖空：支持分句/半句/复句 ==========
+
+    /**
+     * 分句在全文中的坐标：句子下标 + 句内起始位置。
+     *
+     * 挖空的最小粒度就是分句。「本地算法」和「AI 选空」必须共用同一套切分
+     * （[clauseSpans]）与同一套合并规则（[buildClauseBlanks]），否则同样一篇文章，
+     * 本地挖出「＿＿，＿＿」而 AI 一口气挖掉整句，用户看到的就是两种完全不同的挖法。
+     */
+    data class ClauseSpan(
+        val text: String,
+        val sentenceIndex: Int,
+        val startInSentence: Int
+    )
+
+    /**
+     * 把每句按逗号/分号/顿号拆成有序分句，标点保留在前一个分句末尾。
+     * 位置用累加指针记录，避免 indexOf 在重复短语上定位错误。
+     */
+    fun clauseSpans(sentences: List<String>): List<ClauseSpan> {
+        val out = mutableListOf<ClauseSpan>()
+        for (sIdx in sentences.indices) {
+            var pos = 0
+            for (part in splitByClausePunctuation(sentences[sIdx])) {
+                if (part.isNotBlank()) {
+                    out.add(ClauseSpan(part, sIdx, pos))
+                }
+                pos += part.length
+            }
+        }
+        return out
+    }
+
+    /**
+     * 选中分句 → 挖空区间。同一句内相邻的选中分句合并为一个空（复句）。
+     *
+     * 空只覆盖实义内容：末尾标点留在正文里（标点不是要默写的记忆内容）；
+     * 分句之间的标点仍留在空内 —— 它是句子结构的一部分，要不要显式提示交给界面开关。
+     * 纯标点组成的退化分句去掉尾部后可能为空，不能留下"空答案"的空。
+     */
+    fun buildClauseBlanks(
+        clauses: List<ClauseSpan>,
+        selectedClauseIndices: Set<Int>
+    ): List<SentenceBlankInfo> {
+        val groups = mutableListOf<List<ClauseSpan>>()
+        var i = 0
+        while (i < clauses.size) {
+            if (i in selectedClauseIndices) {
+                val group = mutableListOf(clauses[i])
+                i++
+                while (i < clauses.size && i in selectedClauseIndices &&
+                    clauses[i].sentenceIndex == group.last().sentenceIndex
+                ) {
+                    group.add(clauses[i])
+                    i++
+                }
+                groups.add(group)
+            } else {
+                i++
+            }
+        }
+        return groups.mapNotNull { group ->
+            val first = group.first()
+            val covered = trimBlankTrailingPunctuation(group.joinToString("") { it.text })
+            if (covered.isEmpty()) return@mapNotNull null
+            SentenceBlankInfo(
+                index = 0,
+                originalText = covered,
+                sentenceIndex = first.sentenceIndex,
+                startInSentence = first.startInSentence,
+                endInSentence = first.startInSentence + covered.length
+            )
+        }.mapIndexed { idx, b -> b.copy(index = idx) }
+    }
 
     fun generateSentenceCloze(
         content: String,
         count: Int = 0,
         errorProfile: ErrorProfile = ErrorProfile(),
-        strategy: Strategy = Strategy.BALANCED
+        strategy: Strategy = Strategy.BALANCED,
+        /** 只在这些全文句子下标里挖空；用于「本次只覆盖到期句」。null = 不限制。 */
+        focusSentenceIndices: Set<Int>? = null,
     ): SentenceClozeResult {
         var allSentences = SentenceSplitter.split(content)
 
@@ -98,27 +229,8 @@ object BlancallGenerator {
             return SentenceClozeResult(emptyList(), emptyList(), content)
         }
 
-        // 将每句按逗号/分号/顿号拆分为分句
-        data class Clause(
-            val text: String,
-            val sentenceIdx: Int,
-            val startInSentence: Int,
-            val endInSentence: Int
-        )
-
-        val allClauses = mutableListOf<Clause>()
-        for (sIdx in allSentences.indices) {
-            val sentence = allSentences[sIdx]
-            val parts = splitByClausePunctuation(sentence)
-            // 用累加指针记录位置，避免 indexOf 在重复短语时定位错误
-            var pos = 0
-            for (part in parts) {
-                if (part.isNotBlank()) {
-                    allClauses.add(Clause(part, sIdx, pos, pos + part.length))
-                }
-                pos += part.length
-            }
-        }
+        // 将每句按逗号/分号/顿号拆分为分句（与 AI 路径共用同一套切分，见 [clauseSpans]）
+        val allClauses = clauseSpans(allSentences)
 
         // 确定挖几个空（自动档：记忆偏弱时适度加量，更充分复习易忘内容）
         val totalClauses = allClauses.size
@@ -131,18 +243,47 @@ object BlancallGenerator {
         val densityScale = if (count > 0) 1f else errorProfile.memoryFactor.coerceIn(1f, 1.6f)
         val actualCount = (baseCount * densityScale).toInt().coerceIn(1, totalClauses)
 
-        // 策略驱动选择要挖的分句
-        val selectedClauseIndices = when (strategy) {
+        // 策略驱动选择要挖的分句；focus 模式先保证每个目标句至少一个空。
+        val focus = focusSentenceIndices
+            ?.filterTo(HashSet()) { it in allSentences.indices }
+            ?.takeIf { it.isNotEmpty() }
+        val focusPool = if (focus == null) emptyList() else {
+            allClauses.indices.filter { allClauses[it].sentenceIndex in focus }
+        }
+        val focusCount = if (focus == null) 0 else {
+            focus.count { s -> allClauses.any { it.sentenceIndex == s } }
+        }
+        val effectiveCount = if (focus == null) {
+            actualCount
+        } else {
+            maxOf(actualCount, focusCount).coerceAtMost(focusPool.size)
+        }
+        val selectedClauseIndices = if (focus != null) {
+            val selected = mutableSetOf<Int>()
+            focus.sorted().forEach { sentenceIndex ->
+                allClauses.indices
+                    .filter { allClauses[it].sentenceIndex == sentenceIndex }
+                    .maxByOrNull { allClauses[it].text.length }
+                    ?.let(selected::add)
+            }
+            if (selected.size < effectiveCount) {
+                selected += focusPool
+                    .filter { it !in selected }
+                    .shuffled()
+                    .take(effectiveCount - selected.size)
+            }
+            selected
+        } else when (strategy) {
             Strategy.WEAKNESS_FOCUS -> {
                 // 按错误率加权排序，优先选薄弱分句。
                 // 句级错误率尚无数据链路（sentenceErrorRates 恒空）时，若仍按排序 take 会退化为
                 // "永远挖文章开头 N 句"；无数据时改为随机选取，保持策略语义中性。
-                val hasSentenceData = allClauses.any { (errorProfile.sentenceErrorRates[it.sentenceIdx] ?: 0f) > 0f }
+                val hasSentenceData = allClauses.any { (errorProfile.sentenceErrorRates[it.sentenceIndex] ?: 0f) > 0f }
                 if (!hasSentenceData) {
                     allClauses.indices.shuffled().take(actualCount).toMutableSet()
                 } else {
                     val weighted = allClauses.indices.map { idx ->
-                        val sentIdx = allClauses[idx].sentenceIdx
+                        val sentIdx = allClauses[idx].sentenceIndex
                         val errorRate = errorProfile.sentenceErrorRates[sentIdx] ?: 0f
                         idx to (errorRate + 0.1f)  // 基础权重 0.1 避免零概率
                     }.sortedByDescending { it.second }
@@ -170,7 +311,7 @@ object BlancallGenerator {
                 // 均衡：随机但有微弱薄弱倾斜；记忆偏弱时倾斜更强（更偏向薄弱句）
                 val mf = errorProfile.memoryFactor.coerceIn(1f, 1.6f)
                 val weighted = allClauses.indices.map { idx ->
-                    val sentIdx = allClauses[idx].sentenceIdx
+                    val sentIdx = allClauses[idx].sentenceIndex
                     val errorRate = errorProfile.sentenceErrorRates[sentIdx] ?: 0f
                     idx to (0.5f + errorRate * 0.5f * mf)
                 }
@@ -193,59 +334,16 @@ object BlancallGenerator {
             }
         }
 
-        // 合并同一句内相邻的选中分句（如选中了逗号前的分句和逗号后的分句 → 合并为一个空 = 复句）
-        val blankGroups = mutableListOf<List<Clause>>()
-        var i = 0
-        while (i < allClauses.size) {
-            if (i in selectedClauseIndices) {
-                val group = mutableListOf(allClauses[i])
-                i++
-                while (i < allClauses.size && i in selectedClauseIndices
-                    && allClauses[i].sentenceIdx == group.last().sentenceIdx
-                ) {
-                    group.add(allClauses[i])
-                    i++
-                }
-                blankGroups.add(group)
-            } else {
-                i++
-            }
-        }
-
-        // 构建 SentenceBlankInfo 列表
-        // 空只覆盖实义内容：末尾标点留在正文里（标点不是要默写的记忆内容）。
-        // 分句之间的标点仍留在空内 —— 它是句子结构的一部分，要不要显式提示交给界面开关。
-        // mapNotNull：纯标点组成的退化分句去掉头尾后可能为空，不能留下"空答案"的空。
-        val blanks = blankGroups.mapNotNull { group ->
-            val first = group.first()
-            val joined = group.joinToString("") { it.text }
-            val covered = trimBlankTrailingPunctuation(joined)
-            if (covered.isEmpty()) return@mapNotNull null
-            SentenceBlankInfo(
-                index = 0,
-                originalText = covered,
-                sentenceIndex = first.sentenceIdx,
-                startInSentence = first.startInSentence,
-                endInSentence = first.startInSentence + covered.length
-            )
-        }.mapIndexed { idx, b -> b.copy(index = idx) }
+        // 选中分句 → 挖空区间（同一句内相邻选中分句合并为一个空 = 复句）。
+        // 与 AI 路径共用 [buildClauseBlanks]，保证两条路径挖出来的空完全同形。
+        val blanks = buildClauseBlanks(allClauses, selectedClauseIndices)
 
         // 构建 displayText（在句内用 [N] ___ 标记挖空位置）
-        val displayParts = mutableListOf<String>()
-        for (sIdx in allSentences.indices) {
-            val sentenceBlanks = blanks.filter { it.sentenceIndex == sIdx }.sortedBy { it.startInSentence }
-            if (sentenceBlanks.isEmpty()) {
-                displayParts.add(allSentences[sIdx])
-            } else {
-                val sb = StringBuilder(allSentences[sIdx])
-                for (b in sentenceBlanks.reversed()) {
-                    sb.replace(b.startInSentence, b.endInSentence, "[${b.index + 1}] ___")
-                }
-                displayParts.add(sb.toString())
-            }
-        }
-
-        return SentenceClozeResult(allSentences, blanks, displayParts.joinToString("\n"))
+        return SentenceClozeResult(
+            allSentences,
+            blanks,
+            buildSentenceDisplayText(allSentences, blanks)
+        )
     }
 
     /** 按逗号/分号/顿号拆分分句，标点保留在前一个分句末尾 */
@@ -313,6 +411,27 @@ object BlancallGenerator {
     /** 标点 = 既非汉字/字母/数字，也非空白的字符（数字是内容，绝不能当标点剥掉） */
     private fun isBlankPunctuation(c: Char): Boolean =
         !isChinese(c) && !c.isLetterOrDigit() && !c.isWhitespace()
+
+    /** 字词挖空单个空的汉字上限：本地候选窗口就是 1..3 字，AI 路径必须同口径 */
+    const val WORD_BLANK_MAX_CHARS = 3
+
+    /**
+     * 把「字词挖空」的一个空收缩到本地同一个上限：整段连续汉字超过 [WORD_BLANK_MAX_CHARS]
+     * 时只保留开头那几个字。
+     *
+     * 本地候选永远是 1..3 个连续汉字（或整词英文），AI 提示词却允许 4 字且没有窗口约束；
+     * 不剪的话同一个位置本地挖「王安石」、AI 挖「王安石变法」，两条路径的挖法就又不是一套了。
+     * 混排片段（「CO₂」「pH 值」）不动：它的边界由原文自己决定，按字宽剪会切坏词。
+     *
+     * 反向默写**不用**这套上限：那里的跨度是难度档位唯一的作用点（见 AiClozeGenerator）。
+     */
+    fun capWordBlankEnd(sentence: String, start: Int, end: Int): Int {
+        if (start !in 0..sentence.length || end !in start..sentence.length) return end
+        val span = sentence.substring(start, end)
+        if (span.length <= WORD_BLANK_MAX_CHARS) return end
+        if (!span.all { isChinese(it) }) return end
+        return start + WORD_BLANK_MAX_CHARS
+    }
 
     // ========== 字词挖空：1-3字词 + 相邻合并 ==========
 
@@ -661,13 +780,8 @@ object BlancallGenerator {
             )
         }
 
-        // displayText：句内从后往前替换为 "[N] ___"
-        val builders = sentences.map { StringBuilder(it) }.toMutableList()
-        for (b in blanks.sortedWith(compareByDescending<SentenceBlankInfo> { it.sentenceIndex }
-            .thenByDescending { it.startInSentence })) {
-            builders[b.sentenceIndex].replace(b.startInSentence, b.endInSentence, "[${b.index + 1}] ___")
-        }
-        return SentenceClozeResult(sentences, blanks, builders.joinToString("\n") { it.toString() })
+        // displayText：句内从后往前替换为 "[N] ___"（与自动生成共用同一构造）
+        return SentenceClozeResult(sentences, blanks, buildSentenceDisplayText(sentences, blanks))
     }
 
     /**

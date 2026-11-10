@@ -13,7 +13,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -30,6 +29,7 @@ import com.ilyskyo.blancall.ui.common.AppIconKind
 import com.ilyskyo.blancall.ui.common.Motion
 import com.ilyskyo.blancall.ui.common.MotionFade
 import com.ilyskyo.blancall.ui.common.BackButton
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 
 @Composable
 fun HelpScreen(
@@ -376,7 +376,7 @@ fun HelpScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(50.dp),
-                    shape = RoundedCornerShape(14.dp)
+                    shape = SmoothRoundedCornerShape(14.dp)
                 ) {
                     Text(stringResource(com.ilyskyo.blancall.R.string.help_std_start), style = MaterialTheme.typography.titleMedium)
                 }
@@ -407,7 +407,7 @@ private fun HelpSection(
 
     Card(
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
+        shape = SmoothRoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outlineVariant)
     ) {
@@ -435,7 +435,7 @@ private fun HelpSection(
                                     .size(width = 3.dp, height = 14.dp)
                                     .background(
                                         MaterialTheme.colorScheme.primary,
-                                        RoundedCornerShape(2.dp)
+                                        SmoothRoundedCornerShape(2.dp)
                                     )
                             )
                             Spacer(Modifier.width(10.dp))
@@ -494,7 +494,7 @@ private fun SubTitle(text: String) {
         Box(
             modifier = Modifier
                 .size(width = 3.dp, height = 14.dp)
-                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
+                .background(MaterialTheme.colorScheme.primary, SmoothRoundedCornerShape(2.dp))
         )
         Spacer(Modifier.width(8.dp))
         Text(
@@ -579,7 +579,7 @@ private fun FlowTag(
     content: @Composable () -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(8.dp),
+        shape = SmoothRoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
     ) {
         Row(
@@ -610,7 +610,7 @@ private fun InfoCard(
     footer: String? = null
 ) {
     Surface(
-        shape = RoundedCornerShape(10.dp),
+        shape = SmoothRoundedCornerShape(10.dp),
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
     ) {
         Row(

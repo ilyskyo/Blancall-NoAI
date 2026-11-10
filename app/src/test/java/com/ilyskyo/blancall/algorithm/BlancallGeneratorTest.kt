@@ -245,4 +245,30 @@ class BlancallGeneratorTest {
         assertEquals(0, BlancallGenerator.buildCustomSentenceCloze("", mapOf(0 to listOf(0 until 3))).blanks.size)
         assertEquals(0, BlancallGenerator.buildCustomSentenceCloze(numberedArticle, emptyMap()).blanks.size)
     }
+
+    @Test
+    fun `句子挖空的展示文本必须带空位标记`() {
+        val result = BlancallGenerator.generateSentenceCloze(article, count = 3)
+        assertTrue("displayText 应含 [N] ___", result.displayText.contains("___"))
+        assertTrue("displayText 应带编号", Regex("""\[\d+] ___""").containsMatchIn(result.displayText))
+        assertEquals(
+            "每个空位都要在展示文本中出现一次",
+            result.blanks.size,
+            Regex("""\[\d+] ___""").findAll(result.displayText).count()
+        )
+    }
+
+    @Test
+    fun `字词模式能用原句重建句级键文本`() {
+        val result = BlancallGenerator.generateWordCloze(article, count = 3)
+        assertTrue("应有挖空", result.blanks.isNotEmpty())
+        for (i in result.sentences.indices) {
+            val original = BlancallGenerator.originalWordSentence(result, i)
+            assertTrue("重建的句子不能带占位符", !original.contains("___"))
+            result.sentences[i].blanks.forEach { blankIndex ->
+                val answer = result.blanks[blankIndex].originalChar
+                assertTrue("重建句必须包含原答案：$answer", original.contains(answer))
+            }
+        }
+    }
 }

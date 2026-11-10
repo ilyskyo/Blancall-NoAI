@@ -8,9 +8,15 @@ import android.content.SharedPreferences
 import androidx.core.content.edit
 import androidx.compose.ui.graphics.toArgb
 import com.ilyskyo.blancall.util.AtomicFiles
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.io.File
 import kotlin.math.abs
@@ -82,6 +88,21 @@ object AppearanceStore {
     private lateinit var prefs: SharedPreferences
     private lateinit var legacyPrefs: SharedPreferences
     private lateinit var file: File
+
+    /**
+     * 外观写盘的单一后台队列。
+     *
+     * 旧实现是在调用线程（几乎总是主线程）里直接 `AtomicFiles.writeTextAtomic` ——
+     * 那是「写 tmp + fd.sync + .bak 轮换 + rename + 目录 fsync」，低端机单次 10–40ms。
+     * 设置页每点一个开关都掉 1–3 帧。
+     *
+     * 用 CONFLATED 通道：连续拖动字号时只保留最新一帧要写的值，中间值没有意义。
+     */
+    private val writeScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val pendingWrite = Channel<AppearanceSnapshot>(Channel.CONFLATED)
+
+    @Volatile
+    private var writerJob: Job? = null
 
     private val _state = MutableStateFlow(AppearanceSnapshot())
     val state: StateFlow<AppearanceSnapshot> = _state.asStateFlow()
@@ -183,8 +204,28 @@ object AppearanceStore {
     }
 
     private fun write(s: AppearanceSnapshot) {
-        runCatching { AtomicFiles.writeTextAtomic(file, encode(s)) }
+        // init 之前调用过一次会抛 UninitializedPropertyAccessException（flush 挡住了，write 没挡）
+        if (!::file.isInitialized) return
+        ensureWriter()
+        pendingWrite.trySend(s)
         // 写盘失败不该阻断设置：内存值已生效，下次启动会重试
+    }
+
+    /** 惰性启动写盘协程：只在真正要写的时候起，进程里最多一个。 */
+    private fun ensureWriter() {
+        if (writerJob != null) return
+        synchronized(this) {
+            if (writerJob != null) return
+            writerJob = writeScope.launch {
+                for (snapshot in pendingWrite) {
+                    runCatching {
+                        if (::file.isInitialized) {
+                            AtomicFiles.writeTextAtomic(file, encode(snapshot))
+                        }
+                    }
+                }
+            }
+        }
     }
 
     /** 旧版本迁移：theme_prefs 存明暗，app_prefs 存强调色与米黄。 */

@@ -85,6 +85,8 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.ilyskyo.blancall.R
 import com.ilyskyo.blancall.algorithm.FsrsEngine
+import com.ilyskyo.blancall.algorithm.ArticleMemoryReads
+import com.ilyskyo.blancall.algorithm.MemoryModelConfig
 import com.ilyskyo.blancall.algorithm.ReviewTemplate
 import com.ilyskyo.blancall.algorithm.SentenceSelector
 import com.ilyskyo.blancall.algorithm.StudyCoach
@@ -127,6 +129,7 @@ import com.ilyskyo.blancall.ui.common.pullReleaseTravel
 import com.ilyskyo.blancall.ui.common.HapticTier
 import com.ilyskyo.blancall.ui.theme.AppPrefs
 import com.ilyskyo.blancall.ui.theme.Macaron
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -233,8 +236,16 @@ fun StudyFlowScreen(navController: NavController) {
         }
     }
 
-    val tasks = remember(articles, states, pauses, sentenceStates, enrolled, allRecords, nowTick) {
-        buildTasks(articles, states, pauses, sentenceStates, enrolled, nowTick, records = allRecords)
+    val reviewTemplateId by AppPrefs.reviewTemplateFlow.collectAsState()
+    val reviewTemplate = remember(reviewTemplateId) { ReviewTemplate.fromId(reviewTemplateId) }
+    val tasks = remember(
+        articles, states, pauses, sentenceStates, enrolled, allRecords, nowTick, reviewTemplate
+    ) {
+        buildTasks(
+            articles, states, pauses, sentenceStates, enrolled, nowTick,
+            records = allRecords,
+            template = reviewTemplate,
+        )
     }
     // 「现在可练」只认精确到期（含逾期）；今天晚些时候到期的单独标注，不混进大数字。
     // 未开始的成员也算「可练」，但必须单独报数：不能把「开始第一遍」混称成复习。
@@ -748,6 +759,7 @@ internal fun buildTasks(
     enrolled: Map<Long, Long> = emptyMap(),
     now: Long,
     records: List<PracticeRecord> = emptyList(),
+    template: ReviewTemplate = ReviewTemplate.STANDARD,
 ): List<FlowTask> {
     val byId = articles.associateBy { it.id }
     // 旧版/CSV 回灌可能只有 records、没有 FSRS 状态；这些也算练过
@@ -766,26 +778,58 @@ internal fun buildTasks(
             dueByArticle[id] = (dueByArticle[id] ?: 0) + 1
         }
     }
+    val model = MemoryModelConfig.model
+    val summaries = ArticleMemoryReads.views(
+        articles = articles,
+        legacyStates = states,
+        sentenceStates = sentenceStates,
+        recordsByArticle = records.filter { it.articleId > 0L }.groupBy { it.articleId },
+        template = template,
+        pausedArticleIds = pauses.keys,
+        enrolledAt = enrolled,
+        now = now,
+        model = model,
+    ).associateBy { it.articleId }
 
-    // 成员 = 练过的（reviewCount > 0）∪ 主动加入计划的（v3 enrolled 表）。
+    // 成员 = 练过的（reviewCount > 0）∪ 主动加入计划的（v3 enrolled 表）
+    // ∪ 投影口径下已有句级状态的（否则句级卡永远进不了任务流）。
     // 用集合去重：练过之后再"加入"一次不会出现两张卡。
     val memberIds = LinkedHashSet<Long>(states.size + enrolled.size)
     states.forEach { (id, state) -> if (state.reviewCount > 0) memberIds += id }
     memberIds += enrolled.keys
+    summaries.values.forEach { if (it.learned > 0) memberIds += it.articleId }
 
     val out = ArrayList<FlowTask>(memberIds.size)
     memberIds.forEach { id ->
         val article = byId[id] ?: return@forEach
+        val summary = summaries[id] ?: return@forEach
         val stored = states[id]
         val trained = stored != null && stored.reviewCount > 0
         val recordPractices = practicesByArticle[id] ?: 0
-        val hasPractice = trained || recordPractices > 0
-        // 还没练过的成员：临时造一个空状态只用于展示，due 取「加入时刻」。
-        // 故意不写盘 —— states 保持干净，统计、提醒、待复习判定仍把「没练过」当没练过。
-        val state = if (trained) {
-            stored
+        val hasPractice = summary.learned > 0 || trained || recordPractices > 0
+        // LEGACY：trained 用篇级 due，enrolled 未练用加入时刻（与旧逻辑一致）；
+        // PROJECTION：due 取句级投影的最早到期。只展示，不写盘。
+        val dueForDisplay = if (model == ArticleMemoryReads.Model.LEGACY) {
+            if (trained) stored!!.due else enrolled[id] ?: 0L
         } else {
-            FsrsEngine.CardState(due = enrolled[id] ?: 0L)
+            summary.earliestDue
+        }
+        val state = if (model == ArticleMemoryReads.Model.LEGACY) {
+            (if (trained) stored!! else FsrsEngine.CardState()).copy(due = dueForDisplay)
+        } else if (stored != null) {
+            stored.copy(
+                stability = summary.averageStability?.toDouble() ?: stored.stability,
+                due = dueForDisplay,
+                lastReview = summary.lastReview,
+                reviewCount = maxOf(stored.reviewCount, summary.practiceCount),
+            )
+        } else {
+            FsrsEngine.CardState(
+                stability = summary.averageStability?.toDouble() ?: 0.0,
+                due = dueForDisplay,
+                lastReview = summary.lastReview,
+                reviewCount = summary.practiceCount,
+            )
         }
         val pause = pauses[id]
         val due = StudyFlow.projectedDue(state, pause, now)
@@ -797,12 +841,24 @@ internal fun buildTasks(
             due = due,
             phase = StudyFlow.phase(due, pause != null, now),
             // 没练过就没有留存率可言：0f 在这里表示「未开始」，不是「马上要忘光」
-            retention = if (trained) FsrsEngine.retentionRate(state, now).toFloat() else 0f,
+            retention = if (model == ArticleMemoryReads.Model.LEGACY) {
+                if (trained) FsrsEngine.retentionRate(stored!!, now).toFloat() else 0f
+            } else {
+                summary.averageRetention ?: 0f
+            },
             hasPractice = hasPractice,
             // 旧记录没有 FSRS 次数：用记录条数兜底，避免详情显示 0 次
-            practiceCount = maxOf(state.reviewCount, recordPractices),
-            sentenceDue = dueByArticle[id] ?: 0,
-            sentenceLearned = learnedByArticle[id] ?: 0,
+            practiceCount = maxOf(state.reviewCount, recordPractices, summary.learned),
+            sentenceDue = if (model == ArticleMemoryReads.Model.LEGACY) {
+                dueByArticle[id] ?: 0
+            } else {
+                summary.dueCount
+            },
+            sentenceLearned = if (model == ArticleMemoryReads.Model.LEGACY) {
+                learnedByArticle[id] ?: 0
+            } else {
+                summary.learned
+            },
         )
     }
     return out.sortedWith(
@@ -1026,7 +1082,7 @@ private fun FlowForecastCard(forecast: List<Int>, now: Long) {
                             modifier = Modifier
                                 .width(20.dp)
                                 .height((5f + 46f * progress).dp)
-                                .clip(RoundedCornerShape(6.dp))
+                                .clip(SmoothRoundedCornerShape(6.dp))
                                 .background(
                                     if (count > 0) accent.copy(alpha = if (index == 0) 0.85f else 0.45f)
                                     else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
@@ -1773,7 +1829,7 @@ internal fun FlowAdjustSheet(
                         headline = null,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clip(RoundedCornerShape(16.dp)),
+                            .clip(SmoothRoundedCornerShape(16.dp)),
                         // 必须是实底：年份下拉沿用同一个 containerColor，
                         // 透明时它会和下面的日历叠在一起，两层文字完全分不开（真机反馈）。
                         colors = DatePickerDefaults.colors(

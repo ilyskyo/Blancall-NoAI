@@ -17,8 +17,10 @@ import com.ilyskyo.blancall.data.repository.InkStore
 import com.ilyskyo.blancall.data.repository.MaskConfigStore
 import com.ilyskyo.blancall.data.repository.RecordRepository
 import com.ilyskyo.blancall.data.repository.ReaderPrefsStore
+import com.ilyskyo.blancall.data.repository.ReadingMarkStore
 import com.ilyskyo.blancall.data.repository.SentenceCardStore
 import com.ilyskyo.blancall.data.repository.TagStore
+import com.ilyskyo.blancall.ui.theme.AppPrefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -52,6 +54,9 @@ class ArticleViewModel(application: Application) : AndroidViewModel(application)
     val articles: StateFlow<List<Article>> = repository.allArticles
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    /** 冷启动门闩：文章库异步读盘，首页在就绪前不能把空列表当成真实空态。 */
+    suspend fun awaitLoaded() = repository.awaitLoaded()
+
     fun insertArticle(
         title: String,
         content: String,
@@ -80,70 +85,72 @@ class ArticleViewModel(application: Application) : AndroidViewModel(application)
         )
     }
 
-    fun deleteArticle(article: Article) {
+    fun deleteArticle(article: Article) = deleteArticles(listOf(article))
+
+    /**
+     * 批量删除：文章库与首页卡片各只落盘一次，其余按 id 级联。
+     * 旧实现多选删除逐篇起协程，每篇都全量重写 articles/records/fsrs，
+     * 且 HomeLayout 的 getCards/saveCards 之间没有同一把锁，交错时会互相覆盖。
+     */
+    fun deleteArticles(articles: List<Article>) {
+        if (articles.isEmpty()) return
+        val ids = articles.map { it.id }.toSet()
         viewModelScope.launch {
             try {
-                repository.delete(article)
+                repository.deleteAll(ids)
                 val filesDir = getApplication<Application>().filesDir
                 val recordRepo = RecordRepository.getInstance(
                     filesDir.resolve("records.json").absolutePath
                 )
-                recordRepo.deleteByArticleId(article.id)
-                // 连带清理 FSRS 记忆状态，避免残留孤儿状态
                 val fsrsStore = FsrsStateStore.getInstance(
                     filesDir.resolve("fsrs_state.json").absolutePath
                 )
-                // 级联清理自定义挖空/遮挡配置、未完成练习进度与首页对应卡片：
-                // 否则首页「添加卡片」仍会列出幽灵配置，点击后进入已删文章 → 无限 loading；
-                // 残留进度文件还会触发通知点击死链；孤儿配置在 UI 中无法再删除。
                 withContext(Dispatchers.IO) {
                     try {
-                        // remove/removeSentencesForArticle 内部会等首载 + 全量序列化 + fsync，
-                        // 必须与其余级联清理一起放在 IO 线程，不能占着主线程做盘写。
-                        fsrsStore.remove(article.id)
+                        ids.forEach { recordRepo.deleteByArticleId(it) }
+                        ids.forEach {
+                            fsrsStore.remove(it)
+                            fsrsStore.removeSentencesForArticle(it)
+                        }
                         val clozeStore = CustomClozeStore.getInstance(filesDir)
                         val maskStore = MaskConfigStore.getInstance(filesDir)
                         val layout = HomeLayoutStore.getInstance(filesDir)
                         // 先根据卡片反查（旧卡无 articleId 时需查配置库）再删配置，顺序不可颠倒
                         val cards = layout.getCards()
                         val keep = cards.filterNot { c ->
-                            when (c.type) {
-                                HomeLayoutStore.CardType.CUSTOM_CLOZE ->
-                                    c.articleId == article.id ||
-                                        (c.articleId <= 0L && runCatching { clozeStore.findArticleIdByConfigId(c.refId) }.getOrNull() == article.id)
-                                HomeLayoutStore.CardType.CUSTOM_MASK ->
-                                    c.articleId == article.id ||
-                                        (c.articleId <= 0L && runCatching { maskStore.findArticleIdByConfigId(c.refId) }.getOrNull() == article.id)
-                                // 文章卡漏了这一支时，删掉文章后卡还留在首页，渲染成一张永远点不开的空卡
-                                // （ArticleCard 拿到 article=null 只显示空态，用户只能再长按删一次）
-                                HomeLayoutStore.CardType.ARTICLE ->
-                                    c.refId == article.id || c.id == HomeLayoutStore.articleCardId(article.id)
-                                else -> false
+                            ids.any { id ->
+                                when (c.type) {
+                                    HomeLayoutStore.CardType.CUSTOM_CLOZE ->
+                                        c.articleId == id ||
+                                            (c.articleId <= 0L && runCatching { clozeStore.findArticleIdByConfigId(c.refId) }.getOrNull() == id)
+                                    HomeLayoutStore.CardType.CUSTOM_MASK ->
+                                        c.articleId == id ||
+                                            (c.articleId <= 0L && runCatching { maskStore.findArticleIdByConfigId(c.refId) }.getOrNull() == id)
+                                    HomeLayoutStore.CardType.ARTICLE ->
+                                        c.refId == id || c.id == HomeLayoutStore.articleCardId(id)
+                                    else -> false
+                                }
                             }
                         }
                         if (keep.size != cards.size) layout.saveCards(keep)
-                        clozeStore.removeArticle(article.id)
-                        maskStore.removeArticle(article.id)
-                        filesDir.resolve("practice_state_${article.id}.json").delete()
-                        // 句子卡片：清理该文章的句子级 FSRS 状态；今日句指向该文章时连快照一起清
-                        // （下次进入首页会自动重抽，不出现指向已删文章的句子卡）
-                        fsrsStore.removeSentencesForArticle(article.id)
-                        SentenceCardStore.getInstance(filesDir).clearIfArticle(article.id)
-                        // 文章标签：级联解绑该文章的全部标签（标签本体保留）
-                        TagStore.getInstance(filesDir).removeArticle(article.id)
-                        // 按文章的阅读设置存档：本类此前没有 removeArticle API，所以这条一直在漏，
-                        // 每删一篇永久留一条孤儿，reader_prefs.json 只增不减
-                        // （getInstance 收 Context 而非 filesDir，与其余 Store 不同，沿用其既有形态）
-                        ReaderPrefsStore.getInstance(getApplication()).removeArticle(article.id)
-                        // 错题墨迹存档：按文章联动清理（同一步 IO 内完成，避免主线程扫描目录）
-                        InkStore.getInstance(filesDir.resolve("ink").absolutePath)
-                            .deleteByArticleId(article.id)
+                        ids.forEach { id ->
+                            clozeStore.removeArticle(id)
+                            maskStore.removeArticle(id)
+                            filesDir.resolve("practice_state_$id.json").delete()
+                            SentenceCardStore.getInstance(filesDir).clearIfArticle(id)
+                            TagStore.getInstance(filesDir).removeArticle(id)
+                            ReaderPrefsStore.getInstance(getApplication()).removeArticle(id)
+                            ReadingMarkStore.getInstance(filesDir).removeArticle(id)
+                            AppPrefs.clearArticleReadingState(id)
+                            InkStore.getInstance(filesDir.resolve("ink").absolutePath)
+                                .deleteByArticleId(id)
+                        }
                     } catch (e: Exception) {
-                        Log.e("ArticleViewModel", "deleteArticle cascade cleanup failed", e)
+                        Log.e("ArticleViewModel", "deleteArticles cascade cleanup failed", e)
                     }
                 }
             } catch (e: Exception) {
-                Log.e("ArticleViewModel", "deleteArticle failed", e)
+                Log.e("ArticleViewModel", "deleteArticles failed", e)
             }
         }
     }

@@ -26,6 +26,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import com.ilyskyo.blancall.ui.theme.isBlancallDark
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -37,7 +38,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
@@ -98,11 +98,15 @@ fun rememberEnteredOnFirstFrame(): Boolean {
 /**
  * 关掉系统给 Dialog 窗口的进入 / 退出动画，只保留 Compose 自己画的动画。
  *
- * 为什么需要：部分 ROM（已实测华为 EMUI/HarmonyOS）给 dialog 窗口挂的是
- * 「从屏幕右下角斜着推入」的窗口动画。它叠在卡片自身的 scaleIn/fadeIn 上，
- * 观感就是所有弹窗都从右下角冒出来 —— 不在 Material 规范内，也无法用
- * Compose 的 Dialog API 定制。直接把窗口动画归零，让 [BlancallAlertDialog]
- * 的居中缩放淡入成为唯一的入场，和原生 Material 弹窗一致。
+ * 真正的根治点是主题：`Theme.Blancall` 把 `android:dialogTheme` 指到
+ * `Theme.Blancall.Dialog`，后者把 `windowAnimationStyle` 置为 `@null` ——
+ * 窗口从创建那一刻就没有系统动画，不依赖任何运行时补救。
+ *
+ * 这个运行时函数只是兜底：它在窗口 **已经显示之后** 才执行，如果首帧已经画出来，
+ * 部分 ROM 的「从右下角推入」已经开始了，此时再置 0 停不住进行中的动画。
+ * 改造前把它当成唯一手段，于是同一个弹窗组件在不同打开路径下表现不一致
+ * （首帧慢的路径看起来修好了，首帧快的路径很可能照旧从角上飞出来）。
+ * 现在保留它，是为了覆盖「上下文里的 dialogTheme 没解析到自家样式」的极端情况。
  */
 @Composable
 fun SuppressDialogWindowAnimation() {
@@ -141,7 +145,7 @@ fun BlancallAlertDialog(
     text: @Composable (() -> Unit)? = null,
     confirmButton: @Composable () -> Unit = {},
     dismissButton: @Composable (() -> Unit)? = null,
-    shape: Shape = RoundedCornerShape(28.dp),
+    shape: Shape = SmoothRoundedCornerShape(28.dp),
     containerColor: Color? = null,
     tonalElevation: Dp = 0.dp,
     properties: DialogProperties? = null,
@@ -195,7 +199,8 @@ fun BlancallAlertDialog(
     }
 
     Dialog(onDismissRequest = { dismissRequested = true }, properties = properties ?: DialogProperties()) {
-        // 系统窗口动画（部分 ROM 是右下角推入）关掉；入场由下面的 scaleIn + fadeIn 负责
+        // 窗口动画已经在主题层归零（Theme.Blancall.Dialog → windowAnimationStyle=@null）；
+        // 这里再兜一次底，防止某些宿主上下文解析不到自家的 dialogTheme
         SuppressDialogWindowAnimation()
         AnimatedVisibility(
             visible = contentVisible,

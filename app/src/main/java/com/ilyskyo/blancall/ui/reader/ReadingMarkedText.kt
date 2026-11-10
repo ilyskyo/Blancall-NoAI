@@ -8,6 +8,8 @@ import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -45,6 +47,26 @@ internal class ParagraphAnchor(
 )
 
 /**
+ * 段落锚点的"活引用"：组合期注册一次，之后滚动/排版变化自动反映。
+ *
+ * 为什么不直接注册 [ParagraphAnchor] 快照：[MarkedParagraph] 的 layout 与
+ * [positionInRoot][androidx.compose.ui.layout.positionInRoot] 每帧都可能变，
+ * 快照要每帧重建；而跨段拖选只在手指按下时需要读一次，活引用更省。
+ */
+internal class ParagraphAnchorSource(
+    val p: Int,
+    val text: String,
+    private val layoutState: State<TextLayoutResult?>,
+    private val topLeftState: State<Offset>
+) {
+    val layout: TextLayoutResult? get() = layoutState.value
+    val topLeft: Offset get() = topLeftState.value
+
+    fun anchor(): ParagraphAnchor? =
+        layout?.let { ParagraphAnchor(p, text, it, topLeft) }
+}
+
+/**
  * 正文段落（可划线 / 可长按选择版）。
  *
  * 外观与 [ReadingTextContent] 里的普通 Text 逐项对齐（字号 / 行高 / 字重 / 首行缩进 / 颜色），
@@ -73,7 +95,9 @@ internal fun MarkedParagraph(
     /** 本次短按已被本段消费（上层不应再当作「切换控件」） */
     onHandledTap: () -> Unit,
     /** 段落顶部位置上报（根容器坐标）：划线列表跳转时用来精确定位 */
-    onPositioned: ((Int, Float) -> Unit)? = null
+    onPositioned: ((Int, Float) -> Unit)? = null,
+    /** 注册本段的活锚点：跨段拖选时上层要靠它取相邻段的 layout 与坐标 */
+    onAnchorRegistered: ((ParagraphAnchorSource) -> Unit)? = null
 ) {
     val layoutState = remember { mutableStateOf<TextLayoutResult?>(null) }
     val topLeftState = remember { mutableStateOf(Offset.Zero) }
@@ -83,6 +107,11 @@ internal fun MarkedParagraph(
     val onMarkClickState by rememberUpdatedState(onMarkClick)
     val onHandledTapState by rememberUpdatedState(onHandledTap)
     val onPositionedState by rememberUpdatedState(onPositioned)
+    val onAnchorRegisteredState by rememberUpdatedState(onAnchorRegistered)
+    val anchorSource = remember(paragraphIndex, text) {
+        ParagraphAnchorSource(paragraphIndex, text, layoutState, topLeftState)
+    }
+    SideEffect { onAnchorRegisteredState?.invoke(anchorSource) }
 
     Text(
         text = text,

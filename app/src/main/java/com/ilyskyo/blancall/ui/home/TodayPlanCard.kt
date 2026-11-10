@@ -10,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -30,6 +29,7 @@ import com.ilyskyo.blancall.ui.common.GlassCard
 import com.ilyskyo.blancall.ui.common.heroElement
 import com.ilyskyo.blancall.ui.common.pressClick
 import com.ilyskyo.blancall.ui.theme.Macaron
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import java.time.Instant
 import java.time.ZoneId
 
@@ -53,7 +53,7 @@ internal fun TodayPlanCard(
     /** 今天已完成的练习次数（按本地日）；与刷次数的目标一起决定是否显示进度行 */
     todayPracticeCount: Int,
     dailyPracticeGoal: Int,
-    /** 面板里的「在今日计划卡上显示」，关掉后这一行不渲染（目标本身仍参与提醒口径） */
+    /** 面板里的「在今日计划卡上显示目标进度」，关掉后这一行不渲染（目标本身仍参与提醒口径） */
     showDailyGoal: Boolean,
 ) {
     GlassCard(
@@ -221,7 +221,7 @@ internal fun TodayPlanCard(
 @Composable
 private fun SurfaceIndex(index: Int) {
     androidx.compose.material3.Surface(
-        shape = RoundedCornerShape(8.dp),
+        shape = SmoothRoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
     ) {
         Text(

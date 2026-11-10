@@ -85,6 +85,7 @@ import com.ilyskyo.blancall.data.model.TagData
 import com.ilyskyo.blancall.data.repository.DailySentenceCoordinator
 import com.ilyskyo.blancall.data.repository.FsrsStateStore
 import com.ilyskyo.blancall.data.repository.ReviewLogStore
+import com.ilyskyo.blancall.data.repository.ReviewSource
 import com.ilyskyo.blancall.data.repository.SentenceCardStore
 import com.ilyskyo.blancall.data.repository.TagStore
 import com.ilyskyo.blancall.ui.common.AppIcon
@@ -174,12 +175,12 @@ fun SentenceCardScreen(
     val cardAnchor = rememberCoachAnchor()
     // 挖空遮挡偏好（用户可关：关掉即整句直出，只做快速浏览）
     val clozeEnabled by AppPrefs.sentenceClozeEnabledFlow.collectAsState()
-    // 首次见到的句子是否也遮挡（默认关：新句先给全文认读）
-    val clozeNewEnabled by AppPrefs.sentenceClozeNewEnabledFlow.collectAsState()
     // 点按换卡的飞出动画（特性设置）：开关 + 速率。只影响「点评级按钮」这条路，
     // 上下滑动翻卡是手势本体，没有开关也不可调（见下面的 dragY / advance）。
     val tapExitAnimEnabled by AppPrefs.sentenceTapExitEnabledFlow.collectAsState()
     val tapExitSpeed by AppPrefs.sentenceTapExitSpeedFlow.collectAsState()
+    // 首次见到的句子是否也遮挡（默认关：新句先给全文认读）
+    val clozeNewEnabled by AppPrefs.sentenceClozeNewEnabledFlow.collectAsState()
     // 与现有数据对账：已删标签 / 已删文章的筛选 id 仅本次忽略
     val validSentenceFilter = remember(rawSentenceFilter, tagData) {
         rawSentenceFilter.filterTo(mutableSetOf()) { id -> tagData.tags.any { it.id == id } }
@@ -402,6 +403,10 @@ fun SentenceCardScreen(
      * 现在索引在点击这一帧就提交，飞走的是旧卡的**一份独立副本**（[exitItem]，画在最上层，
      * 由 [exitOffset] 驱动）。于是下一张立刻成为按钮的主人：点几次就翻几张，
      * 每一次评级都落在当时屏幕上那张卡上。
+     *
+     * 用户在「特性」里可以关掉这段飞出（`sentenceTapExitEnabled`）或调它的速率
+     * （`sentenceTapExitSpeed`）—— 关掉时连副本都不画，索引照旧这一帧提交，
+     * 观感就是「按一下就换了一张」。手势那条路（[advance]）不受这两个开关影响。
      */
     fun rate(item: DailySentenceCoordinator.QueueItem, rating: FsrsEngine.Rating) {
         val items = queue ?: return
@@ -410,21 +415,31 @@ fun SentenceCardScreen(
         if (!acceptsTapOn(currentIndex, items.size, item.key, items.getOrNull(currentIndex)?.key)) return
         haptic()
         val ts = System.currentTimeMillis()
-        val prevState = states[item.key] ?: FsrsEngine.CardState()
-        val next = FsrsEngine.review(prevState, rating, ts)
-        // 记录本次所选评级名称：回看该卡时回显对应高亮（随 fsrs_state.json 持久化）
-        next.lastRating = rating.name
-        states = states + (item.key to next)
+        val optimisticPrev = states[item.key] ?: FsrsEngine.CardState()
+        val optimisticNext = FsrsEngine.review(optimisticPrev, rating, ts).also {
+            // 记录本次所选评级名称：回看该卡时回显对应高亮（随 fsrs_state.json 持久化）
+            it.lastRating = rating.name
+        }
+        states = states + (item.key to optimisticNext)
         sessionRatings[item.key] = rating
         scope.launch(Dispatchers.IO) {
             runCatching {
-                fsrsStore.saveSentence(item.key, next)
+                // 按磁盘上的真实旧值原子推进：句子卡与文章练习可能同时写同一句，
+                // 直接 save 本地快照会覆盖另一条路径刚写完的状态。
+                val transition = fsrsStore.updateSentenceWithPrevious(item.key) { previous ->
+                    FsrsEngine.review(previous, rating, ts).also { it.lastRating = rating.name }
+                } ?: return@runCatching
                 // 复习事件日志（B3-4）：句子卡的评级也是复习事件，与状态同批落盘
                 ReviewLogStore.append(
                     context.filesDir.resolve(ReviewLogStore.FILE_NAME),
-                    item.key, ts, rating.value,
-                    elapsedMs = if (prevState.lastReview > 0) ts - prevState.lastReview else 0L,
-                    state = next
+                    transition.key, ts, rating.value,
+                    elapsedMs = if (transition.previous.lastReview > 0) {
+                        ts - transition.previous.lastReview
+                    } else {
+                        0L
+                    },
+                    state = transition.next,
+                    source = ReviewSource.SENTENCE_CARD,
                 )
                 // 桌面小组件的到期数立刻跟随本次评级，不等系统 15 分钟轮询
                 com.ilyskyo.blancall.widget.BlancallWidgetRefresh.request(context)

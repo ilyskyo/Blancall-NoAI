@@ -911,6 +911,45 @@ class InkBoardView @JvmOverloads constructor(
         dotPaint.alpha = dotAlpha
     }
 
+    /**
+     * 尺寸变化时按比例缩放墨迹。
+     *
+     * Activity 声明了 `configChanges` 不会因旋转/分屏重建，所以这里是**同一个 View 被重新布局**；
+     * 而墨迹点存的是绝对像素。不缩放的话：写过字之后旋转或拖小窗，整幅墨迹会偏到左上角
+     * 或被裁掉，网格却按新尺寸重画；更糟的是下一次识别用「新尺寸位图 + 旧坐标墨迹」喂模型，
+     * 字被压到一角 → 低置信乱码，极端情况下高置信错字被自动上屏写进答案。
+     */
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (oldw <= 0 || oldh <= 0) return
+        if (w == oldw && h == oldh) return
+
+        val sx = w.toFloat() / oldw
+        val sy = h.toFloat() / oldh
+        if (strokes.isNotEmpty()) {
+            val scaled = ArrayList<StrokeRec>(strokes.size)
+            for (s in strokes) {
+                scaled.add(
+                    StrokeRec(
+                        pts = s.pts.map { Offset(it.x * sx, it.y * sy) },
+                        pressures = s.pressures,
+                        startMs = s.startMs,
+                        endMs = s.endMs,
+                        sim = s.sim,
+                    )
+                )
+            }
+            strokes.clear()
+            strokes.addAll(scaled)
+        }
+        if (current.isNotEmpty()) {
+            val scaledCurrent = current.map { Offset(it.x * sx, it.y * sy) }
+            current.clear()
+            current.addAll(scaledCurrent)
+        }
+        invalidate()
+    }
+
     override fun onDraw(canvas: Canvas) {
         val w = width.toFloat()
         val h = height.toFloat()

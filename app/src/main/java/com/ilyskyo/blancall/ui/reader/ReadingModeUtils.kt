@@ -41,15 +41,15 @@ internal fun buildReadingSections(content: String): List<ReadingSection> {
     val paras = ReaderOcclusion.splitParagraphs(normalized)
     if (paras.isEmpty()) return listOf(ReadingSection(content.trim(), 0, 0))
 
-    // 每个 block 记住自己来自哪一段：超长段落被按行拆开时，拆出来的每一行都指回原段落
+    // 每个 block 记住自己来自哪一段。
+    //
+    // 这里刻意不把超过 500 字的段落按单行拆开：拆出来的行片段在全文段落表里不存在，
+    // `mapToGlobalParagraphs` 会整页返回 -1，翻页模式下这一页就无法选句/划线/批注，
+    // 已有划线也画不出来（导入 PDF/OCR 文本很常见）。宁可让极长的单段占一整页，
+    // 也不能用「页面更短」换「整页只读」。段落聚合仍会在段与段之间分页。
     val blocks = mutableListOf<Pair<String, Int>>()
     paras.forEachIndexed { idx, p ->
-        if (p.text.length > 500) {
-            p.text.split("\n").map { it.trim() }.filter { it.isNotEmpty() }
-                .forEach { line -> blocks += line to idx }
-        } else {
-            blocks += p.text to idx
-        }
+        blocks += p.text to idx
     }
     if (blocks.isEmpty()) return listOf(ReadingSection(content.trim(), 0, 0))
 

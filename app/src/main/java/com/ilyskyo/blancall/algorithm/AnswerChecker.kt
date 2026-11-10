@@ -43,9 +43,14 @@ object AnswerChecker {
         /** 标点/空白层面的差异（仅 [Result.CORRECT] 情形携带；两串都空表示"略有差异"） */
         data class Surface(val missingPunct: String, val extraPunct: String) : Diff
 
-        /** 逐位替换（[Result.GLYPH_CONFUSED] / [Result.TYPO]）：1-based 位置 + 期望字 → 实写字，最多 3 条 */
+        /**
+         * 逐位替换（[Result.GLYPH_CONFUSED] / [Result.TYPO]）：1-based 位置 + 期望字 → 实写字，最多 3 条。
+         *
+         * 用 [String] 而不是 [Char]：一个码点可能是代理对（生僻字 𠮷、emoji），
+         * 用 Char 会把它劈成两个「半个字」，既算成两处差异，渲染出来也是方块。
+         */
         data class Replacement(val items: List<Item>) : Diff {
-            data class Item(val position: Int, val expected: Char, val written: Char)
+            data class Item(val position: Int, val expected: String, val written: String)
         }
 
         /** 缺字（[Result.MISSING]）：缺几个；[fragment] 为单个连续缺失段（不连续或过长时空串，避免误导） */
@@ -152,47 +157,57 @@ object AnswerChecker {
      * 把「没记清字形」与「记成了另一个字」混为一谈。
      * 「换字」与「没记住」之间只留一条阈值，讲的是还剩多少内容 —— 三分之一以内算换字，
      * 再多就是没记住。长答案错几个字终于能被记成换字，单字空也不再恒判 INCORRECT。
+     *
+     * **逐位比较一律按码点走**：生僻字（CJK 扩展区）与 emoji 是代理对，
+     * 按 Char 比会把一个字符算成两处不一致，短答案直接掉进「没记住」。
      */
-    internal fun classifyDiff(expected: String, actual: String): Result = when {
-        expected == actual -> Result.CORRECT
-        expected.toCharArray().sorted() == actual.toCharArray().sorted() -> Result.WRONG_ORDER
-        actual.length < expected.length && isSubsequence(actual, expected) -> Result.MISSING
-        actual.length > expected.length && isSubsequence(expected, actual) -> Result.EXTRA
-        else -> {
-            val lenDiff = kotlin.math.abs(expected.length - actual.length)
-            when {
-                // 又换又漏、不构成子序列时，按长度方向归到少/多字（差 1-2 个字以内）
-                lenDiff in 1..2 -> if (actual.length < expected.length) Result.MISSING else Result.EXTRA
-                // 长度差 ≥3 又不构成子序列：内容差得太多，直接判「没记住」。
-                // 必须显式写出来 —— 旧写法把 mismatch 置成 -1，再靠「-1 落在 0..tolerance 之外」
-                // 隐式落到 INCORRECT，读的人得先在脑子里跑一遍区间判断才知道这一支在说什么。
-                lenDiff != 0 -> Result.INCORRECT
-                else -> {
-                    // 走到这里必然等长。逐位比，差异集中在个别位置才算「换字」，
-                    // 超过容差就是「没记住」（讲的是还剩多少内容）。
-                    val mismatch = expected.indices.count { expected[it] != actual[it] }
-                    val tolerance = maxOf(TYPO_MAX_MISMATCH, expected.length / 3)
-                    when {
-                        mismatch > tolerance -> Result.INCORRECT
-                        // 差异位置全是形近字 → 字形混淆；否则记成他字。
-                        // 分这两类而不并作一类，是因为复习动作不同（辨析字形 vs 补记忆）。
-                        GlyphConfusables.isGlyphConfusedSubstitution(expected, actual) ->
-                            Result.GLYPH_CONFUSED
-                        else -> Result.TYPO
+    internal fun classifyDiff(expected: String, actual: String): Result {
+        val exp = expected.codePoints().toArray()
+        val act = actual.codePoints().toArray()
+        return when {
+            exp.contentEquals(act) -> Result.CORRECT
+            exp.sortedArray().contentEquals(act.sortedArray()) -> Result.WRONG_ORDER
+            act.size < exp.size && isSubsequenceCp(act, exp) -> Result.MISSING
+            act.size > exp.size && isSubsequenceCp(exp, act) -> Result.EXTRA
+            else -> {
+                val lenDiff = kotlin.math.abs(exp.size - act.size)
+                when {
+                    // 又换又漏、不构成子序列时，按长度方向归到少/多字（差 1-2 个字以内）
+                    lenDiff in 1..2 -> if (act.size < exp.size) Result.MISSING else Result.EXTRA
+                    // 长度差 ≥3 又不构成子序列：内容差得太多，直接判「没记住」。
+                    // 必须显式写出来 —— 旧写法把 mismatch 置成 -1，再靠「-1 落在 0..tolerance 之外」
+                    // 隐式落到 INCORRECT，读的人得先在脑子里跑一遍区间判断才知道这一支在说什么。
+                    lenDiff != 0 -> Result.INCORRECT
+                    else -> {
+                        // 走到这里必然等长（按码点）。逐位比，差异集中在个别位置才算「换字」，
+                        // 超过容差就是「没记住」（讲的是还剩多少内容）。
+                        val mismatch = exp.indices.count { exp[it] != act[it] }
+                        val tolerance = maxOf(TYPO_MAX_MISMATCH, exp.size / 3)
+                        when {
+                            mismatch > tolerance -> Result.INCORRECT
+                            // 差异位置全是形近字 → 字形混淆；否则记成他字。
+                            // 分这两类而不并作一类，是因为复习动作不同（辨析字形 vs 补记忆）。
+                            GlyphConfusables.isGlyphConfusedSubstitution(expected, actual) ->
+                                Result.GLYPH_CONFUSED
+                            else -> Result.TYPO
+                        }
                     }
                 }
             }
         }
     }
 
-    /** shorter 能否按序在 longer 里找到（不要求连续） */
-    private fun isSubsequence(shorter: String, longer: String): Boolean {
+    /** shorter 能否按序在 longer 里找到（不要求连续），按码点比较 */
+    private fun isSubsequenceCp(shorter: IntArray, longer: IntArray): Boolean {
         var i = 0
         for (c in longer) {
-            if (i < shorter.length && shorter[i] == c) i++
+            if (i < shorter.size && shorter[i] == c) i++
         }
-        return i == shorter.length
+        return i == shorter.size
     }
+
+    /** 码点 → 字符串（代理对会正确还原成一个字） */
+    private fun cpToString(cp: Int): String = String(Character.toChars(cp))
 
     // ═══════════════════════════════════════════
     //  工具函数
@@ -259,15 +274,18 @@ object AnswerChecker {
         return if (text.length <= 4) text else text.take(4) + "…"
     }
 
-    /** 逐位比较，收集替换明细（1-based 位置 + 期望字 → 实写字），最多 3 条（超出只提示前面的） */
+    /** 逐位比较（按码点），收集替换明细（1-based 位置 + 期望字 → 实写字），最多 3 条 */
     private fun replacements(expected: String, actual: String): List<Diff.Replacement.Item> {
-        val maxLen = maxOf(expected.length, actual.length)
+        val exp = expected.codePoints().toArray()
+        val act = actual.codePoints().toArray()
+        val maxLen = maxOf(exp.size, act.size)
         val items = mutableListOf<Diff.Replacement.Item>()
         for (i in 0 until maxLen) {
-            val e = expected.getOrNull(i)
-            val a = actual.getOrNull(i)
-            if (e != null && a != null && e != a) {
-                items.add(Diff.Replacement.Item(i + 1, e, a))
+            if (i >= exp.size || i >= act.size) continue
+            if (exp[i] != act[i]) {
+                items.add(
+                    Diff.Replacement.Item(i + 1, cpToString(exp[i]), cpToString(act[i])),
+                )
             }
         }
         return items.take(3)

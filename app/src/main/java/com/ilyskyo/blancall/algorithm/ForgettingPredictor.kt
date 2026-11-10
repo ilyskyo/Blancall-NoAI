@@ -74,6 +74,8 @@ object ForgettingPredictor {
         val decayCurve: List<Float>,
         /** 该文章是否被用户暂停了 FSRS 调度（暂停项不进入「待复习」结论） */
         val paused: Boolean = false,
+        /** 投影口径下的最弱句曲线；旧口径为空，图表不画第二线。 */
+        val weakestCurve: List<Float> = emptyList(),
     )
 
     /**
@@ -138,10 +140,12 @@ object ForgettingPredictor {
                     // 留存率、稳定性、未来曲线全部出自【反推出来的同一个 FSRS 状态】——
                     // 与句子侧、与已调度文章同一个模型。这里以前是自造的一条 e^(-Δt/S) 指数曲线。
                     val view = fsrsView(initialStateFromRecords(records) ?: FsrsEngine.CardState(), now)
-                    val lastTime = records.last().timestamp
                     val acc = weightedAccuracy(records)
-                    val reviewDate = EbbinghausScheduler.nextReviewTime(template, count - 1, lastTime, acc)
-                    if (count >= template.intervals.size || reviewDate == null) {
+                    // 到期日必须调用生产调度器的唯一入口：它内部按「日历天」去重轮次，
+                    // 与本函数上方用于展示的 count 同源。若这里再自算 count-1，
+                    // 同一天多次练习会让统计页与首页/列表/小组件得出相反结论。
+                    val reviewDate = EbbinghausScheduler.nextReviewAt(template, records, zone)
+                    if (reviewDate == null) {
                         // 复习轮次跑完（或模板已排完）：视为已掌握，但留存率仍按模型实时给（会随时间衰减）
                         Prediction(
                             articleId = article.id, title = article.title, urgency = Urgency.MASTERED,
@@ -234,7 +238,7 @@ object ForgettingPredictor {
     /** 加权衰减正确率：最近 5 次练习，越近权重越大。
      *  它仍参与模板兜底的间隔微调（autoAdjust），但不再决定留存率。
      */
-    private fun weightedAccuracy(records: List<PracticeRecord>): Float {
+    internal fun weightedAccuracy(records: List<PracticeRecord>): Float {
         if (records.isEmpty()) return 0f
         val recent = records.sortedByDescending { it.timestamp }.take(5)
         var weightSum = 0f

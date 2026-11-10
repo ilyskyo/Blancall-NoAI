@@ -166,4 +166,24 @@ class ColorMathTest {
         assertTrue("三级色与主色太接近，层级读不出来", ColorMath.contrast(light.toArgb(), 0xFF3B5DE7.toInt()) > 1.2)
         assertTrue("深色三级色不该是纯黑或纯白", dark != Color.Black && dark != Color.White)
     }
+
+    @Test
+    fun 自定义主题色的容器前景必须达到可读对比度() {
+        // 旧实现把容器写成 86% 原色，纯黑主题的容器是 #242424、前景是黑，
+        // 对比度只有 1.35:1；自定义色是唯一没有手调容器的路径，必须在纯函数里守住。
+        val samples = listOf(
+            0xFF000000.toInt(), 0xFF3F51B5.toInt(), 0xFF006C4C.toInt(),
+            0xFF9C4300.toInt(), 0xFFB31654.toInt(), 0xFFFFFFFF.toInt(),
+        )
+        for (argb in samples) {
+            val preset = accentPresetFromArgb(argb)
+            val container = preset.primaryContainerLight.toArgb()
+            val foreground = preset.onPrimaryContainerLight.toArgb()
+            val ratio = ColorMath.contrast(container, foreground)
+            assertTrue(
+                "自定义色 ${Integer.toHexString(argb)} 的容器对比度 $ratio 低于 4.5",
+                ratio >= 4.5
+            )
+        }
+    }
 }

@@ -22,15 +22,21 @@ object OneShotCloze {
     data class Pending(
         val articleId: Long,
         val config: CustomClozeStore.CustomConfig,
+        /** 来源用于写回复习日志与错题集训封顶；不参与持久化。 */
+        val source: ReviewSource = ReviewSource.OTHER,
     )
 
     private val tokens = AtomicLong(System.currentTimeMillis())
     private val pending = ConcurrentHashMap<Long, Pending>()
 
     /** 暂存一套配置，返回一次性 token（拼进导航路由）。 */
-    fun put(articleId: Long, config: CustomClozeStore.CustomConfig): Long {
+    fun put(
+        articleId: Long,
+        config: CustomClozeStore.CustomConfig,
+        source: ReviewSource = ReviewSource.OTHER,
+    ): Long {
         val token = tokens.incrementAndGet()
-        pending[token] = Pending(articleId, config)
+        pending[token] = Pending(articleId, config, source)
         // 防御性上限：正常使用只会有一两个在途；异常调用也不允许无限增长
         while (pending.size > MAX_PENDING) {
             pending.keys.firstOrNull()?.let { pending.remove(it) }

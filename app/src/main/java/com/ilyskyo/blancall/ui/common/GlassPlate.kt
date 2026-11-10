@@ -8,7 +8,6 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -25,6 +24,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.ilyskyo.blancall.R
 import com.ilyskyo.blancall.ui.theme.AppearanceStore
 import com.ilyskyo.blancall.ui.theme.ColorMath
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import com.ilyskyo.blancall.ui.theme.isBlancallDark
 import com.qmdeve.liquidglass.widget.LiquidGlassView
 import java.util.concurrent.atomic.AtomicReference
@@ -73,7 +73,7 @@ fun PopupGlassPlate(
     cornerPx: Float? = null
 ) {
     // cornerPx 为像素值（与 LiquidGlassView.setCornerRadius 同源）；null 时沿用默认 20dp
-    val shape = cornerPx?.let { RoundedCornerShape(it) } ?: RoundedCornerShape(20.dp)
+    val shape = cornerPx?.let { SmoothRoundedCornerShape(it) } ?: SmoothRoundedCornerShape(20.dp)
     Box(
         modifier
             .clip(shape)
@@ -358,9 +358,9 @@ fun LiquidGlassPageBar(
         // API<33 降级：实底玻璃板
         Box(
             modifier
-                .clip(RoundedCornerShape(cornerDp.dp))
+                .clip(SmoothRoundedCornerShape(cornerDp.dp))
                 .background(if (isDark) Color(0xE61A1A1A) else Color(0xF2FFFFFF))
-                .border(1.dp, if (isDark) Color(0x59FFFFFF) else Color(0xE0FFFFFF), RoundedCornerShape(cornerDp.dp))
+                .border(1.dp, if (isDark) Color(0x59FFFFFF) else Color(0xE0FFFFFF), SmoothRoundedCornerShape(cornerDp.dp))
         )
     }
 

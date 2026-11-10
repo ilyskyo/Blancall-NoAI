@@ -7,7 +7,11 @@ import android.app.Application
 import android.content.pm.ApplicationInfo
 import android.os.StrictMode
 import com.ilyskyo.blancall.algorithm.FsrsEngine
+import com.ilyskyo.blancall.data.repository.ArticleRepository
 import com.ilyskyo.blancall.data.repository.FsrsStateStore
+import com.ilyskyo.blancall.data.repository.HomeLayoutStore
+import com.ilyskyo.blancall.data.repository.RecordRepository
+import com.ilyskyo.blancall.data.repository.TagStore
 import com.ilyskyo.blancall.notification.NotificationHelper
 import com.ilyskyo.blancall.notification.PracticeLiveUpdate
 import com.ilyskyo.blancall.ui.theme.AppPrefs
@@ -25,12 +29,17 @@ import com.tom_roush.pdfbox.android.PDFBoxResourceLoader
  */
 class BlancallApp : Application() {
 
+    override fun attachBaseContext(base: android.content.Context) {
+        super.attachBaseContext(com.ilyskyo.blancall.ui.common.AppLocale.wrap(base))
+    }
+
     // 保存系统默认崩溃处理器（设置自己的之后 get 会返回自己，必须先保存）
     private val originalUncaughtHandler: Thread.UncaughtExceptionHandler? =
         Thread.getDefaultUncaughtExceptionHandler()
 
     override fun onCreate() {
         super.onCreate()
+        runCatching { com.ilyskyo.blancall.ui.common.AppLocale.migrateLegacyTag(this) }
 
         // 开发期主线程 IO / 资源泄漏检测：仅 debug 生效（penaltyLog 只打日志，不改变发布行为）
         // 用 ApplicationInfo 标志判断而非 BuildConfig：AGP 8 默认不生成 BuildConfig，无需为此开启 buildConfig 特性
@@ -103,7 +112,14 @@ class BlancallApp : Application() {
         val appFilesDir = filesDir
         kotlin.concurrent.thread {
             try {
+                // 首页首帧依赖的几份存储：文章库/练习记录各自在 getInstance 里起加载线程，
+                // 首页布局则是 remember 初始化时同步读盘。全部提前到这里触发，
+                // 让读盘与启动屏重叠，首页组合时拿到的已是缓存。
                 FsrsStateStore.getInstance(appFilesDir.resolve("fsrs_state.json").absolutePath)
+                ArticleRepository.getInstance(appFilesDir.resolve("articles.json").absolutePath)
+                RecordRepository.getInstance(appFilesDir.resolve("records.json").absolutePath)
+                TagStore.getInstance(appFilesDir).snapshot()
+                HomeLayoutStore.getInstance(appFilesDir).getCards()
             } catch (_: Exception) { }
         }
     }

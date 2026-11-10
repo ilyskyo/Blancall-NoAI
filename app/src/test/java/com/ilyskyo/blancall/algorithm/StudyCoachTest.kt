@@ -289,4 +289,25 @@ class StudyCoachTest {
         )
         assertEquals(StudyCoach.ExamPace.BEHIND, behind.examPace)
     }
+
+    @Test
+    fun `时长目标真的参与计划条目数`() {
+        val input = StudyCoach.Input(
+            now = now,
+            dueArticles = listOf(due(1, blanks = 120)),
+            weakestArticleId = 2,
+            weakestArticleTitle = "薄弱篇",
+            weakMistakeCount = 100,
+            dueSentenceCount = 100,
+            mistakeCount = 100,
+        )
+        val short = StudyCoach.buildPlan(input.copy(goalMinutes = 1))
+        val long = StudyCoach.buildPlan(input.copy(goalMinutes = 600))
+        assertEquals("1 分钟目标至少保留一条，不能给空计划", 1, short.items.size)
+        assertEquals("足够长的预算应放下全部条目", 3, long.items.size)
+        assertTrue(
+            "短预算的估算时长不能超过长预算：${short.estimatedMinutes} vs ${long.estimatedMinutes}",
+            short.estimatedMinutes <= long.estimatedMinutes
+        )
+    }
 }

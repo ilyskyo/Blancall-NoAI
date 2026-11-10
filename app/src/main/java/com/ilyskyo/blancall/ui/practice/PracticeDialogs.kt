@@ -4,7 +4,6 @@
 package com.ilyskyo.blancall.ui.practice
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import com.ilyskyo.blancall.ui.common.AppIcon
@@ -17,6 +16,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.unit.dp
 import com.ilyskyo.blancall.algorithm.BlancallGenerator
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 
 
 // ========== 未完成提交确认弹窗 ==========
@@ -29,7 +29,7 @@ internal fun IncompleteSubmitDialog(
 ) {
     BlancallAlertDialog(
         onDismissRequest = onContinue,
-        shape = RoundedCornerShape(20.dp),
+        shape = SmoothRoundedCornerShape(20.dp),
         tonalElevation = 4.dp,
         title = {
             Text(
@@ -54,7 +54,7 @@ internal fun IncompleteSubmitDialog(
                 )
                 Spacer(Modifier.height(12.dp))
                 Surface(
-                    shape = RoundedCornerShape(10.dp),
+                    shape = SmoothRoundedCornerShape(10.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
                 ) {
                     Column(Modifier.padding(12.dp)) {
@@ -70,7 +70,7 @@ internal fun IncompleteSubmitDialog(
         confirmButton = {
             Button(
                 onClick = onSubmitPartial,
-                shape = RoundedCornerShape(10.dp)
+                shape = SmoothRoundedCornerShape(10.dp)
             ) {
                 Text(stringResource(com.ilyskyo.blancall.R.string.save_and_submit))
             }
@@ -78,7 +78,7 @@ internal fun IncompleteSubmitDialog(
         dismissButton = {
             OutlinedButton(
                 onClick = onContinue,
-                shape = RoundedCornerShape(10.dp)
+                shape = SmoothRoundedCornerShape(10.dp)
             ) {
                 Text(stringResource(com.ilyskyo.blancall.R.string.keep_filling))
             }
@@ -123,7 +123,7 @@ internal fun ExportPdfDialog(
                 Button(
                     onClick = { onExport(false) },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp)
+                    shape = SmoothRoundedCornerShape(10.dp)
                 ) {
                     Text(stringResource(com.ilyskyo.blancall.R.string.export_no_answer))
                 }
@@ -131,7 +131,7 @@ internal fun ExportPdfDialog(
                 Button(
                     onClick = { onExport(true) },
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(10.dp)
+                    shape = SmoothRoundedCornerShape(10.dp)
                 ) {
                     Text(stringResource(com.ilyskyo.blancall.R.string.export_with_answer))
                 }

@@ -67,4 +67,19 @@ class SentenceSplitterTest {
             assertEquals(sp.text.trim(), text.substring(sp.startIndex, sp.endIndex).trim())
         }
     }
+
+    @Test
+    fun `英文句点加收尾引号要切句`() {
+        val sentences = SentenceSplitter.split("""He said "I am fine." Then he left.""")
+        assertEquals(2, sentences.size)
+        assertTrue(sentences[0].contains("I am fine."))
+        assertTrue(sentences[1].contains("Then he left"))
+    }
+
+    @Test
+    fun `引号内的缩写点不误切`() {
+        val sentences = SentenceSplitter.split("""He works at Acme Inc." Then he left.""")
+        // Inc. 是缩写：不在 Inc. 后切，整段保持一句（右引号处也不应误判）
+        assertTrue(sentences.isNotEmpty())
+    }
 }

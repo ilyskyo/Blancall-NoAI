@@ -36,5 +36,13 @@ data class PracticeState(
     // -1 = 整篇/段落模式。供「继续练习」恢复后按同一窗口重建句子锚点表 ——
     // 聚焦窗口的句子索引从 0 起，若按整篇口径重建锚点，判分记录的句级归属会全指到文章开头。
     val focusSentence: Int = -1,
+    /**
+     * 保存进度时正文的 MD5。恢复时与当前正文比对：
+     * 不一致说明文章被编辑过，旧 cloze 的句子/空位已经不对应当前正文，
+     * 不能直接把旧挖空和答案套上去（否则判分与热力图会静默错标）。
+     */
+    val contentHash: String? = null,
+    /** 本次练习真正的开始时刻（恢复会话时沿用第一次进入的时间，避免 duration 被重置为 0）。 */
+    val startedAt: Long = 0L,
     val lastPracticeTime: Long = System.currentTimeMillis()
 )

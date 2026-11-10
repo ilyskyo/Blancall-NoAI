@@ -6,7 +6,6 @@ package com.ilyskyo.blancall.ui.theme
 import android.app.Activity
 import android.os.Build
 import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Shapes
@@ -47,13 +46,14 @@ import kotlinx.coroutines.delay
 /**
  * 全局大圆角体系（Material 3 自定义 Shapes）：
  * 卡片 / 按钮 / 输入框 / 弹窗统一圆润风格，所有使用 MaterialTheme.shapes 的组件自动生效。
+ * 五档全部是超椭圆平滑圆角（见 [SmoothRoundedCornerShape]），与页面里手写的形状同一套曲线。
  */
 val BlancallShapes = Shapes(
-    extraSmall = RoundedCornerShape(12.dp),
-    small = RoundedCornerShape(16.dp),
-    medium = RoundedCornerShape(24.dp),
-    large = RoundedCornerShape(32.dp),
-    extraLarge = RoundedCornerShape(40.dp)
+    extraSmall = SmoothRoundedCornerShape(12.dp),
+    small = SmoothRoundedCornerShape(16.dp),
+    medium = SmoothRoundedCornerShape(24.dp),
+    large = SmoothRoundedCornerShape(32.dp),
+    extraLarge = SmoothRoundedCornerShape(40.dp)
 )
 
 /**

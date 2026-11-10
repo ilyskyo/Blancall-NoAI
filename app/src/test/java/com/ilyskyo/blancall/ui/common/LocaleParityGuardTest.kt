@@ -672,7 +672,9 @@ class LocaleParityGuardTest {
         /** 源语言里本来就不该有汉字的条目。
          *  `sentence_card_colon` 是读屏播报里的全角冒号（它自己就不是汉字）；
          *  `first_line_preview` 是「把标题原文包起来的引号」，值里只有 `「%1$s」`。 */
-        val CJK_EXEMPT = setOf("app_name", "sentence_card_colon", "first_line_preview", "csv_header_id", "ai_api_key", "notif_ongoing_short")
+        // sentence_source_title 的默认值是「《%1$s》」：只有书名号与占位符，
+        // 本来就不该含汉字；六语各自决定括号样式（en 用弯引号、ru 用 «»）。
+        val CJK_EXEMPT = setOf("app_name", "sentence_card_colon", "first_line_preview", "csv_header_id", "ai_api_key", "notif_ongoing_short", "sentence_source_title")
 
         val PH_KT_REF = Regex("""R\.(?:string|plurals)\.([A-Za-z0-9_]+)""")
         val PH_XML_REF = Regex("""@(?:string|plurals)/([A-Za-z0-9_]+)""")

@@ -32,6 +32,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import com.ilyskyo.blancall.ui.theme.isBlancallDark
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.grid.GridCells
@@ -57,9 +58,10 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.intl.LocaleList
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -100,6 +102,7 @@ import com.ilyskyo.blancall.ui.common.AnimatedOverlayPresence
 import com.ilyskyo.blancall.ui.common.AppIconKind
 import com.ilyskyo.blancall.ui.common.BackButton
 import com.ilyskyo.blancall.ui.common.BlancallAlertDialog
+import com.ilyskyo.blancall.ui.common.DeleteConfirmDialog
 import com.ilyskyo.blancall.ui.common.GlassDropdownMenu
 import com.ilyskyo.blancall.ui.common.GlassMenuItem
 import com.ilyskyo.blancall.ui.common.HapticTier
@@ -139,13 +142,17 @@ import java.util.Date
 import java.util.Locale
 
 /**
- * 语言名必须按该语言自身的字形渲染：CJK 统一码的字形随文字语言变体走，
- * 日文界面下「繁體中文」若跟着界面语言排版，繁/體 会落成日文字形。
- * 「跟随系统」不是语言名、而是随界面本地化的文案，保持继承界面语言。
+ * 语言名用固定字形渲染。
+ *
+ * 为什么不能只靠 localeList：部分 OEM 的字体栈不消费 Paint.textLocales（HyperOS 实测），
+ * 汉字字形由应用配置语言选中的字体族决定 —— 日语界面下「繁體中文」会变成日文字形，
+ * 每次切换界面语言都会跟着变。这里给每个语言名指定固定的内置子集字体，
+ * 不受界面语言与系统字体影响。「跟随系统」不是语言名、而是随界面本地化的文案，
+ * 保持继承界面语言。
  */
 private fun localeNameStyle(choice: AppLocale, base: TextStyle): TextStyle =
     if (choice == AppLocale.FollowSystem) base
-    else base.copy(localeList = LocaleList(choice.tag))
+    else base.copy(fontFamily = FontFamily(Font(languageLabelFontRes(choice))))
 
 @Composable
 fun SettingsScreen(navController: NavController) {
@@ -215,6 +222,33 @@ fun SettingsScreen(navController: NavController) {
         }
     }
 
+    // ── 备份导出：先勾选要带走的数据类别，再让用户选文件 ──
+    // 页面一打开就统计体积会白读一遍全库，所以只在面板打开时（IO 线程）算，算完再展示。
+    var backupPickerVisible by remember { mutableStateOf(false) }
+    var backupSelection by remember { mutableStateOf<Set<BackupManager.Group>>(emptySet()) }
+    var pendingBackupGroups by remember { mutableStateOf<Set<BackupManager.Group>>(emptySet()) }
+    var backupSelectionInitialized by remember { mutableStateOf(false) }
+    val backupStats by produceState(
+        initialValue = emptyList<BackupManager.GroupStat>(),
+        key1 = backupPickerVisible,
+    ) {
+        if (!backupPickerVisible) return@produceState
+        value = withContext(Dispatchers.IO) { BackupManager.stats(backupContext.filesDir) }
+    }
+    LaunchedEffect(backupPickerVisible, backupStats) {
+        if (backupPickerVisible && !backupSelectionInitialized && backupStats.isNotEmpty()) {
+            // 默认勾选「有数据且非隐私类」的类目：AI 历史体积大且含全文对话，默认不带
+            backupSelection = backupStats
+                .filter { it.files > 0 && it.group in BackupManager.Group.defaultSelection() }
+                .mapTo(mutableSetOf()) { it.group }
+            backupSelectionInitialized = true
+        }
+    }
+    LaunchedEffect(backupPickerVisible) {
+        // 面板每次关闭都复位，下次打开重新按默认勾选（而不是沿用上次的临时选择）
+        if (!backupPickerVisible) backupSelectionInitialized = false
+    }
+
     val backupExportLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("application/zip")
     ) { uri ->
@@ -223,7 +257,9 @@ fun SettingsScreen(navController: NavController) {
                 val failure = withContext(Dispatchers.IO) {
                     runCatching {
                         backupContext.contentResolver.openOutputStream(uri)?.use { out ->
-                            BackupManager.exportZip(backupContext.filesDir, out)
+                            BackupManager.exportZip(
+                                backupContext.filesDir, out, pendingBackupGroups,
+                            )
                         } ?: throw BackupManager.BackupError.CannotWrite()
                     }.exceptionOrNull()
                 }
@@ -238,6 +274,33 @@ fun SettingsScreen(navController: NavController) {
             }
         }
     }
+    if (backupPickerVisible) {
+        BackupPickerSheet(
+            stats = backupStats,
+            selected = backupSelection,
+            onToggle = { g ->
+                backupSelection = if (g in backupSelection) backupSelection - g else backupSelection + g
+            },
+            onSelectAll = {
+                backupSelection = backupStats.filter { it.files > 0 }
+                    .mapTo(mutableSetOf()) { it.group }
+            },
+            onClearAll = { backupSelection = emptySet() },
+            onExport = {
+                pendingBackupGroups = backupSelection
+                backupPickerVisible = false
+                backupScope.launch {
+                    // 等 sheet 退场一帧再拉起系统文件选择器：同帧创建另一个窗口时，
+                    // 部分 ROM 会把 chooser 顶掉（项目里已有同类踩坑记录）
+                    kotlinx.coroutines.delay(90)
+                    val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
+                    backupExportLauncher.launch("blancall_backup_$stamp.zip")
+                }
+            },
+            onDismissRequest = { backupPickerVisible = false },
+        )
+    }
+
     // ── 「导出并归档旧记录」（审计 2.2-15）：确认 → 选文件 → 导出成功后才裁剪 ──
     // 两步之间任何一步失败都不删数据：宁可归档不成，不可静默淘汰用户履历。
     val archiveRecordRepo = remember { RecordRepository.getInstance(recordsFile.absolutePath) }
@@ -325,7 +388,7 @@ fun SettingsScreen(navController: NavController) {
             GlassCard(
                 backdrop = false,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp)
+                shape = SmoothRoundedCornerShape(14.dp)
             ) {
                 Column(Modifier.padding(4.dp)) {
                     // 浅色米黄底色开关（深色模式始终纯黑，不受此开关影响）
@@ -724,7 +787,7 @@ fun SettingsScreen(navController: NavController) {
             GlassCard(
                 backdrop = false,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp)
+                shape = SmoothRoundedCornerShape(14.dp)
             ) {
                 val appearance by AppearanceStore.state.collectAsState()
                 val isDark = isBlancallDark()
@@ -865,7 +928,7 @@ fun SettingsScreen(navController: NavController) {
             GlassCard(
                 backdrop = false,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp)
+                shape = SmoothRoundedCornerShape(14.dp)
             ) {
                 // 段落首行缩进开关（导入时给未缩进段落补两格；关闭后不再新增缩进）
                 val autoIndentEnabled by AppPrefs.autoIndentEnabledFlow.collectAsState()
@@ -923,6 +986,7 @@ fun SettingsScreen(navController: NavController) {
                 val inkContext = LocalContext.current
                 val inkResources = LocalResources.current
                 val inkScope = rememberCoroutineScope()
+                var confirmClearInk by remember { mutableStateOf(false) }
                 Row(
                     Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
@@ -931,18 +995,29 @@ fun SettingsScreen(navController: NavController) {
                     Text(stringResource(com.ilyskyo.blancall.R.string.clear_saved_ink), style = MaterialTheme.typography.bodyLarge,
                         color = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.weight(1f))
-                    TextButton(onClick = {
-                        inkScope.launch {
-                            withContext(Dispatchers.IO) {
-                                InkStore.getInstance(
-                                    inkContext.filesDir.resolve("ink").absolutePath
-                                ).clearAll()
-                            }
-                            Toast.makeText(inkContext, inkResources.getString(com.ilyskyo.blancall.R.string.ink_cleared_toast), Toast.LENGTH_SHORT).show()
-                        }
-                    }) {
+                    TextButton(onClick = { confirmClearInk = true }) {
                         Text(stringResource(com.ilyskyo.blancall.R.string.clear))
                     }
+                }
+                if (confirmClearInk) {
+                    // 墨迹是用户手写的内容、删了重建不了，必须二次确认：
+                    // 这一行紧挨「保留错题墨迹」开关，误触概率不低，而旧实现单击即删。
+                    DeleteConfirmDialog(
+                        title = stringResource(com.ilyskyo.blancall.R.string.clear_ink_confirm_title),
+                        message = stringResource(com.ilyskyo.blancall.R.string.clear_ink_confirm_msg),
+                        onConfirm = {
+                            confirmClearInk = false
+                            inkScope.launch {
+                                withContext(Dispatchers.IO) {
+                                    InkStore.getInstance(
+                                        inkContext.filesDir.resolve("ink").absolutePath
+                                    ).clearAll()
+                                }
+                                Toast.makeText(inkContext, inkResources.getString(com.ilyskyo.blancall.R.string.ink_cleared_toast), Toast.LENGTH_SHORT).show()
+                            }
+                        },
+                        onDismiss = { confirmClearInk = false },
+                    )
                 }
 
                 HorizontalDivider(
@@ -1034,7 +1109,7 @@ fun SettingsScreen(navController: NavController) {
             GlassCard(
                 backdrop = false,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp)
+                shape = SmoothRoundedCornerShape(14.dp)
             ) {
                 val templateId by AppPrefs.reviewTemplateFlow.collectAsState()
                 val templates = listOf(ReviewTemplate.SPRINT, ReviewTemplate.STANDARD, ReviewTemplate.DEEP)
@@ -1091,10 +1166,10 @@ fun SettingsScreen(navController: NavController) {
             GlassCard(
                 backdrop = false,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp)
+                shape = SmoothRoundedCornerShape(14.dp)
             ) {
                 Surface(
-                    onClick = { navController.navigate("onboarding") },
+                    onClick = { navController.navigateOnce("guide") },
                     color = MaterialTheme.colorScheme.surface,
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -1163,7 +1238,7 @@ fun SettingsScreen(navController: NavController) {
                     color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
                 )
                 Surface(
-                    onClick = { navController.navigate("help") },
+                    onClick = { navController.navigateOnce("help") },
                     color = MaterialTheme.colorScheme.surface,
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -1201,10 +1276,10 @@ fun SettingsScreen(navController: NavController) {
             GlassCard(
                 backdrop = false,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp)
+                shape = SmoothRoundedCornerShape(14.dp)
             ) {
                 Surface(
-                    onClick = { navController.navigate("tag_manager") },
+                    onClick = { navController.navigateOnce("tag_manager") },
                     color = MaterialTheme.colorScheme.surface,
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -1239,9 +1314,6 @@ fun SettingsScreen(navController: NavController) {
 
             Spacer(Modifier.height(8.dp))
 
-            // ── 关于 ──
-            Spacer(Modifier.height(8.dp))
-
             // ── 数据（学习数据整机备份，换机/重装可一键迁移） ──
             Text(stringResource(com.ilyskyo.blancall.R.string.data_section), style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
@@ -1250,7 +1322,7 @@ fun SettingsScreen(navController: NavController) {
             GlassCard(
                 backdrop = false,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp)
+                shape = SmoothRoundedCornerShape(14.dp)
             ) {
                 Column(Modifier.padding(4.dp)) {
                     // 体积可见性：只报数 + 超预算时给一句提示，不做任何删除动作。
@@ -1326,8 +1398,8 @@ fun SettingsScreen(navController: NavController) {
                                 modifier = Modifier.padding(end = 16.dp))
                         }
                         TextButton(onClick = {
-                            val stamp = SimpleDateFormat("yyyyMMdd_HHmm", Locale.getDefault()).format(Date())
-                            backupExportLauncher.launch("blancall_backup_$stamp.zip")
+                            // 先选类别，再选文件：见页面顶部的 BackupPickerSheet
+                            backupPickerVisible = true
                         }) { Text(stringResource(com.ilyskyo.blancall.R.string.export_action)) }
                     }
 
@@ -1368,7 +1440,7 @@ fun SettingsScreen(navController: NavController) {
             GlassCard(
                 backdrop = false,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp)
+                shape = SmoothRoundedCornerShape(14.dp)
             ) {
                 // ── 内置素材库：多库各自可启用，未来可继续追加 ──
                 Text(stringResource(com.ilyskyo.blancall.R.string.built_in_library), style = MaterialTheme.typography.titleSmall,
@@ -1404,8 +1476,12 @@ fun SettingsScreen(navController: NavController) {
                         onCheckedChange = { AppPrefs.setLibraryEnabled("gaokao", it) }
                     )
                 }
-                // 预留更多库
+                // 预留更多库：在此 Row 之后追加即可（如化学句子大全）
 
+                HorizontalDivider(
+                    modifier = Modifier.padding(horizontal = 16.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                )
                 // 内容包：用户自己的 zip（txt/md + 清单），可浏览、可一键全文导入
                 Row(
                     Modifier.padding(horizontal = 16.dp, vertical = 10.dp).fillMaxWidth(),
@@ -1426,7 +1502,7 @@ fun SettingsScreen(navController: NavController) {
                         )
                     }
                     GlassButton(
-                        onClick = { navController.navigate("content_packs") },
+                        onClick = { navController.navigateOnce("content_packs") },
                         modifier = Modifier.height(34.dp)
                     ) {
                         Text(
@@ -1456,7 +1532,7 @@ fun SettingsScreen(navController: NavController) {
                         )
                     }
                     GlassButton(
-                        onClick = { navController.navigate("data_interchange") },
+                        onClick = { navController.navigateOnce("data_interchange") },
                         modifier = Modifier.height(34.dp)
                     ) {
                         Text(
@@ -1467,6 +1543,10 @@ fun SettingsScreen(navController: NavController) {
                     }
                 }
             }
+
+            Spacer(Modifier.height(8.dp))
+
+            // ── 关于 ──
             Text(stringResource(com.ilyskyo.blancall.R.string.about_section), style = MaterialTheme.typography.titleSmall,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary)
@@ -1474,7 +1554,7 @@ fun SettingsScreen(navController: NavController) {
             GlassCard(
                 backdrop = false,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(14.dp)
+                shape = SmoothRoundedCornerShape(14.dp)
             ) {
                 Column(Modifier.padding(16.dp)) {
                     Text("Blancall", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
@@ -1568,7 +1648,7 @@ fun SettingsScreen(navController: NavController) {
                 GlassCard(
                     backdrop = false,
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(14.dp)
+                    shape = SmoothRoundedCornerShape(14.dp)
                 ) {
                     val qrSide = if (LocalIsLargeScreen) 200.dp else 168.dp
                     Column(
@@ -1591,7 +1671,7 @@ fun SettingsScreen(navController: NavController) {
                         Box(
                             modifier = Modifier
                                 .size(qrSide)
-                                .clip(RoundedCornerShape(14.dp))
+                                .clip(SmoothRoundedCornerShape(14.dp))
                                 .background(Color.White)
                         ) {
                             Image(
@@ -1681,7 +1761,7 @@ fun SettingsScreen(navController: NavController) {
             if (showLegalDialog) {
                 BlancallAlertDialog(
                     onDismissRequest = { showLegalDialog = false },
-                    shape = RoundedCornerShape(28.dp),
+                    shape = SmoothRoundedCornerShape(28.dp),
                     containerColor = MaterialTheme.colorScheme.surface,
                     title = {
                         Column(Modifier.padding(top = 4.dp)) {
@@ -1702,7 +1782,7 @@ fun SettingsScreen(navController: NavController) {
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clip(RoundedCornerShape(16.dp))
+                                    .clip(SmoothRoundedCornerShape(16.dp))
                                     .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
                                     .heightIn(max = 420.dp)
                                     .verticalScroll(rememberScrollState())
@@ -1738,7 +1818,7 @@ fun SettingsScreen(navController: NavController) {
                         modifier = Modifier.fillMaxWidth(),
                         singleLine = true,
                         label = { Text(stringResource(com.ilyskyo.blancall.R.string.custom_subtitle)) },
-                        shape = RoundedCornerShape(12.dp)
+                        shape = SmoothRoundedCornerShape(12.dp)
                     )
                 }
             },
@@ -1749,7 +1829,7 @@ fun SettingsScreen(navController: NavController) {
                         AppPrefs.subtitle = editText
                         showSubtitleDialog = false
                     },
-                    shape = RoundedCornerShape(14.dp)
+                    shape = SmoothRoundedCornerShape(14.dp)
                 ) { Text(stringResource(com.ilyskyo.blancall.R.string.save)) }
             },
             dismissButton = {
@@ -1785,7 +1865,7 @@ fun SettingsScreen(navController: NavController) {
                             recordsArchiveLauncher.launch("blancall_records_archive_$stamp.json")
                         }
                     },
-                    shape = RoundedCornerShape(14.dp)
+                    shape = SmoothRoundedCornerShape(14.dp)
                 ) { Text(stringResource(com.ilyskyo.blancall.R.string.data_archive_action)) }
             },
             dismissButton = {
@@ -1814,12 +1894,27 @@ fun SettingsScreen(navController: NavController) {
                         backupScope.launch(NonCancellable) {
                             val result = withContext(Dispatchers.IO) {
                                 runCatching {
-                                    // 先落到缓存临时包：ZipFile 需随机读取，且避免边读 SAF 边写盘
                                     val temp = File(backupContext.cacheDir, "backup_import.zip")
-                                    backupContext.contentResolver.openInputStream(importUri)?.use { input ->
-                                        temp.outputStream().use { output -> input.copyTo(output) }
-                                    } ?: throw BackupManager.BackupError.CannotRead()
-                                    BackupManager.restoreZip(temp, backupContext.filesDir).also { temp.delete() }
+                                    try {
+                                        backupContext.contentResolver.openInputStream(importUri)?.use { input ->
+                                            temp.outputStream().use { output ->
+                                                val buffer = ByteArray(8192)
+                                                var total = 0L
+                                                while (true) {
+                                                    val read = input.read(buffer)
+                                                    if (read < 0) break
+                                                    total += read
+                                                    if (total > BackupManager.MAX_TOTAL_BYTES) {
+                                                        throw BackupManager.BackupError.TooLarge(null)
+                                                    }
+                                                    output.write(buffer, 0, read)
+                                                }
+                                            }
+                                        } ?: throw BackupManager.BackupError.CannotRead()
+                                        BackupManager.restoreZip(temp, backupContext.filesDir)
+                                    } finally {
+                                        temp.delete()
+                                    }
                                 }
                             }
                             result.onSuccess {
@@ -1829,12 +1924,18 @@ fun SettingsScreen(navController: NavController) {
                                 val reloadFailures = withContext(Dispatchers.IO) {
                                     LearningDataReloader.reloadAll(backupContext)
                                 }
-                                val doneText = if (it.removed > 0) {
-                                    backupResources.getString(
+                                val doneText = when {
+                                    it.removed > 0 -> backupResources.getString(
                                         R.string.backup_restore_done_cleaned, it.restored, it.removed
                                     )
-                                } else {
-                                    backupResources.getString(R.string.backup_restore_done, it.restored)
+                                    // 部分类目备份：说清楚是「几类」而不是「整库」
+                                    it.groups > 0 -> backupResources.getQuantityString(
+                                        R.plurals.backup_restore_groups,
+                                        it.restored,
+                                        it.restored,
+                                        it.groups,
+                                    )
+                                    else -> backupResources.getString(R.string.backup_restore_done, it.restored)
                                 }
                                 backupRestartMessage = doneText +
                                     backupResources.getString(R.string.backup_restore_applied_hint) +
@@ -1856,7 +1957,7 @@ fun SettingsScreen(navController: NavController) {
                             }
                         }
                     },
-                    shape = RoundedCornerShape(14.dp)
+                    shape = SmoothRoundedCornerShape(14.dp)
                 ) { Text(stringResource(com.ilyskyo.blancall.R.string.import_action)) }
             },
             dismissButton = {
@@ -1874,7 +1975,7 @@ fun SettingsScreen(navController: NavController) {
             confirmButton = {
                 Button(
                     onClick = { backupRestartMessage = null },
-                    shape = RoundedCornerShape(14.dp)
+                    shape = SmoothRoundedCornerShape(14.dp)
                 ) { Text(stringResource(com.ilyskyo.blancall.R.string.done)) }
             }
         )
@@ -2021,7 +2122,7 @@ private fun OptionRow(
     Surface(
         onClick = onClick,
         color = rowColor,
-        shape = RoundedCornerShape(10.dp),
+        shape = SmoothRoundedCornerShape(10.dp),
         modifier = Modifier
             .padding(horizontal = 4.dp, vertical = 2.dp)
             .fillMaxWidth()
@@ -2110,7 +2211,7 @@ private fun StudyDurationSettings() {
                     selected = goalMinutes == mins,
                     onClick = { ReminderPrefs.goalMinutes = mins },
                     label = { AdaptiveChipLabel(stringResource(com.ilyskyo.blancall.R.string.minutes_unit, mins)) },
-                    shape = RoundedCornerShape(8.dp)
+                    shape = SmoothRoundedCornerShape(8.dp)
                 )
             }
             FilterChip(
@@ -2125,7 +2226,7 @@ private fun StudyDurationSettings() {
                         else stringResource(com.ilyskyo.blancall.R.string.minutes_unit, goalMinutes)
                     )
                 },
-                shape = RoundedCornerShape(8.dp)
+                shape = SmoothRoundedCornerShape(8.dp)
             )
         }
     }
@@ -2268,7 +2369,7 @@ private fun ReminderSettingsCard() {
     GlassCard(
         backdrop = false,
         modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp)
+        shape = SmoothRoundedCornerShape(14.dp)
     ) {
         Column(Modifier.padding(4.dp)) {
             // ── 开关行 ──
@@ -2302,6 +2403,10 @@ private fun ReminderSettingsCard() {
                     onCheckedChange = { newEnabled ->
                         ReminderPrefs.enabled = newEnabled
                         if (newEnabled) {
+                            // 先排期，再请求权限。旧实现只在「权限已授予」的分支里补排，
+                            // 权限恰好被拒时队列里连 Worker 都没有 —— 界面显示「已开启 · 下次 20:00」，
+                            // 当天却一声不响，用户开完就锁屏根本不会回来触发 onResume 兜底。
+                            runCatching { ReminderWorker.scheduleNext(context) }
                             (context as? MainActivity)?.requestNotificationPermissionIfNeeded()
                         } else {
                             runCatching { ReminderWorker.cancel(context) }
@@ -2385,7 +2490,7 @@ private fun ReminderSettingsCard() {
                                         reschedule()
                                     },
                                     label = { Text(stringResource(freq.labelRes), style = MaterialTheme.typography.labelSmall) },
-                                    shape = RoundedCornerShape(8.dp)
+                                    shape = SmoothRoundedCornerShape(8.dp)
                                 )
                             }
                         }
@@ -2424,7 +2529,7 @@ private fun ReminderSettingsCard() {
                                                 style = MaterialTheme.typography.labelSmall
                                             )
                                         },
-                                        shape = RoundedCornerShape(8.dp)
+                                        shape = SmoothRoundedCornerShape(8.dp)
                                     )
                                 }
                             }
@@ -2466,7 +2571,7 @@ private fun ReminderSettingsCard() {
                                             stringResource(com.ilyskyo.blancall.R.string.goal_count_chip, g)
                                         )
                                     },
-                                    shape = RoundedCornerShape(8.dp)
+                                    shape = SmoothRoundedCornerShape(8.dp)
                                 )
                             }
                             FilterChip(
@@ -2484,7 +2589,7 @@ private fun ReminderSettingsCard() {
                                         }
                                     )
                                 },
-                                shape = RoundedCornerShape(8.dp)
+                                shape = SmoothRoundedCornerShape(8.dp)
                             )
                         }
                     }
@@ -2732,7 +2837,7 @@ private fun TimePickerDialog(
 
     BlancallAlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(20.dp),
+        shape = SmoothRoundedCornerShape(20.dp),
         title = { Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold) },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
@@ -2758,7 +2863,7 @@ private fun TimePickerDialog(
                             placeholder = { Text("0-23", style = MaterialTheme.typography.bodySmall) },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             textStyle = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.SemiBold),
-                            shape = RoundedCornerShape(10.dp)
+                            shape = SmoothRoundedCornerShape(10.dp)
                         )
                     }
                     Text(" : ", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
@@ -2778,7 +2883,7 @@ private fun TimePickerDialog(
                             placeholder = { Text("0-59", style = MaterialTheme.typography.bodySmall) },
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             textStyle = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.SemiBold),
-                            shape = RoundedCornerShape(10.dp)
+                            shape = SmoothRoundedCornerShape(10.dp)
                         )
                     }
                 }
@@ -2807,7 +2912,7 @@ private fun TimePickerDialog(
                                 minuteText = time.second.toString().padStart(2, '0')
                             },
                             label = { Text(label, style = MaterialTheme.typography.labelSmall) },
-                            shape = RoundedCornerShape(8.dp),
+                            shape = SmoothRoundedCornerShape(8.dp),
                             colors = AssistChipDefaults.assistChipColors(
                                 containerColor = if (isActive)
                                     MaterialTheme.colorScheme.primaryContainer
@@ -2825,7 +2930,7 @@ private fun TimePickerDialog(
                     val m = (minuteText.toIntOrNull() ?: currentMinute).coerceIn(0, 59)
                     onConfirm(h, m)
                 },
-                shape = RoundedCornerShape(10.dp)
+                shape = SmoothRoundedCornerShape(10.dp)
             ) { Text(stringResource(com.ilyskyo.blancall.R.string.ok)) }
         },
         dismissButton = {
@@ -3011,4 +3116,10 @@ private fun FontScaleSlider(current: Float) {
             modifier = Modifier.padding(horizontal = 16.dp)
         )
     }
+}
+
+
+/** 设置页入口统一去重：快速双击不再把同一目的页压两层。 */
+private fun androidx.navigation.NavController.navigateOnce(route: String) {
+    navigate(route) { launchSingleTop = true }
 }

@@ -46,7 +46,9 @@ fun MemoryDecayChart(
     retentionRate: Float,
     modifier: Modifier = Modifier,
     threshold: Float = 0.3f,
-    daysToShow: Int = 30
+    daysToShow: Int = 30,
+    /** 可选最弱句序列：很淡的第二条线，不参与圆点/填色。 */
+    weakestCurve: List<Float>? = null,
 ) {
     if (decayCurve.isEmpty()) return
     val n = decayCurve.size.coerceAtMost(daysToShow + 1)
@@ -71,6 +73,7 @@ fun MemoryDecayChart(
     // 曲线下方纯色填充（已移除 verticalGradient）
     val fillColor = curveColor.copy(alpha = 0.15f)
     val thresholdColor = MaterialTheme.colorScheme.outlineVariant
+    val weakestColor = MaterialTheme.colorScheme.tertiary.copy(alpha = 0.45f)
     val axisColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
     val labelColor = MaterialTheme.colorScheme.onSurfaceVariant
     val dotColor = MaterialTheme.colorScheme.onSurface
@@ -80,6 +83,7 @@ fun MemoryDecayChart(
     // Path 对象提到 Composable 层复用，避免动画每帧在 DrawScope 内创建新对象导致 GC 抖动
     val linePath = remember { Path() }
     val fillPath = remember { Path() }
+    val weakestPath = remember { Path() }
 
     val decayDescription = stringResource(
         com.ilyskyo.blancall.R.string.a11y_memory_decay,
@@ -149,6 +153,22 @@ fun MemoryDecayChart(
                     color = curveColor,
                     style = Stroke(width = 2.dp.toPx(), join = StrokeJoin.Round)
                 )
+                // 最弱句线：很淡，只做提示，不改变主曲线/圆点语义。
+                val weak = weakestCurve
+                if (weak != null && weak.size >= 2) {
+                    weakestPath.rewind()
+                    val weakPoints = (minOf(n, weak.size) * animated).toInt().coerceAtLeast(2)
+                    for (i in 0 until weakPoints) {
+                        val x = leftPad + w * i / (n - 1)
+                        val y = topPad + h * (1f - weak[i].coerceIn(0f, 1f))
+                        if (i == 0) weakestPath.moveTo(x, y) else weakestPath.lineTo(x, y)
+                    }
+                    drawPath(
+                        weakestPath,
+                        color = weakestColor,
+                        style = Stroke(width = 1.25.dp.toPx(), join = StrokeJoin.Round)
+                    )
+                }
 
                 // 当前留存率圆点（index 0，即今天）
                 val dotX = leftPad

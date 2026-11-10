@@ -86,6 +86,7 @@ import com.ilyskyo.blancall.ui.statistics.StudyTaskDetailScreen
 import com.ilyskyo.blancall.ui.statistics.MistakeNotebookScreen
 import com.ilyskyo.blancall.ui.statistics.PracticeHistoryScreen
 import com.ilyskyo.blancall.ui.tag.TagDetailScreen
+import com.ilyskyo.blancall.ui.onboarding.GuideScreen
 import com.ilyskyo.blancall.ui.onboarding.OnboardingScreen
 import com.ilyskyo.blancall.ui.search.SearchScreen
 import com.ilyskyo.blancall.ui.tag.TagManagerScreen
@@ -331,9 +332,12 @@ fun AppNavigation() {
     // 页面内容的采样层：整页录进一个 GraphicsLayer，底栏/侧栏用 drawBackdrop 采样。
     // 不再需要专用 FrameLayout + 嵌套 ComposeView（那层只为旧 AndroidView 玻璃服务）。
     val pageBackdrop = rememberLayerBackdrop()
-    // 只有「根 tab 页 + 玻璃开启」时才录整页：
-    // 子页（设置/阅读/练习/WebView）没有导航栏，不该为装饰效果持续采样。
-    val needsPageBackdrop = currentTab >= 0 && navGlass
+    // 只有「根 tab 页 + 玻璃开启 + 导航面确实在场」时才录整页：
+    // 子页（设置/阅读/练习/WebView）没有导航栏，不该为装饰效果持续采样；
+    // 窄屏滚动自动收起底栏期间同理——没人采样，整页录制纯属白烧帧。
+    // 大屏侧栏不受 navBarAutoHidden 控制（见下方 NavRail），必须继续录。
+    val needsPageBackdrop =
+        currentTab >= 0 && navGlass && (isLargeScreen || !navBarAutoHidden)
 
     // 侧栏让位宽度：NavHost 与侧栏现在同处外层组合，直接读这个值即可。
     val railReserved = if (isLargeScreen && currentTab >= 0) NavRailWidth else 0.dp
@@ -435,9 +439,14 @@ fun AppNavigation() {
         }
 
         composable(
-            route = "reader/{articleId}",
+            // read=true：使用引导直达沉浸阅读页（「遮挡自定义」要在阅读页里才能打开）
+            route = "reader/{articleId}?read={read}",
             arguments = listOf(
-                navArgument("articleId") { type = NavType.LongType }
+                navArgument("articleId") { type = NavType.LongType },
+                navArgument("read") {
+                    type = NavType.BoolType
+                    defaultValue = false
+                }
             ),
             // 首页卡点进来 = 从触点放大铺开；没有登记锚点的入口（列表页、搜索页、深链）
             // 一律回退普通滑入，reveal 解析对同一导航可重复求值。
@@ -447,9 +456,10 @@ fun AppNavigation() {
             popEnterTransition = { revealPopEnter(popEnterSlide()) }
         ) { backStackEntry ->
             val articleId = backStackEntry.arguments?.getLong("articleId") ?: 0L
+            val startReading = backStackEntry.arguments?.getBoolean("read") ?: false
             RevealPageShell(backStackEntry.id) {
                 HeroEntry(this) {
-                    ReaderScreen(navController, articleId)
+                    ReaderScreen(navController, articleId, startReading)
                 }
             }
         }
@@ -501,7 +511,7 @@ fun AppNavigation() {
         }
 
         composable(
-            route = "practice/{articleId}?mode={mode}&resume={resume}&sectionMode={sectionMode}&configId={configId}&focusSentence={focusSentence}&oneShot={oneShot}&budget={budget}",
+            route = "practice/{articleId}?mode={mode}&resume={resume}&sectionMode={sectionMode}&configId={configId}&focusSentence={focusSentence}&oneShot={oneShot}&budget={budget}&guide={guide}",
             arguments = listOf(
                 navArgument("articleId") { type = NavType.LongType },
                 navArgument("mode") {
@@ -534,6 +544,11 @@ fun AppNavigation() {
                     // 时间预算（分钟）；0 = 无。到点只提醒收尾，不强制中断。
                     type = NavType.IntType
                     defaultValue = 0
+                },
+                navArgument("guide") {
+                    // 使用引导进入：模式选择卡上多一句「先选模式再拖标题」的说明
+                    type = NavType.BoolType
+                    defaultValue = false
                 }
             ),
             enterTransition = enterSlide,
@@ -794,6 +809,17 @@ fun AppNavigation() {
             popEnterTransition = popEnterSlide
         ) {
             OnboardingScreen(navController)
+        }
+
+        // 操作地图：从设置「帮助 → 使用引导」进入，逐条把隐藏操作带到真界面上重演
+        composable(
+            "guide",
+            enterTransition = enterSlide,
+            exitTransition = exitSlide,
+            popExitTransition = popExitSlide,
+            popEnterTransition = popEnterSlide
+        ) {
+            GuideScreen(navController = navController)
         }
 
         composable(

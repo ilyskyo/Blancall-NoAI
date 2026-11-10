@@ -67,6 +67,25 @@ object SentenceSelector {
         return "$SENTENCE_KEY_PREFIX$articleId:$hex"
     }
 
+    /**
+     * 本篇当前到期的句子索引（全文切句口径）。
+     *
+     * 与 [candidates] 不同：这里不按 6..80 字过滤、也不按哈希去重 —— 练过的短句/重复句
+     * 同样可能有到期状态，练习封面要按全文句子下标对齐，不能拿候选集下标硬套。
+     */
+    fun dueSentenceIndices(
+        article: Article,
+        sentenceStates: Map<String, FsrsEngine.CardState>,
+        now: Long = System.currentTimeMillis(),
+    ): Set<Int> {
+        if (sentenceStates.isEmpty()) return emptySet()
+        val sentences = SentenceSplitter.split(article.content)
+        return sentences.indices.filterTo(HashSet()) { index ->
+            val state = sentenceStates[sentenceKey(article.id, sentences[index])]
+            state != null && FsrsEngine.isDue(state, now)
+        }
+    }
+
     /** 从句子键解析所属文章 id（脏键返回 null） */
     fun articleIdOf(key: String): Long? {
         if (!key.startsWith(SENTENCE_KEY_PREFIX)) return null

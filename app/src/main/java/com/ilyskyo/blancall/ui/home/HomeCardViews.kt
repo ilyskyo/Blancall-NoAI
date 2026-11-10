@@ -29,7 +29,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.MaterialTheme
@@ -82,6 +81,7 @@ import com.ilyskyo.blancall.ui.common.trackTouchAnchor
 import com.ilyskyo.blancall.ui.reader.updateArticleReaderPrefs
 import com.ilyskyo.blancall.ui.theme.AppPrefs
 import com.ilyskyo.blancall.ui.theme.Macaron
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -106,6 +106,20 @@ import kotlinx.coroutines.withContext
 
 /** 窄卡阈值：宽度小于该值（典型为 colSpan=1）时收紧内边距、隐藏次要信息 */
 private val NARROW_CARD_WIDTH = 168.dp
+
+/**
+ * 空态光学下沉比例：空态在自己的「舞台」（标题以下的剩余区）里几何居中后，再按舞台高度的
+ * 3% 往下压一点（1~8dp 封顶）。
+ *
+ * 依据两条：
+ * - 排版上的光学居中：文字块的视觉重心高于它的行盒中心（行盒上下各留了 ascender/descender
+ *   的空隙，而字墨只占中间一段），纯几何居中在眼睛里会偏上，需要往下补偿一点。
+ * - Material 空状态规范：插图/说明放在**内容区**的中心，而不是连标题一起的整卡中心；
+ *   标题是独立的一条信息带，把说明按整卡居中会让它顶在标题下方。
+ *
+ * 比例不取更大：高卡的舞台本身就高，3% 已足够把行盒补偿回来；再大就会读成「内容掉到下半张」。
+ */
+private const val EMPTY_STATE_DROP_RATIO = 0.03f
 
 /**
  * 首页「句子卡片」的数据快照。
@@ -148,20 +162,8 @@ private val TALL_CARD_HEIGHT = 140.dp
  */
 private val SHORT_CARD_HEIGHT = 140.dp
 
-/**
- * 空态光学下沉比例：空态在自己的「舞台」（标题以下的剩余区）里几何居中后，再按舞台高度的
- * 3% 往下压一点（1~8dp 封顶）。
- *
- * 依据两条：
- * - 排版上的光学居中：文字块的视觉重心高于它的行盒中心（行盒上下各留了 ascender/descender
- *   的空隙，而字墨只占中间一段），纯几何居中在眼睛里会偏上，需要往下补偿一点。
- * - Material 空状态规范：插图/说明放在**内容区**的中心，而不是连标题一起的整卡中心；
- *   标题是独立的一条信息带，把说明按整卡居中会让它顶在标题下方。
- */
-private const val EMPTY_STATE_DROP_RATIO = 0.03f
-
 /** 首页卡片统一圆角：编辑态描环按同一曲率绘制，内外圆角一致 */
-internal val HOME_CARD_SHAPE = RoundedCornerShape(20.dp)
+internal val HOME_CARD_SHAPE = SmoothRoundedCornerShape(20.dp)
 
 /**
  * 卡片尺寸度量：一次量好宽高，供各卡按「窄（1 列）/ 矮（1 行）/ 高（≥2 行）」三档自适应。
@@ -295,7 +297,8 @@ fun HomeCardContent(
             )
 
             HomeLayoutStore.CardType.ARTICLE -> ArticleCard(
-                article = articles.firstOrNull { it.id == card.refId },
+                // 线性反查随文章数增长，卡片每次重组都扫一遍不划算
+                article = remember(articles, card.refId) { articles.firstOrNull { it.id == card.refId } },
                 tagsByArticle = tagsByArticle,
                 dateFormat = dateFormat,
                 anchorArticleId = anchorArticleId,
@@ -358,6 +361,9 @@ fun HomeCardContent(
 // DUE —— 今日待复习
 // ══════════════════════════════════════════════════════════════════
 
+/** 待复习卡内最多组合多少行；再多也滚不到底，完整清单走卡片点击进入的列表页 */
+private const val MAX_DUE_ROWS_IN_CARD = 20
+
 @Composable
 private fun DueCard(
     dueArticles: List<Article>,
@@ -394,9 +400,9 @@ private fun DueCard(
         containerColor = hue.fill,
         onClick = onOpenList,
     ) {
-        // 空态 / 单条要相对**整卡**居中（与并排卡片的文字落在同一条水平线）；
-        // 若仍按「标题 + 正文」的纵向流排布，重心会被标题压到卡片下半部分。
-        // 多条仍走原来的「标题固定顶部 + 列表吃满余下空间并内滚」。
+        // 空态 / 单条都相对**标题以下的剩余区**居中，与多条时「标题顶着、内容往下排」同一套
+        // 结构：空态按整卡居中的话，「标题 + 空态」整组的重心会压在卡片上半部，看着就是内容
+        // 顶在上面（矮卡尤其明显）。多条仍走「标题固定顶部 + 列表吃满余下空间并内滚」。
         StateSwap(
             targetState = dueArticles.isEmpty(),
             label = "homeDueSwap",
@@ -422,24 +428,29 @@ private fun DueCard(
                     )
                 }
 
-                dueArticles.size == 1 -> Box(
+                dueArticles.size == 1 -> Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(m.pad),
                 ) {
                     CardHeader(dotColor = hue.accent, title = headerTitle)
-                    DueRow(
-                        article = dueArticles.first(),
-                        isNew = dueArticles.first().id in newArticleIds,
-                        accent = hue.accent,
-                        anchorArticleId = anchorArticleId,
-                        onAnchorMeasured = onAnchorMeasured,
-                        onPracticeArticle = onPracticeArticle,
-                        m = m,
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .align(Alignment.Center),
-                    )
+                            .weight(1f),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        DueRow(
+                            article = dueArticles.first(),
+                            isNew = dueArticles.first().id in newArticleIds,
+                            accent = hue.accent,
+                            anchorArticleId = anchorArticleId,
+                            onAnchorMeasured = onAnchorMeasured,
+                            onPracticeArticle = onPracticeArticle,
+                            m = m,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                 }
 
                 else -> Column(
@@ -459,7 +470,10 @@ private fun DueCard(
                             Arrangement.Top
                         },
                     ) {
-                        dueArticles.forEach { article ->
+                        // 只组合前 N 行：到期几十上百篇时，旧写法会把每一行都组合出来
+                        //（卡内滚动也看不到全部），首页一进场就要量几百个文本。
+                        // 完整清单点卡片进入待复习页，那里是 LazyColumn。
+                        dueArticles.take(MAX_DUE_ROWS_IN_CARD).forEach { article ->
                             DueRow(
                                 article = article,
                                 isNew = article.id in newArticleIds,
@@ -565,8 +579,8 @@ private fun ContinueCard(
         shape = HOME_CARD_SHAPE,
         containerColor = hue.fill,
     ) {
-        // 空态 / 单条相对整卡居中（与并排的「添加文章」卡文字同一条水平线），
-        // 多条仍按「标题 + 列表」纵向排布。
+        // 空态 / 单条相对**标题以下的剩余区**居中（理由同「待复习」卡：整卡居中的话重心会被
+        // 标题压到上半部），多条仍按「标题 + 列表」纵向排布。
         StateSwap(
             targetState = rows.isEmpty(),
             label = "homeContinueSwap",
@@ -592,23 +606,28 @@ private fun ContinueCard(
                     )
                 }
 
-                rows.size == 1 -> Box(
+                rows.size == 1 -> Column(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(m.pad),
                 ) {
                     CardHeader(dotColor = hue.accent, title = headerTitle)
                     val (item, art) = rows.first()
-                    ContinueRow(
-                        item = item,
-                        art = art,
-                        accent = hue.accent,
-                        onResumePractice = onResumePractice,
-                        m = m,
+                    Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .align(Alignment.Center),
-                    )
+                            .weight(1f),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        ContinueRow(
+                            item = item,
+                            art = art,
+                            accent = hue.accent,
+                            onResumePractice = onResumePractice,
+                            m = m,
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                    }
                 }
 
                 else -> Column(
@@ -790,7 +809,7 @@ private fun RecentCard(
                         maxLines = 1,
                         modifier = Modifier
                             .pressFeedback(viewAllSrc, PressTier.Plain)
-                            .clip(RoundedCornerShape(6.dp))
+                            .clip(SmoothRoundedCornerShape(6.dp))
                             .clickable(
                                 interactionSource = viewAllSrc,
                                 indication = null,
@@ -818,9 +837,9 @@ private fun RecentCard(
                         accent = MaterialTheme.colorScheme.primary,
                         compact = m.compact,
                         short = m.short,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .weight(1f),
+                        // 这颗空态直接挂在 StateSwap 下，没有 Column 去消费 weight（见 StateSwap
+                        // 的 KDoc）——剩余高度已经由 StateSwap 的 modifier 定死，这里 fillMaxSize 即可
+                        modifier = Modifier.fillMaxSize(),
                     )
                 } else {
                     CardBody(
@@ -898,7 +917,7 @@ private fun RecentArticleRow(
         modifier = Modifier
             .fillMaxWidth()
             .trackTouchAnchor(anchor)
-            .clip(RoundedCornerShape(14.dp))
+            .clip(SmoothRoundedCornerShape(14.dp))
             .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
             .padding(
                 start = if (compact || slim) 10.dp else 12.dp,
@@ -1053,7 +1072,7 @@ private fun PracticeButton(
     Button(
         onClick = onPractice,
         modifier = modifier.height(if (dense) 24.dp else if (compact) 30.dp else 34.dp),
-        shape = RoundedCornerShape(8.dp),
+        shape = SmoothRoundedCornerShape(8.dp),
         contentPadding = PaddingValues(
             horizontal = if (dense) 8.dp else if (compact) 10.dp else 12.dp,
             vertical = 0.dp,
@@ -1787,7 +1806,7 @@ private fun SentenceDailyCard(
             }
         } else {
             val meta = buildString {
-                if (ui.articleTitle.isNotBlank()) append("《").append(ui.articleTitle).append("》 · ")
+                if (ui.articleTitle.isNotBlank()) append(stringResource(com.ilyskyo.blancall.R.string.sentence_source_title, ui.articleTitle)).append(" · ")
                 append(ui.statusLine)
                 if (ui.pendingDueCount > 0) {
                     append(" · ")
@@ -1930,8 +1949,17 @@ private fun CardHeader(dotColor: Color, title: String) {
  * 精致空态：柔和圆形图标底 + 主文案 + 一行淡色副文案。
  * 供「待复习」「继续练习」「最近文章」三种卡的零数据场景复用。
  *
- * 通过内滚 + [Arrangement.Center] 实现「空间富余时垂直居中、空间不足时卡内滚动」：
- * 图标永远完整可见（不会出现被切一半），小卡下自动缩小图标并隐藏副文案。
+ * 位置由宿主给的「舞台」决定：空态不是相对整张卡居中，而是相对**标题以下的剩余区**居中。
+ * 标题行是卡片顶部的视觉锚，若按整卡居中，「标题 + 空态」这一整组的重心会压在卡片上半部
+ * （80dp 的矮卡实测：上方只剩 10px、下方空出 55px），观感就是内容顶在上边。
+ *
+ * 在舞台里居中之后还要往下压 [emptyStateDrop]：几何居中在眼睛里永远偏高——文字块的光学
+ * 中心高于它的包围盒中心（字形贴着行高上缘，西文还有 ascender 额外压秤），所以真要让眼睛
+ * 觉得“在中间”，内容得比几何中心低一点点，底部留白略大于顶部。
+ *
+ * 滚动：`verticalScroll` 的内层 Column 高度是 wrap content 的，`Arrangement.Center` 在它
+ * 里面**永远不生效**（内容贴顶、下方空一片）。这里先 `heightIn(min = 舞台高)` 把它撑满，
+ * 居中才成立；真的放不下时它才变高并开始滚动。
  */
 @Composable
 private fun CardEmptyState(
@@ -1979,8 +2007,9 @@ private fun CardEmptyState(
         }
         val boxSize = if (compact) 38.dp else 52.dp
         val iconSize = if (compact) 19.dp else 26.dp
-        // 舞台居中的宿主必须是 Box：把 verticalScroll 直接挂在 Column 上时，滚动容器按内容高度
-        // 收敛，舞台再高也只包住那一小块 —— 高卡里文字会贴在标题下面、下方留一大片空白。
+        // 舞台居中的宿主必须是 Box：以前把 verticalScroll 直接挂在 Column 上，
+        // 滚动容器按**内容高度**收敛，舞台再高也只包住那一小块 —— 高卡里文字就贴在标题下面，
+        // 下方留一大片空白（真机反馈「看着太靠上」正是这个）。Box 拿满舞台，居中才有作用对象。
         Box(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center,
@@ -2046,6 +2075,7 @@ private fun emptyStateDrop(stageHeight: Dp, short: Boolean): Dp {
     val raw = stageHeight * EMPTY_STATE_DROP_RATIO
     return if (short) raw.coerceIn(0.5.dp, 2.dp) else raw.coerceIn(1.dp, 8.dp)
 }
+
 
 /**
  * 练习按钮位置上报修饰符：仅当该行/卡正是宿主当前 pending 的文章时挂上，

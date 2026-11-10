@@ -233,15 +233,25 @@ private fun renderPdfPage(
     return try {
         if (index < pageCount) {
             val page = renderer.openPage(index)
-            val w = page.width.toFloat() * scale
-            val h = page.height.toFloat() * scale
-            val bmp = createBitmap(w.toInt(), h.toInt(), Bitmap.Config.ARGB_8888)
-            val m = Matrix().apply { postScale(scale, scale) }
-            page.render(bmp, null, m, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-            page.close()
-            bmp
+            try {
+                val w = page.width.toFloat() * scale
+                val h = page.height.toFloat() * scale
+                val bmp = createBitmap(w.toInt(), h.toInt(), Bitmap.Config.ARGB_8888)
+                val m = Matrix().apply { postScale(scale, scale) }
+                page.render(bmp, null, m, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
+                bmp
+            } finally {
+                // 必须放 finally：API ≤34 的 PdfRenderer.close() 第一步就校验「没有打开的页」，
+                // 渲染失败或协程被取消时页对象留着，退出预览时会在主线程 onDispose 里抛
+                // IllegalStateException("Current page is not closed")，直接闪退。
+                runCatching { page.close() }
+            }
         } else null
-    } catch (_: Exception) { null }
+    } catch (_: Throwable) {
+        // 含 OutOfMemoryError：createBitmap 对大页 4 倍渲染会抛 Error，
+        // 用 Exception 拦不住，会直接把进程带走。这里降级成「这一页没渲染出来」。
+        null
+    }
 }
 
 /** 夹紧平移量，确保放大后内容仍在可视范围内、文字不跑到屏幕外 */

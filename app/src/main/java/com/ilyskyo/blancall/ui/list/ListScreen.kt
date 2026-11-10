@@ -20,6 +20,7 @@ import android.widget.Toast
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -59,7 +60,9 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -79,6 +82,8 @@ import com.ilyskyo.blancall.ui.common.BackButton
 import com.ilyskyo.blancall.ui.common.DeleteConfirmDialog
 import com.ilyskyo.blancall.ui.common.GlassButton
 import com.ilyskyo.blancall.ui.common.GlassCard
+import com.ilyskyo.blancall.ui.common.GlassDropdownMenu
+import com.ilyskyo.blancall.ui.common.GlassMenuItem
 import com.ilyskyo.blancall.ui.common.GridMaxWidth
 import com.ilyskyo.blancall.ui.common.LocalIsLargeScreen
 import com.ilyskyo.blancall.ui.common.NavBarAutoHide
@@ -93,6 +98,7 @@ import com.ilyskyo.blancall.ui.practice.AdaptiveModePicker
 import com.ilyskyo.blancall.ui.practice.PickerSelection
 import com.ilyskyo.blancall.ui.tag.TagPickerSheet
 import com.ilyskyo.blancall.ui.theme.AppPrefs
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import com.ilyskyo.blancall.ui.viewmodel.ArticleViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -103,6 +109,7 @@ import java.util.Locale
 
 @Composable
 fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
+    // 「长按文章进多选」的锚点：整片列表区
     val listAnchor = rememberCoachAnchor()
     // 根 tab 的「返回＝退出应用」只在 AppNavigation 注册一处（见那边的 BackHandler）。
     // 这里曾经也有一份，旧版走 OnBackPressedDispatcher 时重复注册无害；
@@ -284,98 +291,67 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
             shape = CoachShape.Card,
             enabled = !crossSelectMode && filteredArticles.isNotEmpty(),
         )
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            // 底部导航固定启用：ListScreen 作为底部导航 tab，无返回键（切 home 即返回）
-
-            Text(
-                text = if (crossSelectMode) stringResource(com.ilyskyo.blancall.R.string.selected_count, selectedIds.size) else stringResource(com.ilyskyo.blancall.R.string.nav_articles),
-                style = MaterialTheme.typography.headlineMedium,
-                color = MaterialTheme.colorScheme.onBackground,
-                modifier = Modifier.weight(1f)
-            )
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                // 多选模式下右上角显示"全选/取消全选"
-                // 进/出多选时右上角那组键是整块换脸的：原来是同帧替换，看着像卡了一下。
-                // 常态那臂本来有 2~3 个根（AI 记录 / 导入 / 导出），AnimatedContent 每态只许一根，
-                // 所以各收进一个同 spacedBy 的 Row —— 稳态排布与改前逐像素相同。
-                StateSwap(
-                    targetState = crossSelectMode,
-                    label = "listTopBarActions"
-                ) { selecting ->
-                    if (selecting) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                // 全选/取消全选：与导入/导出同款磨砂玻璃样式（原 OutlinedButton 与之不一致）
-                                                GlassButton(
-                                                    onClick = {
-                                                        selectedIds = if (selectedIds.size == filteredArticles.size) emptySet()
-                                                        else filteredArticles.map { it.id }.toSet()
-                                                    },
-                                                    modifier = Modifier.height(40.dp)
-                                                ) {
-                                                    Text(if (selectedIds.size == articles.size) stringResource(com.ilyskyo.blancall.R.string.deselect_all) else stringResource(com.ilyskyo.blancall.R.string.select_all),
-                                                        style = MaterialTheme.typography.labelMedium,
-                                                        color = MaterialTheme.colorScheme.onSurface)
-                                                }
-                                                // 导出：多选态直接把选中的文章带进导出对话框（选多篇 = 组卷）
-                                                GlassButton(
-                                                    onClick = {
-                                                        if (selectedIds.isEmpty()) return@GlassButton
-                                                        exportPreselectIds = selectedIds
-                                                        showExportDialog = true
-                                                    },
-                                                    enabled = selectedIds.isNotEmpty(),
-                                                    modifier = Modifier.height(40.dp)
-                                                ) {
-                                                    Text(stringResource(com.ilyskyo.blancall.R.string.export_action),
-                                                        style = MaterialTheme.typography.labelMedium,
-                                                        color = MaterialTheme.colorScheme.onSurface)
-                                                }
-                        }
+        // 底部导航固定启用：ListScreen 作为底部导航 tab，无返回键（切 home 即返回）
+        // 标题严格保持原字号与单行；右侧动作按优先级保留，放不下的自动收进最右侧「⋯」。
+        ListHeader(
+            title = if (crossSelectMode) {
+                stringResource(com.ilyskyo.blancall.R.string.selected_count, selectedIds.size)
+            } else {
+                stringResource(com.ilyskyo.blancall.R.string.nav_articles)
+            },
+            selecting = crossSelectMode,
+            normalActions = listOf(
+                // 搜索是内容页的高频动作：优先级最高，窄屏也保留在栏上。
+                ListHeaderAction(
+                    key = "search",
+                    label = stringResource(com.ilyskyo.blancall.R.string.search),
+                    priority = 0,
+                    icon = AppIconKind.SearchHint,
+                ) { navController.navigate("search") },
+                ListHeaderAction(
+                    key = "import",
+                    label = stringResource(com.ilyskyo.blancall.R.string.import_action),
+                    priority = 1,
+                ) { navController.navigate("import") },
+                ListHeaderAction(
+                    key = "export",
+                    label = stringResource(com.ilyskyo.blancall.R.string.export_action),
+                    priority = 2,
+                ) {
+                    if (articles.isEmpty()) {
+                        Toast.makeText(context, noArticlesToExportMsg, Toast.LENGTH_SHORT).show()
                     } else {
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                // 搜索入口：搜索是内容页的高频动作，不能只藏在首页。
-                                                GlassButton(
-                                                    onClick = { navController.navigate("search") },
-                                                    modifier = Modifier.height(40.dp)
-                                                ) {
-                                                    AppIcon(
-                                                        kind = AppIconKind.SearchHint,
-                                                        modifier = Modifier.size(18.dp),
-                                                        tint = MaterialTheme.colorScheme.onSurface,
-                                                        contentDescription = stringResource(com.ilyskyo.blancall.R.string.search),
-                                                    )
-                                                }
-                                                // 与首页右上角同款磨砂玻璃风格
-                                                GlassButton(
-                                                    onClick = { navController.navigate("import") },
-                                                    modifier = Modifier.height(40.dp)
-                                                ) {
-                                                    Text(stringResource(com.ilyskyo.blancall.R.string.import_action), style = MaterialTheme.typography.labelMedium,
-                                                        color = MaterialTheme.colorScheme.onSurface)
-                                                }
-                                                GlassButton(
-                                                    onClick = {
-                                                        if (articles.isEmpty()) {
-                                                            Toast.makeText(context, noArticlesToExportMsg, Toast.LENGTH_SHORT).show()
-                                                        } else {
-                                                            exportPreselectIds = emptySet()
-                                                            showExportDialog = true
-                                                        }
-                                                    },
-                                                    modifier = Modifier.height(40.dp)
-                                                ) {
-                                                    Text(stringResource(com.ilyskyo.blancall.R.string.export_action),
-                                                        style = MaterialTheme.typography.labelMedium,
-                                                        color = MaterialTheme.colorScheme.onSurface)
-                                                }
-                        }
+                        exportPreselectIds = emptySet()
+                        showExportDialog = true
                     }
-                }
-            }
-        }
+                },
+            ),
+            selectActions = listOf(
+                ListHeaderAction(
+                    key = "select_all",
+                    label = stringResource(
+                        if (selectedIds.size == articles.size) com.ilyskyo.blancall.R.string.deselect_all
+                        else com.ilyskyo.blancall.R.string.select_all
+                    ),
+                    priority = 0,
+                ) {
+                    selectedIds = if (selectedIds.size == filteredArticles.size) emptySet()
+                    else filteredArticles.map { it.id }.toSet()
+                },
+                // 导出：多选态直接把选中的文章带进导出对话框（选多篇 = 组卷）
+                ListHeaderAction(
+                    key = "export_selected",
+                    label = stringResource(com.ilyskyo.blancall.R.string.export_action),
+                    priority = 1,
+                    enabled = selectedIds.isNotEmpty(),
+                ) {
+                    if (selectedIds.isNotEmpty()) {
+                        exportPreselectIds = selectedIds
+                        showExportDialog = true
+                    }
+                },
+            ),
+        )
 
         Spacer(modifier = Modifier.height(20.dp))
 
@@ -449,7 +425,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                         Spacer(modifier = Modifier.height(12.dp))
                         Button(
                             onClick = { navController.navigate("import") },
-                            shape = RoundedCornerShape(10.dp)
+                            shape = SmoothRoundedCornerShape(10.dp)
                         ) {
                             Text(stringResource(com.ilyskyo.blancall.R.string.import_first_article))
                         }
@@ -632,7 +608,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                         deleteTargets = articles.filter { it.id in selectedIds }
                     },
                     modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = SmoothRoundedCornerShape(12.dp),
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                     enabled = selectedIds.isNotEmpty(),
                     colors = ButtonDefaults.outlinedButtonColors(
@@ -646,7 +622,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                 OutlinedButton(
                     onClick = { tagPickTargets = articles.filter { it.id in selectedIds } },
                     modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(12.dp),
+                    shape = SmoothRoundedCornerShape(12.dp),
                     contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                     enabled = selectedIds.isNotEmpty()
                 ) {
@@ -661,7 +637,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                             navController.navigate("cross/$ids")
                         },
                         modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(12.dp),
+                        shape = SmoothRoundedCornerShape(12.dp),
                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 8.dp),
                         colors = ButtonDefaults.buttonColors(
                             containerColor = MaterialTheme.colorScheme.primary
@@ -710,7 +686,7 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
             },
             confirmButton = {
                 TextButton(onClick = {
-                    targets.forEach { articleViewModel.deleteArticle(it) }
+                    articleViewModel.deleteArticles(targets)
                     deleteTargets = emptyList()
                     exitCrossSelect()
                 }) { Text(stringResource(com.ilyskyo.blancall.R.string.delete), color = MaterialTheme.colorScheme.error) }
@@ -793,7 +769,9 @@ private fun ArticleCard(
     GlassCard(
         modifier = modifier.heroElement("article/${article.id}")
             .fillMaxWidth(),
-        shape = RoundedCornerShape(14.dp),
+        // 与首页卡片同一档「卡片级」圆角（HOME_CARD_SHAPE = 20dp）：
+        // 14dp 在这张约 370×72dp 的横向卡片上显得生硬，也与首页观感断层
+        shape = SmoothRoundedCornerShape(20.dp),
         // 列表含数十张卡片：关闭逐卡毛玻璃模糊背板，改用半透明染色层，
         // 既保留玻璃观感又彻底消除进入列表时的 GPU 模糊卡顿
         backdrop = false,
@@ -838,7 +816,7 @@ private fun ArticleCard(
                         )
                         if (statusText != null) {
                             Surface(
-                                shape = RoundedCornerShape(6.dp),
+                                shape = SmoothRoundedCornerShape(6.dp),
                                 color = statusText.component2().copy(alpha = 0.12f)
                             ) {
                                 Text(
@@ -994,11 +972,6 @@ private suspend fun exportPaperPdf(
  * 保证单行不换行、始终完整可见（多选底栏按钮多/窄时不再被裁切）。
  * 收敛采用按比例一步缩（0.9×/帧），几帧内到位，避免逐 0.5sp 收缩过慢。
  */
-/**
- * 自适应单行按钮文字：空间不足时自动缩小字号（下限 8sp，上限为默认 labelLarge），
- * 保证单行不换行、始终完整可见（多选底栏按钮多/窄时不再被裁切）。
- * 收敛采用按比例一步缩（0.9×/帧），几帧内到位，避免逐 0.5sp 收缩过慢。
- */
 @Composable
 private fun AdaptiveButtonLabel(text: String) {
     val style = MaterialTheme.typography.labelLarge
@@ -1016,4 +989,194 @@ private fun AdaptiveButtonLabel(text: String) {
             }
         }
     )
+}
+
+/**
+ * 顶栏动作项。
+ *
+ * @param priority 数字越小越优先保留在栏上；放不下时按优先级倒序收进「⋯」菜单
+ * @param icon 非空 = 仅图标按钮（[label] 仍用于无障碍与溢出菜单）
+ * @param enabled false 时置灰但仍占位（多选未选任何文章时的「导出」）
+ */
+private data class ListHeaderAction(
+    val key: String,
+    val label: String,
+    val priority: Int,
+    val icon: AppIconKind? = null,
+    val enabled: Boolean = true,
+    val onClick: () -> Unit,
+)
+
+/**
+ * 列表页顶栏：标题严格不动，右侧动作放不下就收进「⋯」。
+ *
+ * 改造前标题用 `weight(1f)` 与右侧按钮均分：英文标题 «My Articles» 遇到
+ * «Import / Export» 时只剩几个字宽，被压成一字一行（2026-11-05 用户截图）。
+ * 现在标题按自然宽度单行显示、绝不收缩；动作组按 [ListHeaderAction.priority] 贪心保留，
+ * 只要有任意一项放不下，就在最右侧出现「⋯」把剩下的收进去；全部放得下时不显示「⋯」。
+ *
+ * 判定用真实文本宽度测量而不是固定断点：六种语言的标题与按钮名长短不同，
+ * 写死断点必然在某个语种上失败。
+ */
+@Composable
+private fun ListHeader(
+    title: String,
+    selecting: Boolean,
+    normalActions: List<ListHeaderAction>,
+    selectActions: List<ListHeaderAction>,
+    modifier: Modifier = Modifier,
+) {
+    val density = LocalDensity.current
+    val measurer = rememberTextMeasurer()
+    val titleStyle = MaterialTheme.typography.headlineMedium
+    val titleWidthPx = remember(title, titleStyle, measurer, density) {
+        measurer.measure(
+            text = AnnotatedString(title),
+            style = titleStyle,
+            maxLines = 1,
+            softWrap = false,
+        ).size.width.toFloat()
+    }
+    BoxWithConstraints(modifier.fillMaxWidth()) {
+        val maxWidthPx = with(density) { maxWidth.toPx() }
+        val headerGapPx = with(density) { 8.dp.toPx() }
+        val actionsBudgetPx = (maxWidthPx - titleWidthPx - headerGapPx).coerceAtLeast(0f)
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = title,
+                style = titleStyle,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Clip,
+            )
+            Spacer(Modifier.weight(1f))
+            Spacer(Modifier.width(8.dp))
+            // 多选 ⇄ 常态仍是整块换脸（淡入淡出），各自按同一预算决定栏上与「⋯」的分配
+            StateSwap(targetState = selecting, label = "listTopBarActions") { isSelecting ->
+                ListHeaderActions(
+                    actions = if (isSelecting) selectActions else normalActions,
+                    budgetPx = actionsBudgetPx,
+                )
+            }
+        }
+    }
+}
+
+/** 顶栏动作组：按预算决定哪些留在栏上、哪些收进「⋯」。 */
+@Composable
+private fun ListHeaderActions(
+    actions: List<ListHeaderAction>,
+    budgetPx: Float,
+) {
+    val density = LocalDensity.current
+    val measurer = rememberTextMeasurer()
+    val labelStyle = MaterialTheme.typography.labelMedium
+    // GlassButton 几何：内容内边距 14dp×2；仅图标按钮 = 18dp 图标 + 内边距
+    val iconButtonWidthPx = with(density) { 46.dp.toPx() }
+    val textButtonPaddingPx = with(density) { 28.dp.toPx() }
+    val gapPx = with(density) { 8.dp.toPx() }
+
+    val widthsPx = remember(actions, labelStyle, measurer, density) {
+        actions.map { action ->
+            if (action.icon != null) iconButtonWidthPx
+            else measurer.measure(
+                text = AnnotatedString(action.label),
+                style = labelStyle,
+                maxLines = 1,
+                softWrap = false,
+            ).size.width + textButtonPaddingPx
+        }
+    }
+    val visibleIndices = remember(actions, widthsPx, budgetPx) {
+        val allWidthPx = widthsPx.sum() + gapPx * (actions.size - 1).coerceAtLeast(0)
+        if (allWidthPx <= budgetPx) {
+            actions.indices.toList()
+        } else {
+            // 先给「⋯」和它前面的间距留位，再按优先级贪心保留
+            var remainingPx = budgetPx - iconButtonWidthPx - gapPx
+            val kept = mutableListOf<Int>()
+            actions.indices.sortedBy { actions[it].priority }.forEach { index ->
+                val costPx = widthsPx[index] + gapPx
+                if (costPx <= remainingPx) {
+                    kept += index
+                    remainingPx -= costPx
+                }
+            }
+            kept.sorted()
+        }
+    }
+    val hidden = actions.indices
+        .filterNot { it in visibleIndices }
+        .map { actions[it] }
+    var menuOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(hidden.isEmpty()) { if (hidden.isEmpty()) menuOpen = false }
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        visibleIndices.forEach { index ->
+            val action = actions[index]
+            GlassButton(
+                onClick = action.onClick,
+                enabled = action.enabled,
+                modifier = Modifier.height(40.dp),
+            ) {
+                if (action.icon != null) {
+                    AppIcon(
+                        kind = action.icon,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        contentDescription = action.label,
+                    )
+                } else {
+                    Text(
+                        text = action.label,
+                        style = labelStyle,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+        }
+        if (hidden.isNotEmpty()) {
+            Box {
+                GlassButton(
+                    onClick = { menuOpen = true },
+                    modifier = Modifier.height(40.dp),
+                ) {
+                    AppIcon(
+                        kind = AppIconKind.MoreVert,
+                        modifier = Modifier.size(18.dp),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        contentDescription = stringResource(com.ilyskyo.blancall.R.string.more),
+                    )
+                }
+                GlassDropdownMenu(
+                    expanded = menuOpen,
+                    onDismissRequest = { menuOpen = false },
+                ) {
+                    hidden.forEach { action ->
+                        GlassMenuItem(
+                            onClick = {
+                                menuOpen = false
+                                action.onClick()
+                            },
+                            enabled = action.enabled,
+                            label = {
+                                Text(
+                                    text = action.label,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                            },
+                        )
+                    }
+                }
+            }
+        }
+    }
 }

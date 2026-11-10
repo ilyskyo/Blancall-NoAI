@@ -4,11 +4,9 @@
 package com.ilyskyo.blancall.ui.reader
 
 import android.os.Build
-import com.ilyskyo.blancall.ui.common.MotionFade
 import android.view.View
 import android.widget.FrameLayout
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -24,11 +22,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import com.ilyskyo.blancall.ui.common.PressTier
+import com.ilyskyo.blancall.ui.common.applyGlassThemeBackground
+import com.ilyskyo.blancall.ui.common.applyGlassThemeTint
 import com.ilyskyo.blancall.ui.common.pressFeedback
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
@@ -165,6 +168,8 @@ internal fun LiquidGlassPill(
                     // 淡出完成后 INVISIBLE：退出命中测试与绘制（样貌不变，本就不可见），
                     // 否则消失的玻璃仍拦截其区域点击，下层正文点不了
                     view.visibility = if (touchAlpha > 0.05f) View.VISIBLE else View.INVISIBLE
+                    view.applyGlassThemeBackground(isDark, 230)
+                    view.applyGlassThemeTint(isDark, darkTintIsBlack = true, darkTintAlpha = 0.25f, lightTintAlpha = 0.12f)
                     if (view.getTag(com.ilyskyo.blancall.R.id.lg_bound_tag) == null) {
                         view.post {
                             if (view.isAttachedToWindow && view.getTag(com.ilyskyo.blancall.R.id.lg_bound_tag) == null) {
@@ -218,7 +223,12 @@ internal fun FallbackGlassPlate(
 }
 
 
-/** 底部细进度胶囊（阅读进度）。fraction 用 lambda：让进度读取只发生在胶囊内部，不带动整页重组 */
+/**
+ * 底部细进度胶囊（阅读进度）。
+ *
+ * fraction 在 drawBehind 里读取：滚动进度每帧都在变，若在组合期读，整个胶囊要逐帧
+ * 重组；用 fillMaxWidth 画填充更糟——它还是布局修饰符，每帧重新测量。这里只重绘。
+ */
 @Composable
 internal fun ReadingProgressCapsule(
     fraction: () -> Float,
@@ -226,26 +236,27 @@ internal fun ReadingProgressCapsule(
     accent: Color,
     modifier: Modifier = Modifier
 ) {
+    val track = if (isDark) Color(0x33FFFFFF) else Color(0x26000000)
+    val fill = accent.copy(alpha = 0.85f)
     Box(
         modifier = modifier
             .width(168.dp)
             .height(6.dp)
             .clip(RoundedCornerShape(50))
-            .background(if (isDark) Color(0x33FFFFFF) else Color(0x26000000))
-    ) {
-        val animated = animateFloatAsState(
-            targetValue = fraction().coerceIn(0f, 1f),
-            animationSpec = MotionFade.number(MotionFade.itemEnter),
-            label = "readProgress"
-        )
-        Box(
-            modifier = Modifier
-                .fillMaxHeight()
-                .fillMaxWidth(animated.value)
-                .clip(RoundedCornerShape(50))
-                .background(accent.copy(alpha = 0.85f))
-        )
-    }
+            .drawBehind {
+                val radius = CornerRadius(size.height / 2f)
+                drawRoundRect(track, cornerRadius = radius)
+                val filled = size.width * fraction().coerceIn(0f, 1f)
+                if (filled > 0f) {
+                    drawRoundRect(
+                        color = fill,
+                        topLeft = androidx.compose.ui.geometry.Offset.Zero,
+                        size = Size(filled, size.height),
+                        cornerRadius = radius,
+                    )
+                }
+            }
+    )
 }
 
 // ========== 阅读设置面板 ==========

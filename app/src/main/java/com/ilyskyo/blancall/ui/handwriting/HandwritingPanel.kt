@@ -26,7 +26,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -64,6 +63,7 @@ import com.ilyskyo.blancall.ui.common.pressFeedback
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import com.ilyskyo.blancall.ui.common.StylusPresence
 import com.ilyskyo.blancall.ui.common.rememberConfirmHaptic
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -235,10 +235,10 @@ fun HandwritingPanel(
      */
     var recognizedInk by remember { mutableStateOf<List<List<Offset>>>(emptyList()) }
 
-    // 笔尖悬停（仅主动笔具备的能力）与墨迹本身一样，已下沉到 InkBoardView 内部绘制 ——
-    // 悬停提示要跟着笔尖走，留在 Compose 里同样会被流水线拖慢。
-    // 这里只需要基础色（不再 copy(alpha)：透明度由 View 侧按「空闲/悬停」两档施加，
-    // 否则会叠加两次 alpha，格子比改造前更淡）。
+    // 屏幕显示色：跟随主题，深色下手写板才与卡片一致。
+    // 但识别位图**不能**用这两色：native 预处理以「白底黑字」训练口径找前景，
+    // 深色 surface + 浅色 onSurface 会被判成「整块纸面是笔画」的极性反转图。
+    // 识别与显示分离后，深色模式不再影响模型输入（见 renderInk）。
     val strokeColor = MaterialTheme.colorScheme.onSurface
     val paperColor = MaterialTheme.colorScheme.surface
     val gridColor = MaterialTheme.colorScheme.outlineVariant
@@ -259,7 +259,7 @@ fun HandwritingPanel(
     if (!nativeOk) {
         Surface(
             modifier = modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(10.dp),
+            shape = SmoothRoundedCornerShape(10.dp),
             color = MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
         ) {
             Text(
@@ -401,15 +401,20 @@ fun HandwritingPanel(
         pendingAt = 0
     }
 
-    /** 把指定笔画集渲染成白底黑字位图（供识别）。 */
+    /** 把指定笔画集渲染成白底黑字位图（供识别）。
+     *
+     * 颜色刻意固定为白底黑字，不跟随主题：native 预处理按 `v < 220` 找前景、
+     * 模型也按「白纸黑墨」训练。若把深色主题的 surface/onSurface 直接画进来，
+     * 整块深色纸面会被当成前景、浅色笔画被当成背景，识别结果整体失效。
+     */
     fun renderInk(ink: List<List<Offset>>): Bitmap? {
         if (ink.isEmpty() || canvasSize.width <= 0 || canvasSize.height <= 0) return null
         val bmp = createBitmap(canvasSize.width, canvasSize.height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
-        canvas.drawColor(paperColor.toArgbInt())
+        canvas.drawColor(android.graphics.Color.WHITE)
 
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = strokeColor.toArgbInt()
+            color = android.graphics.Color.BLACK
             style = Paint.Style.STROKE
             strokeWidth = STROKE_WIDTH_PX
             strokeCap = Paint.Cap.ROUND
@@ -998,7 +1003,7 @@ fun HandwritingPanel(
                 punctuationKeys(script).forEach { p ->
                     val keySrc = remember { MutableInteractionSource() }
                     Surface(
-                        shape = RoundedCornerShape(6.dp),
+                        shape = SmoothRoundedCornerShape(6.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant,
                         modifier = Modifier
                             .padding(end = 4.dp)
@@ -1014,7 +1019,7 @@ fun HandwritingPanel(
                             //
                             // 这里刻意**不**改成 Surface(onClick = …) 重载：那个重载会带上
                             // 48dp 最小交互尺寸，一行 6 个标点会被撑到近 300dp 宽、把操作行挤变形。
-                            .clip(RoundedCornerShape(6.dp))
+                            .clip(SmoothRoundedCornerShape(6.dp))
                             .clickable(
                                 interactionSource = keySrc,
                                 indication = null,
@@ -1125,7 +1130,7 @@ private fun CandidateChip(
     // Surface(onClick) 内部会按 shape 裁剪指示器，按压反馈与按键形状、尺寸完全一致。
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(8.dp),
+        shape = SmoothRoundedCornerShape(8.dp),
         color = if (highlighted) MaterialTheme.colorScheme.primaryContainer
         else MaterialTheme.colorScheme.surfaceVariant
     ) {
@@ -1146,7 +1151,7 @@ private fun CandidateChip(
                     .height(2.dp)
                     .background(
                         MaterialTheme.colorScheme.outlineVariant,
-                        RoundedCornerShape(1.dp)
+                        SmoothRoundedCornerShape(1.dp)
                     )
             ) {
                 Box(
@@ -1156,7 +1161,7 @@ private fun CandidateChip(
                         .background(
                             if (highlighted) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.outline,
-                            RoundedCornerShape(1.dp)
+                            SmoothRoundedCornerShape(1.dp)
                         )
                 )
             }

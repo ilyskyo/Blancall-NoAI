@@ -67,6 +67,38 @@ class StudyFlowTest {
     }
 
     @Test
+    fun `句级恢复只顺延暂停时长并保留各自间隔`() {
+        val pause = StudyFlow.pauseOf(state(due = now + 2 * day), now)
+        val earlier = state(due = now + 2 * day)
+        val later = state(due = now + 6 * day)
+        val resumeAt = now + 3 * day
+
+        assertEquals(now + 5 * day, StudyFlow.sentenceResumedDue(earlier, pause, resumeAt))
+        assertEquals(now + 9 * day, StudyFlow.sentenceResumedDue(later, pause, resumeAt))
+    }
+
+    @Test
+    fun `句级恢复尊重暂停中练习与绝对日期`() {
+        val pause = StudyFlow.pauseOf(state(due = now + 2 * day), now)
+        val practiced = state(due = now + 9 * day, lastReview = now + day)
+        assertEquals(now + 9 * day, StudyFlow.sentenceResumedDue(practiced, pause, now + 3 * day))
+
+        val fixed = pause.copy(fixedDue = now + 12 * day)
+        assertEquals(
+            now + 12 * day,
+            StudyFlow.sentenceResumedDue(state(due = now + day), fixed, now + 3 * day),
+        )
+    }
+
+    @Test
+    fun `没有排期的句子恢复时不被拉成到期`() {
+        val pause = StudyFlow.pauseOf(state(due = now + 2 * day), now)
+        val finished = state(due = 0L)
+
+        assertEquals(0L, StudyFlow.sentenceResumedDue(finished, pause, now + 5 * day))
+    }
+
+    @Test
     fun `按本地日历日分桶且暂停优先`() {
         val startToday = Studies.startOfToday(now, zone)
         assertEquals(StudyFlow.Phase.OVERDUE, StudyFlow.phase(startToday - 1, false, now, zone))

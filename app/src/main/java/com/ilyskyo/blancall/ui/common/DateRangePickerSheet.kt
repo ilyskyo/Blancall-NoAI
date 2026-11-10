@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -35,6 +34,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -44,6 +44,7 @@ import com.ilyskyo.blancall.R
 import com.ilyskyo.blancall.algorithm.DateRange
 import com.ilyskyo.blancall.algorithm.dayOfWeekAtRow
 import com.ilyskyo.blancall.algorithm.monthCells
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
@@ -405,6 +406,7 @@ private fun DayCell(
     // 区间选择默认不允许未来（没有数据）；单日期（考试日期）反过来要允许未来
     val enabled = futureEnabled || !date.isAfter(today)
     val isEdge = date == start || date == end || date == selected
+    val todayLabel = stringResource(R.string.section_today)
     val inBand = start != null && end != null && date in start..end && !isEdge
     val bg = when {
         isEdge -> MaterialTheme.colorScheme.primary
@@ -420,8 +422,18 @@ private fun DayCell(
         modifier = Modifier
             .fillMaxSize()
             .padding(2.dp)
-            .clip(if (isEdge) CircleShape else RoundedCornerShape(8.dp))
+            .clip(if (isEdge) CircleShape else SmoothRoundedCornerShape(8.dp))
             .background(bg)
+            // 读屏不能只听到 "5"：带上完整日期、选中态与今天标记。
+            .semantics(mergeDescendants = true) {
+                contentDescription = buildString {
+                    append(date.toString())
+                    if (date == today) append(" · ").append(todayLabel)
+                }
+                // 参数名 selected 与语义属性同名：显式用 receiver 赋值，避免解析到 LocalDate? 参数
+                this.selected = isEdge
+                if (!enabled) disabled()
+            }
             .then(
                 if (enabled) {
                     Modifier.pressClick(tier = PressTier.Icon) { onClick(date) }

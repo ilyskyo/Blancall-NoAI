@@ -198,6 +198,16 @@ Blancall 标准版 使用了以下第三方开源组件。本项目自身以 MIT
      许可证：SIL Open Font License 1.1
 
 ================================================================================
+10. Noto Sans CJK（语言名固定字形子集）
+   - 上游：https://github.com/notofonts/noto-cjk
+   - 用途：设置页六个语言名按各自字形固定显示，不随界面语言切换
+   - 文件：app/src/main/res/font/lang_zh_hans.ttf、lang_zh_hant.ttf、
+           lang_ja.ttf、lang_ko.ttf、lang_latin.ttf
+   - 处理：从 NotoSansCJK-Regular.ttc 取对应字面，仅保留语言名用到的字形，
+           移除 GSUB/GPOS/GDEF（避免 locl 按界面语言替换字形），并按 OFL 要求
+           将字体名改为 Blancall Lang *
+   - 版权：© 2014-2021 Adobe (http://www.adobe.com/)
+   - 许可证：SIL Open Font License 1.1（许可声明与链接保留在字体 name 表中）
 
 ================================================================================
 补充合规说明（许可证保留要求）

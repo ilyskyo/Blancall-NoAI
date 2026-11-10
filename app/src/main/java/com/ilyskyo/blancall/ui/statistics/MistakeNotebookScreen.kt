@@ -21,7 +21,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
@@ -52,6 +51,7 @@ import com.ilyskyo.blancall.data.repository.ArticleRepository
 import com.ilyskyo.blancall.data.repository.CustomClozeStore
 import com.ilyskyo.blancall.data.repository.InkStore
 import com.ilyskyo.blancall.data.repository.OneShotCloze
+import com.ilyskyo.blancall.data.repository.ReviewSource
 import com.ilyskyo.blancall.data.repository.RecordRepository
 import com.ilyskyo.blancall.ui.common.AmbientBackground
 import com.ilyskyo.blancall.ui.common.BackButton
@@ -61,6 +61,7 @@ import com.ilyskyo.blancall.ui.common.GlassCard
 import com.ilyskyo.blancall.ui.common.pressClick
 import com.ilyskyo.blancall.ui.handwriting.InkThumbnail
 import com.ilyskyo.blancall.ui.common.rememberAutoHideNavBarOnScroll
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -298,7 +299,7 @@ private fun MistakeEntryCard(entry: MistakeNotebook.Entry) {
                     Spacer(Modifier.height(4.dp))
                     if (ink.isNotEmpty()) {
                         Surface(
-                            shape = RoundedCornerShape(8.dp),
+                            shape = SmoothRoundedCornerShape(8.dp),
                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                             modifier = Modifier.fillMaxWidth().height(52.dp).pressClick { enlarged = true }
                         ) {
@@ -422,7 +423,7 @@ private fun startBatch(
         blanks = drill.blanks.map { CustomClozeStore.BlankSpec(it.sentenceIndex, it.start, it.endExclusive) },
         mode = "SENTENCE",
     )
-    val token = OneShotCloze.put(article.id, cfg)
+    val token = OneShotCloze.put(article.id, cfg, ReviewSource.MISTAKE_DRILL)
     if (drill.unresolved > 0) {
         Toast.makeText(
             context,

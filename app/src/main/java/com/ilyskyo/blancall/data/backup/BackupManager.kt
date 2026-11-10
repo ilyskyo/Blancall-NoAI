@@ -92,53 +92,207 @@ object BackupManager {
         "appearance.json",
     )
 
+    /** 条目相对路径的最大层数（根文件 1 层、`ink/x` 2 层、`content_packs/<id>/<file>` 3 层）。 */
+    private const val MAX_ENTRY_DEPTH = 3
+
     /** 单条目解压上限，防异常压缩包拖垮内存（正常学习数据远小于此值）。 */
-    private const val MAX_ENTRY_BYTES = 64L * 1024 * 1024
+    private const val MAX_ENTRY_BYTES = 32L * 1024 * 1024
 
     /**
      * 整包解压总量上限：单条目上限挡不住「many 个小条目」把整包字节全驻内存，
      * restoreZip 是先在内存里凑齐 data 才开始落盘的。
+     *
+     * 128 MB：常见手机的 Java 堆在 256–512 MB，旧值 512 MB 等于「合法备份也能 OOM」。
+     * 真实学习库（几千篇 / 几万条记录）压缩后远小于这个数。
      */
-    private const val MAX_TOTAL_BYTES = 512L * 1024 * 1024
+    internal const val MAX_TOTAL_BYTES = 128L * 1024 * 1024
 
     /** 两段式写回的暂存后缀（不在 collectBackupFiles 的任何收集模式内，天然不进备份）。 */
     private const val IMPORT_SUFFIX = ".import"
 
-    /** 导入结果：restored=写回的数据文件数，removed=被清掉的备份外残留数据文件数。 */
-    data class RestoreReport(val restored: Int, val removed: Int)
+    /**
+     * 导入结果：restored=写回的数据文件数，removed=被清掉的备份外残留数据文件数，
+     * groups=本次备份包含的类目数（0 表示旧格式备份，视为全选）。
+     */
+    data class RestoreReport(val restored: Int, val removed: Int, val groups: Int = 0)
+
+    /**
+     * 备份类目：界面上给用户勾选的粒度。
+     *
+     * 拆成"类目"而不是"文件"的原因：
+     * - 用户不理解 `fsrs_state.json`，但理解"记忆进度"；
+     * - 有些数据必须成对带走才有意义（`records.json` 与 `fsrs_state.json`：
+     *   只有记录没有记忆状态，恢复后每篇都变成"没练过"）；
+     * - 导入侧要按类目做"只替换备份里有的"，不能整库覆盖。
+     *
+     * [key] 写进 manifest，导入时按它决定动哪些文件。**改名等于格式不兼容**，
+     * 因此 key 一律用 ASCII 短词，且不随界面文案变化。
+     */
+    enum class Group(
+        val key: String,
+        /** filesDir 根目录下的固定文件 */
+        val fileNames: List<String> = emptyList(),
+        /** filesDir 下的子目录（条目名形如 `ink/xxx.json`） */
+        val dirNames: List<String> = emptyList(),
+        /** filesDir 根目录下的文件名前缀（条目名就是文件名本身） */
+        val filePrefixes: List<String> = emptyList(),
+        /** 仅 Pro 版存在的数据；标准版收集时自然为空 */
+        val proOnly: Boolean = false,
+    ) {
+        /** 文章正文。内容包（用户自己导入的 zip 解出来的 txt）跟文章一起走。 */
+        ARTICLES(
+            "articles",
+            fileNames = listOf("articles.json"),
+            dirNames = listOf("content_packs"),
+        ),
+
+        /**
+         * 练习记录 + 记忆进度。
+         *
+         * 必须同一个类目：只有 records 没有 fsrs_state，恢复后每篇都显示"没练过"，
+         * 复习计划全乱；只有 fsrs_state 没有 records，统计页又是空的。
+         */
+        PROGRESS(
+            "progress",
+            fileNames = listOf("records.json", "fsrs_state.json"),
+        ),
+
+        /** 划线与批注：用户逐篇手写的内容，丢了重建不了 */
+        MARKS("marks", fileNames = listOf("reading_marks.json")),
+
+        /** 标签 / 自定义挖空 / 遮挡配置：组织方式与自建题面 */
+        ORGANIZE(
+            "organize",
+            fileNames = listOf("tags.json", "custom_cloze.json", "mask_config.json"),
+        ),
+
+        /** 手写墨迹（错题本里的笔迹图） */
+        INK("ink", dirNames = listOf("ink")),
+
+        /** 偏好与外观：阅读排版、首页布局、每日一句、主题、考试目标、成就时刻 */
+        PREFS(
+            "prefs",
+            fileNames = listOf(
+                "reader_prefs.json",
+                "home_layout.json",
+                "sentence_card.json",
+                "appearance.json",
+                "exam_goal.json",
+                "achievements.json",
+            ),
+        ),
+
+        /** 未完成的练习现场（练习到一半退出时的存档） */
+        SESSION("session", filePrefixes = listOf("practice_state_")),
+
+        /** AI 对话历史（Pro 专属；含全文对话，体积大且属隐私，默认不勾） */
+        AI("ai", dirNames = listOf("ai_history"), proOnly = true),
+        ;
+
+        companion object {
+            /** 默认全选，但 AI 历史默认不带（体积与隐私） */
+            fun defaultSelection(): Set<Group> = entries.filter { it != AI }.toSet()
+
+            fun fromKeys(keys: Collection<String>?): Set<Group> {
+                if (keys == null) return entries.toSet()
+                val set = keys.toSet()
+                return entries.filter { it.key in set }.toSet()
+            }
+        }
+    }
+
+    // ────────────────────────────────────────────────
+    //  收集
+    // ────────────────────────────────────────────────
+
+    /**
+     * 某一类目当前在磁盘上实际占用的字节数与文件数（UI 用来显示"约 1.2 MB · 38 项"）。
+     * 只看存在的东西，不估。
+     */
+    data class GroupStat(val group: Group, val bytes: Long, val files: Int)
+
+    fun statOf(filesDir: File, group: Group): GroupStat {
+        var bytes = 0L
+        var count = 0
+        for ((_, f) in collectGroupFiles(filesDir, group)) {
+            bytes += f.length()
+            count++
+        }
+        return GroupStat(group, bytes, count)
+    }
+
+    /** 全部类目的统计（含空类目，UI 据此置灰）。 */
+    fun stats(filesDir: File): List<GroupStat> = Group.entries.map { statOf(filesDir, it) }
+
+    private fun collectGroupFiles(filesDir: File, group: Group): List<Pair<String, File>> {
+        val out = mutableListOf<Pair<String, File>>()
+        for (name in group.fileNames) {
+            val f = File(filesDir, name)
+            if (f.isFile) out.add(FILES_PREFIX + name to f)
+        }
+        for (dir in group.dirNames) {
+            val d = File(filesDir, dir)
+            if (!d.isDirectory) continue
+            // 递归收集（content_packs 是 <id>/<file>，ink 与 ai_history 是一层）。
+            // 目录分支必须显式过滤伴生文件：主文件每写一次就有一份 .bak，
+            // AI 历史/墨迹会把旧对话、旧答案一起打包（体积翻倍且属隐私残留）。
+            d.walkTopDown()
+                .filter { it.isFile && !isBackupCompanion(it.name) }
+                .sortedBy { it.relativeTo(filesDir).path }
+                .forEach { out.add(FILES_PREFIX + it.relativeTo(filesDir).path.replace('\\', '/') to it) }
+        }
+        for (prefix in group.filePrefixes) {
+            filesDir.listFiles { f -> f.isFile && !isBackupCompanion(f.name) && f.name.startsWith(prefix) }
+                ?.sortedBy { it.name }
+                ?.forEach { out.add(FILES_PREFIX + it.name to it) }
+        }
+        return out
+    }
+
+    /** AtomicFiles 的伴生文件：备份/暂存/损坏现场，永远不属于用户数据本身。 */
+    private fun isBackupCompanion(name: String): Boolean =
+        name.endsWith(".bak") || name.endsWith(".tmp") || name.contains(".corrupt-")
 
     /**
      * 收集应备份的文件，返回「ZIP 条目名 → 磁盘文件」列表（缺失的跳过）。
-     * 覆盖：固定主文件 + `practice_state_` 前缀的 JSON + `ink` 目录下的 JSON；
-     * `.tmp` / `.bak` / `.corrupt-*` 不在清单模式内，天然被排除。
+     *
+     * [groups] 为空表示"全选"（旧调用点与旧测试的兼容路径）。
+     * `.tmp` / `.bak` / `.corrupt-*` 不在任何类目的收集模式内，天然被排除。
      */
-    fun collectBackupFiles(filesDir: File): List<Pair<String, File>> {
-        val entries = mutableListOf<Pair<String, File>>()
-        for (name in ROOT_DATA_FILES) {
-            val f = File(filesDir, name)
-            if (f.isFile) entries.add(FILES_PREFIX + name to f)
+    fun collectBackupFiles(
+        filesDir: File,
+        groups: Set<Group> = Group.entries.toSet(),
+    ): List<Pair<String, File>> {
+        val effective = groups.ifEmpty { Group.entries.toSet() }
+        val out = mutableListOf<Pair<String, File>>()
+        // 按 enum 声明顺序输出，保证同一份数据每次打包的条目顺序稳定（便于 diff 与测试）
+        for (g in Group.entries) {
+            if (g !in effective) continue
+            out += collectGroupFiles(filesDir, g)
         }
-        filesDir.listFiles { f -> f.isFile && f.name.startsWith("practice_state_") && f.name.endsWith(".json") }
-            ?.sortedBy { it.name }
-            ?.forEach { entries.add(FILES_PREFIX + it.name to it) }
-        File(filesDir, "ink").listFiles { f -> f.isFile && f.name.endsWith(".json") }
-            ?.sortedBy { it.name }
-            ?.forEach { entries.add(FILES_PREFIX + "ink/${it.name}" to it) }
-        return entries
+        return out
     }
 
     /**
-     * 把 [filesDir] 的学习数据写入 ZIP（manifest + files/ 条目）。
+     * 把 [filesDir] 里选中的类目写入 ZIP（manifest + files/ 条目）。
      * 没有任何可备份文件时抛 [BackupError.NothingToExport]，避免产出空备份。
      * IO 异常原样上抛，由调用方提示。
+     *
+     * 逐条目**流式**写入，不再 `file.readBytes()`：大库（几万条记录 / 整本内容包）
+     * 一次性读进内存会在低端机上 OOM，而导出的本意就是给大库做快照。
      */
-    fun exportZip(filesDir: File, output: OutputStream) {
-        val entries = collectBackupFiles(filesDir)
+    fun exportZip(
+        filesDir: File,
+        output: OutputStream,
+        groups: Set<Group> = Group.entries.toSet(),
+    ) {
+        val effective = groups.ifEmpty { Group.entries.toSet() }
+        val entries = collectBackupFiles(filesDir, effective)
         if (entries.isEmpty()) throw BackupError.NothingToExport()
-        ZipOutputStream(output).use { zip ->
-            writeEntry(zip, MANIFEST_ENTRY, buildManifest(entries.map { it.first }))
+        ZipOutputStream(java.io.BufferedOutputStream(output, 32 * 1024)).use { zip ->
+            writeEntry(zip, MANIFEST_ENTRY, buildManifest(entries.map { it.first }, effective))
             for ((entryName, file) in entries) {
-                writeEntry(zip, entryName, file.readBytes())
+                writeFileEntry(zip, entryName, file)
             }
         }
     }
@@ -155,9 +309,12 @@ object BackupManager {
      * 写回后内存单例仍是旧数据，调用方须引导用户重启应用。
      */
     fun restoreZip(zipFile: File, filesDir: File): RestoreReport {
-        val data: List<Pair<String, ByteArray>>
+        var data: List<Pair<String, ByteArray>>
+        var groups: Set<Group>
         ZipFile(zipFile).use { zip ->
-            data = readDataEntries(zip)
+            val parsed = readDataEntries(zip)
+            data = parsed.first
+            groups = parsed.second
             data.forEach { (rel, _) ->
                 if (!isSafeRelativeName(rel)) throw BackupError.UnsafeEntry(rel)
             }
@@ -170,38 +327,61 @@ object BackupManager {
             val dst = File(filesDir, rel)
             File(dst.parentFile, dst.name + IMPORT_SUFFIX).also { AtomicFiles.writeStaged(it, bytes) } to dst
         }
+        // 提换阶段也必须有回滚：第 N 个失败时前 N-1 个已经是新内容，若不管，
+        // 用户会得到一个「文章是新的、FSRS 是旧的」的错配库，比整体失败更难恢复。
+        val promoted = mutableListOf<File>()
         try {
-            staged.forEach { (stage, dst) -> AtomicFiles.promoteStaged(stage, dst) }
+            staged.forEach { (stage, dst) ->
+                AtomicFiles.promoteStaged(stage, dst)
+                promoted += dst
+            }
+        } catch (e: Exception) {
+            for (dst in promoted.asReversed()) {
+                val bak = File(dst.parentFile, dst.name + ".bak")
+                if (bak.isFile) {
+                    // promoteStaged 已把「导入前的内容」链接到 .bak，复制回去即可还原
+                    runCatching {
+                        bak.copyTo(dst, overwrite = true)
+                        bak.delete()
+                    }
+                } else {
+                    // 导入前这个文件不存在（新增），回滚就是删掉它
+                    runCatching { dst.delete() }
+                }
+            }
+            throw e
         } finally {
             // 提换成功时 staged 已被 rename 走；这里只清失败中断留下的孤儿暂存文件
             staged.forEach { (stage, _) -> if (stage.exists()) stage.delete() }
         }
-        // 清理备份外的残留学习数据：只识别学习数据范围内的文件，其余一概不动
-        val keep = data.map { it.first }.toSet()
+
+        // keep 必须与 collectGroupFiles 返回的键同形（都带 `files/` 前缀）。
+        // 这里写成裸相对名过一次错：刚恢复的文件会被自己的孤儿清理当成残留删掉，
+        // 测试表现为「restore 报告成功，但目标文件不存在」。
+        val keep = data.mapTo(mutableSetOf()) { FILES_PREFIX + it.first }
         var removed = 0
-        for (name in ROOT_DATA_FILES) {
-            val f = File(filesDir, name)
-            if (f.isFile && name !in keep && f.delete()) removed++
+        // 只清理「本次备份覆盖的类目」内的残留：未包含在备份里的类目，磁盘上一个字节都不动。
+        // 旧实现按 ROOT_DATA_FILES 全量清理，于是「只备份了文章」的包一恢复，
+        // 记忆进度、划线、标签全被当成残留删掉。
+        for (g in Group.entries.filter { it in groups }) {
+            for ((rel, f) in collectGroupFiles(filesDir, g)) {
+                if (rel in keep) {
+                    // 本次恢复的文件：删掉导入前那份旧库的 .bak，
+                    // 否则主文件将来缺失时会被各 Store 回读，"复活"成导入前的版本
+                    val bak = File(f.parentFile, f.name + ".bak")
+                    if (bak.isFile) bak.delete()
+                } else if (f.delete()) {
+                    removed++
+                    // 孤儿连同伴生文件一起清，避免 .bak 下次被回读
+                    AtomicFiles.deleteWithCompanions(f)
+                }
+            }
         }
-        filesDir.listFiles { f -> f.isFile && f.name.startsWith("practice_state_") && f.name.endsWith(".json") }
-            ?.forEach { if (it.name !in keep && it.delete()) removed++ }
-        File(filesDir, "ink").listFiles { f -> f.isFile && f.name.endsWith(".json") }
-            ?.forEach { if ("ink/${it.name}" !in keep && it.delete()) removed++ }
-        // 导入是整库替换：promoteStaged 已把导入前的旧主文件轮换成 .bak，这些 .bak
-        // 属于旧库。留着会在主文件缺失/损坏时被各 Store 回读，把刚恢复的数据“复活”成旧版本。
-        // 只有全部提换成功走到这里才删；中途失败时 .bak 仍保留，用于回滚。
-        for (name in ROOT_DATA_FILES) {
-            val bak = File(filesDir, "$name.bak")
-            if (bak.isFile) bak.delete()
-        }
-        filesDir.listFiles { f ->
-            f.isFile && f.name.startsWith("practice_state_") && f.name.endsWith(".json.bak")
-        }?.forEach { it.delete() }
-        return RestoreReport(data.size, removed)
+        return RestoreReport(data.size, removed, groups.size)
     }
 
-    /** 解析 manifest 并读出其登记的全部数据条目（相对路径 → 字节）。 */
-    private fun readDataEntries(zip: ZipFile): List<Pair<String, ByteArray>> {
+    /** 解析 manifest 并读出其登记的全部数据条目（相对路径 → 字节）与本次包含的类目。 */
+    private fun readDataEntries(zip: ZipFile): Pair<List<Pair<String, ByteArray>>, Set<Group>> {
         val manifestEntry = zip.getEntry(MANIFEST_ENTRY)
             ?: throw BackupError.NotABackup()
         val json = try {
@@ -211,6 +391,11 @@ object BackupManager {
         }
         val version = json.optInt("formatVersion")
         if (version != FORMAT_VERSION) throw BackupError.UnsupportedVersion(version)
+        // 旧备份（v1 早期）没有 groups 字段 → 视为全选，行为与升级前一致
+        val groupKeys = json.optJSONArray("groups")?.let { arr ->
+            (0 until arr.length()).mapNotNull { arr.optString(it)?.takeIf(String::isNotBlank) }
+        }
+        val groups = Group.fromKeys(groupKeys)
         val names = json.optJSONArray("files") ?: JSONArray()
         val result = mutableListOf<Pair<String, ByteArray>>()
         var totalBytes = 0L
@@ -228,7 +413,7 @@ object BackupManager {
             if (totalBytes > MAX_TOTAL_BYTES) throw BackupError.TooLarge(null)
             result.add(entry.removePrefix(FILES_PREFIX) to bytes)
         }
-        return result
+        return result to groups
     }
 
     /** 读取条目内容，超过上限视为异常包拒绝。 */
@@ -248,21 +433,43 @@ object BackupManager {
         }
     }
 
-    /** 仅允许「主文件名」或「ink/文件名」两级安全名，各段只含常见安全字符。 */
-    private fun isSafeRelativeName(rel: String): Boolean =
-        rel.isNotBlank() && !rel.startsWith("/") &&
-            rel.split("/").all { it.isNotEmpty() && !it.contains("..") && it.matches(Regex("[A-Za-z0-9_.\\-]+")) } &&
-            (rel.count { it == '/' } == 0 || rel.startsWith("ink/"))
+    /**
+     * 条目相对名的安全校验：最多三级（根文件 / `ink/x.json` / `content_packs/<id>/<file>`），
+     * 各段只含常见安全字符，且不含 `..`、不以 `/` 开头。
+     *
+     * 放宽到三级是为了让内容包与 AI 历史能进备份；路径穿越仍被两处挡住：
+     * 段里出现 `..` 直接拒，盘符（`C:`）与反斜杠不匹配 [SAFE_SEGMENT]。
+     */
+    private fun isSafeRelativeName(rel: String): Boolean {
+        if (rel.isBlank() || rel.startsWith("/")) return false
+        val parts = rel.split("/")
+        if (parts.size > MAX_ENTRY_DEPTH) return false
+        return parts.all { it.isNotEmpty() && !it.contains("..") && it.matches(SAFE_SEGMENT) }
+    }
 
-    private fun buildManifest(entryNames: List<String>): ByteArray {
+    private val SAFE_SEGMENT = Regex("[A-Za-z0-9_.\\-]+")
+
+    private fun buildManifest(entryNames: List<String>, groups: Set<Group>): ByteArray {
         val files = JSONArray()
         entryNames.forEach { files.put(it) }
+        // 记录本次备份包含哪些类目：导入侧据此决定"只替换这几类"，
+        // 未包含的类目在磁盘上一个字节都不动。旧备份没有这个字段 → 视为全选。
+        val gs = JSONArray()
+        Group.entries.filter { it in groups }.forEach { gs.put(it.key) }
         return JSONObject()
             .put("formatVersion", FORMAT_VERSION)
             .put("createdAt", System.currentTimeMillis())
+            .put("groups", gs)
             .put("files", files)
             .toString()
             .toByteArray(StandardCharsets.UTF_8)
+    }
+
+    /** 流式写一个磁盘文件到归档条目（不整块读进内存）。 */
+    private fun writeFileEntry(zip: ZipOutputStream, name: String, file: File) {
+        zip.putNextEntry(ZipEntry(name))
+        file.inputStream().use { input -> input.copyTo(zip, 32 * 1024) }
+        zip.closeEntry()
     }
 
     private fun writeEntry(zip: ZipOutputStream, name: String, bytes: ByteArray) {

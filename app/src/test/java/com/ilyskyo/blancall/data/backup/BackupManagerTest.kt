@@ -33,6 +33,12 @@ class BackupManagerTest {
         File(dir, "tags.json").writeText("""{"version":1,"tags":[],"links":{}}""")
         File(dir, "ink").mkdirs()
         File(dir, "ink/rec1.json").writeText("""{"v":1,"recordId":"rec1"}""")
+        // 目录型数据的伴生文件：旧实现只过滤根目录，会把旧答案/旧 AI 对话一起打包
+        File(dir, "ink/rec1.json.bak").writeText("old-ink")
+        File(dir, "ink/rec1.json.abc12345.tmp").writeText("tmp-ink")
+        File(dir, "ai_history").mkdirs()
+        File(dir, "ai_history/1.json").writeText("""{"id":1}""")
+        File(dir, "ai_history/1.json.bak").writeText("old-ai")
         // 干扰文件：不属于备份范围
         File(dir, "articles.json.tmp").writeText("tmp")
         File(dir, "articles.json.bak").writeText("bak")
@@ -70,6 +76,7 @@ class BackupManagerTest {
         val expected = listOf(
             "articles.json", "records.json", "fsrs_state.json",
             "practice_state_1.json", "practice_state_2.json", "tags.json", "ink/rec1.json",
+            "ai_history/1.json",
         )
         assertEquals(expected.size, report.restored)
         expected.forEach { rel ->
@@ -147,8 +154,8 @@ class BackupManagerTest {
         assertFalse(File(dst, "practice_state_9.json").exists())
         assertFalse(File(dst, "ink/old.json").exists())
         assertEquals("keep me", File(dst, "crash.log").readText())
-        // 10 个数据文件（含目标机原本已有、备份里也有主文件的场景）：本例备份含 7 个条目
-        assertEquals(7, report.restored)
+        // 10 个数据文件（含目标机原本已有、备份里也有主文件的场景）：本例备份含 8 个条目
+        assertEquals(8, report.restored)
     }
 
     @Test

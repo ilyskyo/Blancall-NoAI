@@ -53,7 +53,12 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.ilyskyo.blancall.R
+import com.ilyskyo.blancall.algorithm.ArticleMemory
+import com.ilyskyo.blancall.algorithm.ArticleMemoryFallback
+import com.ilyskyo.blancall.algorithm.ArticleMemoryReads
 import com.ilyskyo.blancall.algorithm.FsrsEngine
+import com.ilyskyo.blancall.algorithm.MemoryModelConfig
+import com.ilyskyo.blancall.algorithm.ReviewTemplate
 import com.ilyskyo.blancall.algorithm.StudyCoach
 import com.ilyskyo.blancall.algorithm.StudyFlow
 import com.ilyskyo.blancall.data.model.PracticeRecord
@@ -154,11 +159,14 @@ fun StudyTaskDetailScreen(navController: NavController, articleId: Long) {
         allRecords.filter { it.articleId == articleId }.sortedByDescending { it.timestamp }
     }
     val stats = remember(records) { StatsRepository.aggregateArticle(records) }
-    val task = remember(article, states, pauses, sentenceStates, enrolled, records, nowTick) {
+    val reviewTemplateId by AppPrefs.reviewTemplateFlow.collectAsState()
+    val reviewTemplate = remember(reviewTemplateId) { ReviewTemplate.fromId(reviewTemplateId) }
+    val task = remember(article, states, pauses, sentenceStates, enrolled, records, nowTick, reviewTemplate) {
         article?.let {
             buildTasks(
                 listOf(it), states, pauses, sentenceStates, enrolled, nowTick,
                 records = records,
+                template = reviewTemplate,
             ).firstOrNull()
         }
     }
@@ -167,12 +175,27 @@ fun StudyTaskDetailScreen(navController: NavController, articleId: Long) {
         TaskDisplayLogic.startedAt(records)
     }
     val readingSeconds = remember(articleId) { AppPrefs.getReadingSeconds(articleId) }
-    val curve = remember(task, nowTick) {
-        val state = task?.state ?: return@remember emptyList<Float>()
-        // 一次没练过：没有留存曲线可画（画出来是一条贴着 0 的直线，比空态更误导）
-        if (state.reviewCount <= 0) return@remember emptyList<Float>()
-        List(31) { dayOffset ->
-            FsrsEngine.retentionRate(state, nowTick + dayOffset * StudyFlow.MILLIS_PER_DAY).toFloat()
+    val (curve, weakestCurve) = remember(
+        task, nowTick, article, states, sentenceStates, records, reviewTemplate
+    ) {
+        if (MemoryModelConfig.model == ArticleMemoryReads.Model.SENTENCE_PROJECTION && article != null) {
+            val fallback = states[article.id]
+                ?: ArticleMemoryFallback.fromRecords(records, reviewTemplate)
+            val aggregate = ArticleMemory.curve(
+                article = article,
+                sentenceStates = sentenceStates,
+                legacyState = fallback,
+                now = nowTick,
+                target = FsrsEngine.targetRetention().toFloat(),
+            )
+            aggregate.mean to aggregate.weakest
+        } else {
+            val state = task?.state ?: return@remember emptyList<Float>() to emptyList<Float>()
+            // 一次没练过：没有留存曲线可画（画出来是一条贴着 0 的直线，比空态更误导）
+            if (state.reviewCount <= 0) return@remember emptyList<Float>() to emptyList<Float>()
+            List(31) { dayOffset ->
+                FsrsEngine.retentionRate(state, nowTick + dayOffset * StudyFlow.MILLIS_PER_DAY).toFloat()
+            } to emptyList()
         }
     }
     val intervalDays = remember(task) {
@@ -298,7 +321,7 @@ fun StudyTaskDetailScreen(navController: NavController, articleId: Long) {
                     }
                     item(key = "detail_curve") {
                         DetailSection(index = 2) {
-                            DetailCurveCard(task = task, curve = curve)
+                            DetailCurveCard(task = task, curve = curve, weakestCurve = weakestCurve)
                         }
                     }
                     if (stats.totalPractices > 0) {
@@ -728,7 +751,11 @@ private fun DetailOverallCard(
 }
 
 @Composable
-private fun DetailCurveCard(task: FlowTask, curve: List<Float>) {
+private fun DetailCurveCard(
+    task: FlowTask,
+    curve: List<Float>,
+    weakestCurve: List<Float> = emptyList(),
+) {
     GlassCard(backdrop = false) {
         Column(Modifier.padding(16.dp)) {
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -756,6 +783,7 @@ private fun DetailCurveCard(task: FlowTask, curve: List<Float>) {
                 MemoryDecayChart(
                     decayCurve = curve,
                     retentionRate = task.retention,
+                    weakestCurve = weakestCurve,
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(10.dp))

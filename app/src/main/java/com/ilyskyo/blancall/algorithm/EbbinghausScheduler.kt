@@ -67,8 +67,8 @@ object EbbinghausScheduler {
             interval = when {
                 lastAccuracy < 0.4f -> if (interval <= 1) 1 else maxOf(1, (interval * 0.5).toInt())
                 lastAccuracy < 0.7f -> if (interval <= 1) 1 else maxOf(1, (interval * 0.75).toInt())
-                lastAccuracy > 0.95f -> if (interval <= 1) 2 else (interval * 1.3).toInt()
-                lastAccuracy > 0.85f -> if (interval <= 1) 2 else (interval * 1.15).toInt()
+                lastAccuracy > 0.95f -> if (interval <= 1) 2 else kotlin.math.ceil(interval * 1.3f).toInt()
+                lastAccuracy > 0.85f -> if (interval <= 1) 2 else kotlin.math.ceil(interval * 1.15f).toInt()
                 else -> interval
             }
         }
@@ -84,14 +84,22 @@ object EbbinghausScheduler {
      * 这是模板调度的唯一「到期时间」出口：今日计划的快照与 [isDue] / [getReviewStatus]
      * 都从这里取，避免一处按记录条数算、另一处按 FSRS 的 due 算，两屏给出相反结论。
      */
-    fun nextReviewAt(template: ReviewTemplate, records: List<PracticeRecord>): Long? {
+    fun nextReviewAt(
+        template: ReviewTemplate,
+        records: List<PracticeRecord>,
+        zone: java.time.ZoneId = java.time.ZoneId.systemDefault(),
+    ): Long? {
         if (records.isEmpty()) return null
         val sorted = records.sortedBy { it.timestamp }
-        if (sorted.size >= template.intervals.size) return null
+        // 轮次按「日历天」去重，不按记录条数：同一天重做两次不该算两轮，
+        // 否则一天内刷 6 次就会被判成已完成，永远不再进到期列表。
+        // 统计页、首页、列表、小组件、通知必须共用这一条口径。
+        val rounds = sorted.distinctBy { DayBucket.localDate(it.timestamp, zone) }
+        if (rounds.size >= template.intervals.size) return null
         val last = sorted.last()
         val lastAcc = if (last.totalBlanks > 0)
             last.correctCount.toFloat() / last.totalBlanks else 1f
-        return nextReviewTime(template, sorted.size - 1, last.timestamp, lastAcc)
+        return nextReviewTime(template, rounds.size - 1, last.timestamp, lastAcc)
     }
 
     /**

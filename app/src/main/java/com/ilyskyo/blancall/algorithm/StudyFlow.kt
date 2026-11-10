@@ -63,6 +63,23 @@ object StudyFlow {
     fun resumedDue(state: FsrsEngine.CardState, pause: Pause, now: Long): Long =
         projectedDue(state, pause, now)
 
+    /**
+     * 句级卡在文章恢复时的 due：暂停作用于整篇文章，句级也必须一起冻结。
+     *
+     * 与篇级 [resumedDue] 的差别：篇级只有一个间隔，句级每句间隔不同，不能用文章的剩余期
+     * 覆盖所有句子。这里保持每句自己的间隔，只把「暂停时长」加回去：
+     * - 暂停后练过的句子已经有新 due，尊重那次推进；
+     * - 暂停中设过绝对日期，整组落到那个日期（与篇级一致）；
+     * - 其余句子按暂停时长顺延，恢复后不会集体瞬间到期。
+     */
+    fun sentenceResumedDue(state: FsrsEngine.CardState, pause: Pause, now: Long): Long {
+        if (state.reviewCount <= 0 || state.due <= 0L) return state.due
+        if (state.lastReview > pause.pausedAt) return max(state.due, now)
+        if (pause.fixedDue > 0L) return max(pause.fixedDue, now)
+        val pausedMs = (now - pause.pausedAt).coerceAtLeast(0L)
+        return state.due + pausedMs
+    }
+
     /** 按本地日历日分桶；暂停优先于任何日期结论 */
     fun phase(
         due: Long,

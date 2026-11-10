@@ -10,7 +10,6 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
@@ -38,6 +37,7 @@ import com.ilyskyo.blancall.algorithm.DateRange
 import com.ilyskyo.blancall.algorithm.dayOfWeekAtRow
 import com.ilyskyo.blancall.algorithm.heatmapCellMetrics
 import com.ilyskyo.blancall.algorithm.heatmapGridForRange
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import java.time.format.TextStyle
@@ -175,14 +175,14 @@ fun DailyTrendChart(
                     modifier = Modifier
                         .weight(1f)
                         .fillMaxHeight(fraction.coerceAtLeast(0.02f))
-                        .clip(RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
+                        .clip(SmoothRoundedCornerShape(topStart = 4.dp, topEnd = 4.dp))
                         .background(
                             barColor.copy(alpha = if (isToday) 0.85f else (0.30f + fraction * 0.5f))
                         )
                         .then(
                             if (isToday) Modifier.border(
                                 1.dp, barColor.copy(alpha = 0.85f),
-                                RoundedCornerShape(topStart = 4.dp, topEnd = 4.dp)
+                                SmoothRoundedCornerShape(topStart = 4.dp, topEnd = 4.dp)
                             ) else Modifier
                         )
                 )
@@ -280,7 +280,7 @@ fun CalendarHeatmap(
                 Box(
                     modifier = Modifier
                         .size(9.dp)
-                        .clip(RoundedCornerShape(2.dp))
+                        .clip(SmoothRoundedCornerShape(2.dp))
                         .background(c)
                 )
                 Spacer(Modifier.width(2.dp))

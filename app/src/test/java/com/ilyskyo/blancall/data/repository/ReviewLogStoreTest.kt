@@ -48,6 +48,32 @@ class ReviewLogStoreTest {
     }
 
     @Test
+    fun `v2 来源与记录 id 可读回`() {
+        val f = tempFile()
+        assertTrue(
+            ReviewLogStore.append(
+                f, key = "s:12:ab12cd34ef56ab78", ts = 1_750_000_000_000L,
+                rating = 2, elapsedMs = 5_000L, state = state(),
+                source = ReviewSource.MISTAKE_DRILL, recordId = 42L
+            )
+        )
+        val event = ReviewLogStore.read(f).single()
+        assertEquals(ReviewSource.MISTAKE_DRILL, event.source)
+        assertEquals(42L, event.recordId)
+    }
+
+    @Test
+    fun `v1 旧行读取为默认来源与零记录 id`() {
+        val f = tempFile()
+        f.appendText(
+            """{"v":1,"key":"a:1","ts":1,"rating":3,"d":5.0,"s":10.0,"due":1,"reps":1,"lapses":0}""" + "\n"
+        )
+        val event = ReviewLogStore.read(f).single()
+        assertEquals(ReviewSource.OTHER, event.source)
+        assertEquals(0L, event.recordId)
+    }
+
+    @Test
     fun `批量追加一次写入且顺序可读回`() {
         val f = tempFile()
         val events = (1..3).map { i ->
@@ -109,6 +135,13 @@ class ReviewLogStoreTest {
         val ok = ReviewLogStore.append(f, "a:2", 2L, 3, 0L, state(), maxBytes = 1L)
         assertFalse("超过软上限后必须停止追加", ok)
         assertEquals(1, ReviewLogStore.read(f).size)
+    }
+
+    @Test
+    fun `未知来源 wire 归 OTHER`() {
+        assertEquals(ReviewSource.OTHER, ReviewSource.fromWire("unknown"))
+        assertEquals(ReviewSource.OTHER, ReviewSource.fromWire(null))
+        assertEquals(ReviewSource.MISTAKE_DRILL, ReviewSource.fromWire("mistake_drill"))
     }
 
     @Test

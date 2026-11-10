@@ -13,7 +13,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -36,6 +35,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import com.ilyskyo.blancall.ui.theme.AppPrefs
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 
 /**
  * 赞赏邀请的闸门。
@@ -142,7 +142,7 @@ fun DonationInviteRow(slot: String, modifier: Modifier = Modifier) {
         modifier = modifier
             .fillMaxWidth()
             // 圆角裁切要在 pressClick 之前，否则按压反馈的底色会露出直角
-            .clip(RoundedCornerShape(12.dp))
+            .clip(SmoothRoundedCornerShape(12.dp))
             .pressClick(tier = PressTier.Icon) { showDialog = true }
             .padding(vertical = 12.dp, horizontal = 16.dp),
         contentAlignment = Alignment.Center,
@@ -187,7 +187,7 @@ fun DonationInviteRow(slot: String, modifier: Modifier = Modifier) {
 private fun DonationQrDialog(onDismiss: () -> Unit, onNeverShow: () -> Unit) {
     BlancallAlertDialog(
         onDismissRequest = onDismiss,
-        shape = RoundedCornerShape(28.dp),
+        shape = SmoothRoundedCornerShape(28.dp),
         containerColor = MaterialTheme.colorScheme.surface,
         title = {
             Text(
@@ -208,7 +208,7 @@ private fun DonationQrDialog(onDismiss: () -> Unit, onNeverShow: () -> Unit) {
                 Box(
                     modifier = Modifier
                         .size(172.dp)
-                        .clip(RoundedCornerShape(16.dp))
+                        .clip(SmoothRoundedCornerShape(16.dp))
                         .background(Color.White),
                 ) {
                     Image(

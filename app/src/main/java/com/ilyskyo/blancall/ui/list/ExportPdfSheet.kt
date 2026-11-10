@@ -33,7 +33,6 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -56,6 +55,7 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.ilyskyo.blancall.R
@@ -71,6 +71,7 @@ import com.ilyskyo.blancall.ui.common.PressTier
 import com.ilyskyo.blancall.ui.common.pressClick
 import com.ilyskyo.blancall.ui.common.pressFeedback
 import com.ilyskyo.blancall.ui.common.rememberHaptic
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import com.ilyskyo.blancall.ui.theme.isBlancallDark
 
 /**
@@ -135,7 +136,10 @@ fun ExportPdfSheet(
             // 列表的最大高度 = 面板可用高度 - 固定区（抓手 / 导航条 / 分段 / 说明 / 选择行 / 按钮）。
             // 固定区高度按层级估一个保守值：宁可列表矮一行，也不要内容顶出屏幕被裁掉。
             val availableHeight = if (maxHeight.value.isFinite()) maxHeight else 620.dp
-            val reservedHeight = if (exportAsCloze) 440.dp else 300.dp
+            // 固定区高度是按 1x 字号估的：大字号下说明/标题/按钮都会长高，
+            // 不乘 fontScale 会把主按钮裁出屏幕且无法滚到。
+            val fontScale = LocalDensity.current.fontScale.coerceAtLeast(1f)
+            val reservedHeight = (if (exportAsCloze) 440.dp else 300.dp) * fontScale
             val listMaxHeight = (availableHeight - reservedHeight).coerceIn(110.dp, 420.dp)
 
             Column(
@@ -184,7 +188,7 @@ fun ExportPdfSheet(
                             onSelect = { maxBlanksPerArticle = blankOptions[it] },
                         )
                         Spacer(Modifier.height(12.dp))
-                        Surface(shape = RoundedCornerShape(12.dp), color = cardColor) {
+                        Surface(shape = SmoothRoundedCornerShape(12.dp), color = cardColor) {
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -228,7 +232,7 @@ fun ExportPdfSheet(
                 }
                 Spacer(Modifier.height(8.dp))
 
-                Surface(shape = RoundedCornerShape(12.dp), color = cardColor) {
+                Surface(shape = SmoothRoundedCornerShape(12.dp), color = cardColor) {
                     // 列表是唯一可滚动区：高度随文章数增长，涨到剩余空间就封顶并由自己滚。
                     // 旧版把列表钉死在 240dp，条目一多就被硬裁；这里用 heightIn(max) 而不是
                     // 固定行数 × 行高，短列表不留空白，长列表也能一直翻到底。
@@ -286,7 +290,7 @@ private val ArticleRowHeight = 58.dp
 private val CardGrayLight = Color(0xFFF2F2F7)
 
 /** iOS 填充按钮的圆角（system borderedProminent ≈ 14pt，不是胶囊）。 */
-private val IosButtonShape = RoundedCornerShape(14.dp)
+private val IosButtonShape = SmoothRoundedCornerShape(14.dp)
 
 private val TextStyleIosTitle = androidx.compose.ui.text.TextStyle(
     fontFamily = FontFamily.Default,
@@ -373,7 +377,7 @@ private fun IosSegmentedControl(
     val isDark = isBlancallDark()
     val trackColor = if (isDark) Color.White.copy(alpha = 0.12f) else Color(0xFF767680).copy(alpha = 0.12f)
     val thumbColor = if (isDark) Color(0xFF636366) else Color.White
-    val thumbShape = RoundedCornerShape(7.dp)
+    val thumbShape = SmoothRoundedCornerShape(7.dp)
     val haptic = rememberHaptic(HapticTier.Toggle)
     val selectedTextColor = MaterialTheme.colorScheme.onSurface
     val unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant
@@ -382,7 +386,7 @@ private fun IosSegmentedControl(
         modifier = Modifier
             .fillMaxWidth()
             .height(32.dp)
-            .clip(RoundedCornerShape(9.dp))
+            .clip(SmoothRoundedCornerShape(9.dp))
             .background(trackColor)
             .padding(2.dp)
             .selectableGroup()

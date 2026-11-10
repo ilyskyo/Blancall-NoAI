@@ -137,9 +137,17 @@ class ContentPackStore internal constructor(private val root: File) {
     /** 读取一篇正文；不存在/被删返回 null。 */
     fun readEntry(packId: String, index: Int): String? {
         val pack = listPacks().firstOrNull { it.id == packId } ?: return null
+        return readEntry(pack, index)
+    }
+
+    /**
+     * 已持有 [PackMeta] 时直接读：批量导入/预览对同一包会逐篇读取，
+     * 旧实现每次都 `listPacks()` 重新扫目录并解析所有 pack.json，整体 O(N²)。
+     */
+    fun readEntry(pack: PackMeta, index: Int): String? {
         val entry = pack.entries.getOrNull(index) ?: return null
         if (!isSafeGeneratedName(entry.file)) return null
-        val dir = File(root, packId)
+        val dir = File(root, pack.id)
         val file = File(dir, entry.file)
         if (!file.canonicalPath.startsWith(dir.canonicalPath + File.separator)) return null
         return runCatching { file.readText() }.getOrNull()

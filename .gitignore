@@ -31,3 +31,7 @@ apk-output/
 # JVM 崩溃转储与回放日志（构建中断产物）
 hs_err_pid*.log
 replay_pid*.log
+
+# 本地构建日志与临时备份（不入库）
+_*.log
+_*.orig

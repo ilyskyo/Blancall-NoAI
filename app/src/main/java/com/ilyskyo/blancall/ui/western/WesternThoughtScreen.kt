@@ -23,14 +23,12 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.interaction.collectIsPressedAsState
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import com.ilyskyo.blancall.ui.theme.isBlancallDark
 import com.ilyskyo.blancall.ui.common.Motion
 import androidx.compose.animation.core.Animatable
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Icon as M3Icon
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -51,7 +49,6 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -312,7 +309,7 @@ private fun LibraryCard(
         MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
     }
 
-    val shape = RoundedCornerShape(16.dp)
+    val shape = SmoothRoundedCornerShape(16.dp)
     val interactionSource = remember { MutableInteractionSource() }
     val isPressed by interactionSource.collectIsPressedAsState()
 
@@ -438,7 +435,7 @@ private fun BatchImportPill(
 ) {
     Surface(
         modifier = Modifier.pressClick { onClick() },
-        shape = RoundedCornerShape(10.dp),
+        shape = SmoothRoundedCornerShape(10.dp),
         color = accent.copy(alpha = 0.12f),
     ) {
         Text(
@@ -654,7 +651,7 @@ fun LibraryContentPage(
                                 }
                             }
                         },
-                    shape = RoundedCornerShape(8.dp),
+                    shape = SmoothRoundedCornerShape(8.dp),
                     color = accent.copy(alpha = 0.12f)
                 ) {
                     Text(
@@ -670,10 +667,11 @@ fun LibraryContentPage(
             // 三点点菜单按钮 + 一级 GlassDropdownMenu（与 PracticeScreen 顶栏 ⋮ 完全一致）
             Box {
                 IconButton(onClick = { showMenu = true }) {
-                    M3Icon(
-                        imageVector = Icons.Filled.MoreVert,
-                        contentDescription = stringResource(com.ilyskyo.blancall.R.string.more),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    AppIcon(
+                        kind = AppIconKind.MoreVert,
+                        modifier = Modifier.size(22.dp),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                        contentDescription = stringResource(com.ilyskyo.blancall.R.string.more)
                     )
                 }
 

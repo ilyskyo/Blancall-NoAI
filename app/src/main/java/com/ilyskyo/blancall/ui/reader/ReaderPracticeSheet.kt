@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -28,6 +27,7 @@ import androidx.compose.ui.unit.dp
 import com.ilyskyo.blancall.ui.common.AnimatedOverlayPresence
 import com.ilyskyo.blancall.ui.common.GlassModalBottomSheet
 import com.ilyskyo.blancall.ui.common.pressClick
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import com.ilyskyo.blancall.ui.viewmodel.BlancallMode
 
 /**
@@ -161,13 +161,13 @@ private fun PracticeChoiceRow(
     onClick: () -> Unit,
 ) {
     Surface(
-        shape = RoundedCornerShape(14.dp),
+        shape = SmoothRoundedCornerShape(14.dp),
         color = MaterialTheme.colorScheme.surface,
         // 用本项目统一的按压反馈（缩放 + 亮度，无涟漪）：M3 的 Surface(onClick) 自带
         // indication=ripple，会跟全局「退场涟漪」的取舍打架
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
+            .clip(SmoothRoundedCornerShape(14.dp))
             .pressClick { onClick() }
     ) {
         Row(

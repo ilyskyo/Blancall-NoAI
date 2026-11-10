@@ -76,6 +76,20 @@ class FsrsStateStore private constructor(private val file: File) {
      */
     @Volatile
     private var fromNewerVersion = false
+
+    /**
+     * 读盘失败标记：主文件与 .bak **都**读不出来时为 true ⇒ 拒绝后续写盘。
+     *
+     * 与 TagStore / CustomClozeStore / ReadingMarkStore / MaskConfigStore / ReaderPrefsStore /
+     * AchievementTimelineStore / ReminderStateStore 完全同款。本 Store 早先只挡了
+     * [fromNewerVersion] 一种情况，于是「主文件与备份双损坏」会被读成空表，
+     * 用户练一次就用空表 + 这一条覆盖磁盘 —— 复习次数、稳定性、到期日、
+     * 计划成员（enrolled）全部永久丢失，且没有任何提示。
+     *
+     * 首次使用（两边都不存在）不算失败，否则新安装用户永远存不上。
+     */
+    @Volatile
+    private var loadFailed = false
     // 加载完成门闩：后台加载完成后 countDown；save/remove 前需等加载完成，避免 persist 覆盖丢旧状态
     private val loadLatch = CountDownLatch(1)
     // 落盘互斥：persist() 是「全量序列化 → 写 tmp → rename」。
@@ -151,29 +165,54 @@ class FsrsStateStore private constructor(private val file: File) {
         try {
             if (!file.exists()) {
                 if (fallbackToBackup && bak.exists()) {
+                    // 主文件缺失但备份在：写盘轮换中途被杀 / 手工误删。备份能用就不算失败。
                     applySnapshot(parseSnapshot(bak.readText()))
+                    loadFailed = false
                     Log.w("FsrsStateStore", "主文件丢失，已从备份恢复 ${states.size} 条记忆状态")
                 } else {
+                    // 两边都不存在 = 真正的首次使用，允许后续写盘
                     applySnapshot(emptySnapshot())
+                    loadFailed = false
                 }
                 return
             }
             applySnapshot(parseSnapshot(file.readText()))
+            loadFailed = false
         } catch (e: Exception) {
-            // 主文件损坏：先回读备份，避免整库记忆状态静默归零
+            // 主文件损坏：先留现场、再回读备份，避免整库记忆状态静默归零
             Log.e("FsrsStateStore", "加载 FSRS 状态失败，尝试从备份恢复", e)
+            // 必须在 preserveCorruptFile 之前取：它会把主文件 rename 走，
+            // 之后 file.exists() 恒为 false，判不出「本来有数据」。
+            val hadDiskData = file.exists() || bak.exists()
+            preserveCorruptFile()
             if (fallbackToBackup) {
                 try {
                     if (bak.exists()) {
                         applySnapshot(parseSnapshot(bak.readText()))
+                        loadFailed = false
                         Log.w("FsrsStateStore", "已从备份恢复 ${states.size} 条记忆状态")
                         return
                     }
                 } catch (e2: Exception) {
-                    Log.e("FsrsStateStore", "备份恢复也失败，将从空状态开始", e2)
+                    Log.e("FsrsStateStore", "backup recovery failed; writes will be refused", e2)
                 }
             }
             applySnapshot(emptySnapshot())
+            // 磁盘上确实曾有数据（主文件或备份存在）却一条都读不出来 ⇒ 拒绝写盘。
+            // 备份导入语义（fallbackToBackup=false）下，备份里没有这份数据是正常的，
+            // 此时主文件缺失/损坏应当清空并允许后续写入。
+            loadFailed = fallbackToBackup && hadDiskData
+        }
+    }
+
+    /** 主文件解析失败时另存一份 `.corrupt-<ts>`（尽力而为），避免损坏现场被后续写盘覆盖 */
+    private fun preserveCorruptFile() {
+        try {
+            if (!file.exists()) return
+            val dst = File(file.parentFile, file.name + ".corrupt-" + System.currentTimeMillis())
+            if (!file.renameTo(dst)) file.copyTo(dst, overwrite = true)
+        } catch (_: Exception) {
+            // 保留失败不影响主流程
         }
     }
 
@@ -204,7 +243,13 @@ class FsrsStateStore private constructor(private val file: File) {
     suspend fun reload() {
         withContext(Dispatchers.IO) {
             loadLatch.await()
-            load(fallbackToBackup = false)
+            // 必须持 persistLock：load() 是「读盘 → 解析 → 整体换入」，读盘与解析在锁外。
+            // 备份导入期间若正好有一次 save（导入后立刻答题 / 句子卡评分 / Widget 刷新），
+            // 那次新状态会被随后 applySnapshot 用旧文件整体覆盖 —— 表现为「刚练完的一篇，
+            // 回来还是没练过」。锁是可重入的（applySnapshot 内部也取同一把）。
+            synchronized(persistLock) {
+                load(fallbackToBackup = false)
+            }
         }
         bumpRevision()
     }
@@ -266,6 +311,31 @@ class FsrsStateStore private constructor(private val file: File) {
         return parts.size == 3 && parts[1].toLongOrNull() != null && parts[2].isNotBlank()
     }
 
+    private fun sentenceKeysForArticle(articleId: Long): List<String> {
+        val prefix = "$SENTENCE_KEY_PREFIX$articleId:"
+        return sentenceStates.keys.filter { it.startsWith(prefix) }
+    }
+
+    /** 改期作用于整篇：所有已学句落到同一绝对日期（与篇级 `a:` 的语义一致）。 */
+    private fun rescheduleSentences(articleId: Long, due: Long) {
+        val keys = sentenceKeysForArticle(articleId)
+        for (key in keys) {
+            val state = sentenceStates[key] ?: continue
+            if (state.reviewCount <= 0) continue
+            if (state.due != due) sentenceStates[key] = state.copy(due = due)
+        }
+    }
+
+    /** 恢复时把暂停时长加回每一句，保留句与句之间不同的间隔。 */
+    private fun resumeSentences(articleId: Long, pause: StudyFlow.Pause, now: Long) {
+        val keys = sentenceKeysForArticle(articleId)
+        for (key in keys) {
+            val state = sentenceStates[key] ?: continue
+            val due = StudyFlow.sentenceResumedDue(state, pause, now)
+            if (due != state.due) sentenceStates[key] = state.copy(due = due)
+        }
+    }
+
     private fun stateToJson(s: FsrsEngine.CardState): JSONObject = JSONObject()
         .put("difficulty", s.difficulty).put("stability", s.stability)
         .put("due", s.due).put("lastReview", s.lastReview)
@@ -278,6 +348,12 @@ class FsrsStateStore private constructor(private val file: File) {
                 // 盘上那份是更高版本写的：本版本不认识它的字段，整本重写会把那些字段抹平。
                 // 宁可停在「这次没存上」并留下日志，也不要静默改数据 —— 升级回来原文件还是完整的
                 Log.e("FsrsStateStore", "磁盘格式版本高于本应用，拒绝写盘（内存状态仍可用，退出后不保留）")
+                return
+            }
+            if (loadFailed) {
+                // 主文件与备份都读不出来：此时内存是空表，写下去就是用空表覆盖整库记忆状态。
+                // 宁可这一次不存，等用户从"一键备份"恢复或修好文件。
+                Log.e("FsrsStateStore", "load failed; refusing to persist to protect existing data")
                 return
             }
             file.parentFile?.mkdirs()
@@ -315,6 +391,35 @@ class FsrsStateStore private constructor(private val file: File) {
 
     /** 获取某文章的记忆状态；未练习过返回 null */
     fun get(articleId: Long): FsrsEngine.CardState? = states[articleId]
+
+    /**
+     * 原子地读-改-写某文章状态。
+     *
+     * 调用方（练习/句子卡）原先在 store 外 `get` 再 `save`：两把锁之间没有互斥，
+     * 同 articleId 的两次提交可能后写覆盖前写，reviewCount/stability 少推进一次。
+     * 这里把「读旧值 + 计算新值 + 落盘」放进同一把 persistLock。
+     *
+     * @return 新状态；磁盘处于只读保护/更高版本时返回 null（内存不写入）
+     */
+    fun update(articleId: Long, transform: (FsrsEngine.CardState) -> FsrsEngine.CardState): FsrsEngine.CardState? =
+        updateWithPrevious(articleId, transform)?.second
+
+    /** 与 [update] 相同，但同时返回旧状态与计算后的新状态（供复习事件日志记录 elapsed）。 */
+    fun updateWithPrevious(
+        articleId: Long,
+        transform: (FsrsEngine.CardState) -> FsrsEngine.CardState,
+    ): Pair<FsrsEngine.CardState, FsrsEngine.CardState>? {
+        loadLatch.await()
+        synchronized(persistLock) {
+            if (loadFailed || fromNewerVersion) return null
+            val previous = states[articleId] ?: FsrsEngine.CardState()
+            val next = transform(previous)
+            states[articleId] = next
+            persist()
+            bumpRevision()
+            return previous to next
+        }
+    }
 
     /** 保存（更新）某文章的记忆状态；先等初始加载完成，避免写入时覆盖未加载的旧状态 */
     fun save(articleId: Long, state: FsrsEngine.CardState) {
@@ -355,7 +460,10 @@ class FsrsStateStore private constructor(private val file: File) {
      * 老数据一条都不用动，新加入的走新表。
      */
     fun isInPlan(articleId: Long): Boolean =
-        (states[articleId]?.reviewCount ?: 0) > 0 || enrolledArticles.containsKey(articleId)
+        (states[articleId]?.reviewCount ?: 0) > 0 ||
+            enrolledArticles.containsKey(articleId) ||
+            // 投影口径下可能只有句级状态（跨文练习只写来源句），它同样是一篇在计划里的文章。
+            sentenceKeysForArticle(articleId).isNotEmpty()
 
     /** 计划成员快照（articleId → 加入时刻）；只读拷贝，调用方可安全持有 */
     fun enrolledArticles(): Map<Long, Long> = enrolledArticles.toMap()
@@ -444,6 +552,8 @@ class FsrsStateStore private constructor(private val file: File) {
             } else if (pause.fixedDue > 0L) {
                 enrolledArticles[articleId] = pause.fixedDue.coerceAtLeast(now)
             }
+            // 暂停是文章组操作：句级卡不能独立于篇级继续计时，否则恢复当天会集体爆到期。
+            resumeSentences(articleId, pause, now)
             persist()
             bumpRevision()
             return true
@@ -467,10 +577,14 @@ class FsrsStateStore private constructor(private val file: File) {
             val target = due.coerceAtLeast(0L)
             val state = states[articleId]
             if (state == null || state.reviewCount <= 0) {
-                // 还没练过的计划成员：它的「到期时间」就是加入时刻，改期改的就是这个时间戳。
-                // 不在计划里（既没练过也没加入）则无从改起。
-                if (!enrolledArticles.containsKey(articleId)) return false
-                enrolledArticles[articleId] = target
+                // 没有篇级卡的两类成员：主动加入计划的（到期 = 加入时刻），
+                // 以及只写过句级状态的（跨文练习/投影）。两者都必须能改期。
+                val enrolled = enrolledArticles.containsKey(articleId)
+                val hasSentences = sentenceKeysForArticle(articleId).isNotEmpty()
+                if (!enrolled && !hasSentences) return false
+                if (enrolled) enrolledArticles[articleId] = target
+                // 句级落点始终跟随这次改期；暂停状态下同样立即写，恢复时不会被旧值覆盖。
+                rescheduleSentences(articleId, target)
                 pausedArticles[articleId]?.let { pause ->
                     pausedArticles[articleId] = pause.copy(
                         remainingMs = (target - now).coerceAtLeast(0L),
@@ -490,8 +604,13 @@ class FsrsStateStore private constructor(private val file: File) {
                 if (state.lastReview > pause.pausedAt) {
                     states[articleId] = state.copy(due = target)
                 }
+                // 暂停中也可以改期：固定日期就是整组恢复后的落点，
+                // 暂停期间练过的句子同样以这次改期为准（与篇级 state 的处理一致）。
+                rescheduleSentences(articleId, target)
             } else {
                 states[articleId] = state.copy(due = target)
+                // 篇级改期必须同时作用到句子组，否则投影口径下这次操作对到期清单完全无效。
+                rescheduleSentences(articleId, target)
             }
             persist()
             bumpRevision()
@@ -515,6 +634,8 @@ class FsrsStateStore private constructor(private val file: File) {
         val state: FsrsEngine.CardState?,
         val pause: StudyFlow.Pause?,
         val enrolledAt: Long?,
+        /** 该文当前全部句子级状态；恢复/改期会动句级 due，撤销必须把它们一起还原。 */
+        val sentenceStates: Map<String, FsrsEngine.CardState> = emptyMap(),
     )
 
     /** 为 [ids] 逐篇取现场快照。阻塞等首次加载，调用方需在 IO 线程执行（与 [save] 同约定）。 */
@@ -527,6 +648,9 @@ class FsrsStateStore private constructor(private val file: File) {
                     state = states[id]?.copy(),
                     pause = pausedArticles[id],
                     enrolledAt = enrolledArticles[id],
+                    sentenceStates = sentenceKeysForArticle(id).associateWith { key ->
+                        sentenceStates.getValue(key).copy()
+                    },
                 )
             }
         }
@@ -551,6 +675,10 @@ class FsrsStateStore private constructor(private val file: File) {
                 val enrolledAt = snap.enrolledAt
                 if (enrolledAt == null) enrolledArticles.remove(snap.articleId)
                 else enrolledArticles[snap.articleId] = enrolledAt
+                // 只回写快照时存在的键：撤销窗口里新练出的句子状态不能被一次撤销抹掉。
+                snap.sentenceStates.forEach { (key, state) ->
+                    sentenceStates[key] = state.copy()
+                }
             }
             persist()
             bumpRevision()
@@ -576,6 +704,66 @@ class FsrsStateStore private constructor(private val file: File) {
 
     /** 获取某句子的记忆状态；未练习过返回 null */
     fun getSentence(key: String): FsrsEngine.CardState? = sentenceStates[key]
+
+    /** 一次句子级原子更新的前后态；日志必须用真实旧值算 elapsed，不能用 UI 侧快照。 */
+    data class SentenceTransition(
+        val key: String,
+        val previous: FsrsEngine.CardState,
+        val next: FsrsEngine.CardState,
+    )
+
+    /**
+     * 原子地读-改-写单个句子状态。
+     *
+     * 与文章级 [updateWithPrevious] 同一把锁：句子卡和文章练习可能同时提交同一句，
+     * 先 `getSentence` 再 `saveSentence` 会让后写覆盖前写，reviewCount 少推进一次。
+     * 键非法或磁盘处于只读保护时返回 null，不制造半次更新。
+     */
+    fun updateSentenceWithPrevious(
+        key: String,
+        transform: (FsrsEngine.CardState) -> FsrsEngine.CardState,
+    ): SentenceTransition? {
+        if (!isSentenceKey(key)) return null
+        loadLatch.await()
+        synchronized(persistLock) {
+            if (loadFailed || fromNewerVersion) return null
+            val previous = sentenceStates[key] ?: FsrsEngine.CardState()
+            val next = transform(previous)
+            sentenceStates[key] = next
+            persist()
+            bumpRevision()
+            return SentenceTransition(key, previous.copy(), next.copy())
+        }
+    }
+
+    /**
+     * 批量原子更新句子状态：一次读旧值、一次落盘、一次 revision。
+     *
+     * 一次练习会同时推进几十句；逐句调用 [updateSentenceWithPrevious] 会整本重写几十次。
+     * 这里把「读旧值 + review + 写回」整体放进同一把锁，避免两场提交交错时互相覆盖。
+     * 返回每次实际发生的前后态供事件日志使用；非法键静默跳过。
+     */
+    fun updateSentences(
+        transforms: Map<String, (FsrsEngine.CardState) -> FsrsEngine.CardState>,
+    ): List<SentenceTransition> {
+        if (transforms.isEmpty()) return emptyList()
+        loadLatch.await()
+        synchronized(persistLock) {
+            if (loadFailed || fromNewerVersion) return emptyList()
+            val transitions = ArrayList<SentenceTransition>(transforms.size)
+            for ((key, transform) in transforms) {
+                if (!isSentenceKey(key)) continue
+                val previous = sentenceStates[key] ?: FsrsEngine.CardState()
+                val next = transform(previous)
+                sentenceStates[key] = next
+                transitions += SentenceTransition(key, previous.copy(), next.copy())
+            }
+            if (transitions.isEmpty()) return emptyList()
+            persist()
+            bumpRevision()
+            return transitions
+        }
+    }
 
     /** 保存（更新）某句子的记忆状态；键不合法时直接忽略（防脏键写入） */
     fun saveSentence(key: String, state: FsrsEngine.CardState) {

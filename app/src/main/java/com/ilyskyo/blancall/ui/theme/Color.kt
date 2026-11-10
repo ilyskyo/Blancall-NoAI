@@ -223,15 +223,18 @@ fun hueShiftFor(argb: Int): Float {
  *
  * 规则（与预设同口径）：
  * - 浅色 primary 就是用户选的颜色本身；前景色取对比度更高的白或近黑；
- * - 容器色 = 该色与白按 14% 混合，容器前景 = 压暗到 72%；
+ * - 容器色 = 该色与白按 14% 混合，容器前景按容器色取可读黑/白（≥4.5:1）；
  * - 深色 primary 若在黑底上不足 4.5:1 会被提亮到刚好够，
  *   容器 = 深色 primary 压暗，容器前景 = 提亮 —— 保证深色下文字不糊。
  */
 fun accentPresetFromArgb(argb: Int): AccentPreset {
     val primaryLight = argb or (0xFF shl 24)
     val onPrimaryLight = ColorMath.readableOn(primaryLight)
-    val containerLight = ColorMath.blend(ColorMath.WHITE, primaryLight, 0.14f)
-    val onContainerLight = ColorMath.darken(primaryLight, 0.72f)
+    // blend(fg, bg, alpha) = fg*alpha + bg*(1-alpha)。
+    // 容器色要的是「主色 14% + 白 86%」的浅底，所以原色在前、白色在后；
+    // 反过来（旧实现）得到 86% 原色的深底，与 onContainer 的深色前景对比度只有 1.3~3.7。
+    val containerLight = ColorMath.blend(primaryLight, ColorMath.WHITE, 0.14f)
+    val onContainerLight = ColorMath.readableOn(containerLight)
     val primaryDark = ColorMath.lightenUntilContrast(primaryLight, ColorMath.BLACK, 4.5)
     val onPrimaryDark = ColorMath.readableOn(primaryDark)
     val containerDark = ColorMath.darken(primaryDark, 0.62f)

@@ -7,7 +7,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import com.ilyskyo.blancall.ui.common.MotionFade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import com.ilyskyo.blancall.ui.common.AppIcon
@@ -21,8 +20,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ilyskyo.blancall.algorithm.AnswerChecker
+import com.ilyskyo.blancall.algorithm.PracticeCoverage
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.setValue
+import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 
 
 /** 句子/字词挖空评分卡片：醒目得分行 + 错误分布 + 相似度，右侧查看本篇文章数据 */
@@ -31,7 +32,8 @@ internal fun BlancallScoreCard(
     checkResults: Map<Int, AnswerChecker.CheckDetail>,
     onViewArticleData: (() -> Unit)? = null,
     weakHints: Int = 0,
-    strongHints: Int = 0
+    strongHints: Int = 0,
+    coverage: PracticeCoverage? = null,
 ) {
     if (checkResults.isEmpty()) return
     // 入场动画：淡入 + 从下方滑入，让评分卡出现更生动
@@ -58,7 +60,7 @@ internal fun BlancallScoreCard(
         else -> MaterialTheme.colorScheme.error
     }
     Surface(
-        shape = RoundedCornerShape(12.dp),
+        shape = SmoothRoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceVariant,
         modifier = Modifier
             .fillMaxWidth()
@@ -117,6 +119,19 @@ internal fun BlancallScoreCard(
                 Text(parts.joinToString("  ·  "),
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            if (coverage != null && coverage.dueTotal > 0) {
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    stringResource(
+                        com.ilyskyo.blancall.R.string.practice_due_coverage,
+                        coverage.assessed,
+                        coverage.dueTotal,
+                        coverage.remaining,
+                    ),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
             }
             // 平均相似度（与反向默写统一口径，展示整体作答接近程度）
             val avgSim = checkResults.values.map { it.similarity }.average().toFloat()

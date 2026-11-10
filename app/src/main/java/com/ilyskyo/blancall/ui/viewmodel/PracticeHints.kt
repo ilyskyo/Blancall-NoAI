@@ -41,6 +41,8 @@ import kotlinx.coroutines.launch
                     if (currentAnswerText(blankIndex).length < expected.length) {
                         setAnswerText(blankIndex, currentAnswerText(blankIndex) + ch)
                         _strongHintCount.value += 1
+                        // 记下这个空：提交时整篇评级要封顶到 HARD（见 resolveRating）
+                        strongHintedBlanks += blankIndex
                         firstWait = false
                         continue
                     }
