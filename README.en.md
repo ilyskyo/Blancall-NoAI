@@ -16,15 +16,13 @@ The standard (NoAI) edition **contains no AI modules whatsoever**: no AI integra
 
 ## Screenshots
 
-<!-- Screenshots to be added: place images in docs/screenshots/ and uncomment below
 | Article page | Practice |
-|---|---|
-| ![](docs/screenshots/reader.png) | ![](docs/screenshots/practice.png) |
+|:---:|:---:|
+| <img src="docs/screenshots/reader.png" width="320" alt="Article page"> | <img src="docs/screenshots/practice.png" width="320" alt="Practice"> |
 
 | Statistics | Handwriting |
-|---|---|
-| ![](docs/screenshots/stats.png) | ![](docs/screenshots/handwriting.png) |
--->
+|:---:|:---:|
+| <img src="docs/screenshots/stats.png" width="320" alt="Statistics"> | <img src="docs/screenshots/handwriting.png" width="320" alt="Handwriting"> |
 
 ## Highlights
 

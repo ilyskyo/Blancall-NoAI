@@ -16,15 +16,13 @@ Blancall 是一个帮助你把任何文章转化为挖空练习的开源项目�
 
 ## 界面预览
 
-<!-- 截图待补充：图片放入 docs/screenshots/ 后取消下方注释
 | 文章详情页 | 练习页 |
-|---|---|
-| ![](docs/screenshots/reader.png) | ![](docs/screenshots/practice.png) |
+|:---:|:---:|
+| <img src="docs/screenshots/reader.png" width="320" alt="文章详情页"> | <img src="docs/screenshots/practice.png" width="320" alt="练习页"> |
 
 | 统计页 | 手写作答 |
-|---|---|
-| ![](docs/screenshots/stats.png) | ![](docs/screenshots/handwriting.png) |
--->
+|:---:|:---:|
+| <img src="docs/screenshots/stats.png" width="320" alt="统计页"> | <img src="docs/screenshots/handwriting.png" width="320" alt="手写作答"> |
 
 ## 功能亮点
 
