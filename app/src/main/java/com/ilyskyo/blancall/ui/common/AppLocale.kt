@@ -54,8 +54,10 @@ enum class AppLocale(val tag: String, val nativeName: String) {
         /** 旧名字保留给调用方：现在两条通道都能切换，所以恒为 true。 */
         val supported: Boolean get() = true
 
+        // 不能用 context.applicationContext：Application.attachBaseContext 阶段它还是 null，
+        // 而 wrap() 正是在那里调用的（冷启动第一行就会 NPE）。
         private fun prefs(context: Context): SharedPreferences =
-            context.applicationContext.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
+            context.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
 
         fun storedTag(context: Context): String = prefs(context).getString(PREF_KEY, "") ?: ""
 
