@@ -208,6 +208,17 @@ object AppPrefs {
     /** 当前使用的自定义遮挡配置 id（配合 readingOcclusionMode == "custom"；-1 = 未选择） */
     val readingOcclusionCustomConfigIdFlow: StateFlow<Long> = _readingOcclusionCustomConfigIdFlow.asStateFlow()
 
+    // ── 设置页布局：紧凑（概览 + 二级页）/ 完整（分区平铺）──
+    // 存「紧凑」这个正向语义而不是「完整」：默认值必须与新装用户看到的一致，
+    // 若存负向 key（默认 false = 紧凑），读代码的人会把 false 当成「没配置」而写反分支。
+    // 不进备份：布局形态是设备上的界面偏好，换机后跟着数据走没有意义（AppPrefs 本身也不在备份包里）。
+    private val _settingsCompactFlow = MutableStateFlow(true)
+    val settingsCompactFlow: StateFlow<Boolean> = _settingsCompactFlow.asStateFlow()
+
+    /** 是否已看过「双击标题可切换布局」的一次性引导（看过就不再出现） */
+    private val _settingsLayoutHintSeenFlow = MutableStateFlow(false)
+    val settingsLayoutHintSeenFlow: StateFlow<Boolean> = _settingsLayoutHintSeenFlow.asStateFlow()
+
     @SuppressLint("ApplySharedPref")
     fun init(context: Context) {
         prefs = context.applicationContext.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
@@ -225,6 +236,8 @@ object AppPrefs {
         _libraryDisclaimerSeenFlow.value = prefs.getStringSet("library_disclaimer_seen", emptySet())?.toSet() ?: emptySet()
         _pdfViewModeFlow.value = prefs.getString("pdf_view_mode", "text") ?: "text"
         _hapticLevelFlow.value = prefs.getString("haptic_level", "standard") ?: "standard"
+        _settingsCompactFlow.value = prefs.getBoolean("settings_layout_compact", true)
+        _settingsLayoutHintSeenFlow.value = prefs.getBoolean("settings_layout_hint_seen", false)
         _handwritingInputEnabledFlow.value = prefs.getBoolean("handwriting_input_enabled", false)
         _keepInkEnabledFlow.value = prefs.getBoolean("keep_ink_enabled", true)
         _articleTagFilterFlow.value = prefs.getStringSet("article_tag_filter", emptySet())
@@ -555,6 +568,23 @@ object AppPrefs {
 
     /** 当前 PDF 预览视图模式（text=纯文本排版 / image=原 PDF 图片渲染） */
     fun pdfViewMode(): String = _pdfViewModeFlow.value
+
+    /**
+     * 设置页是否用紧凑布局：true=概览 + 二级页，false=全部分区平铺（旧观感）。
+     * 切换入口有两个：标题栏右侧的自绘胶囊（主入口，可被读屏发现）、双击标题（专家捷径）。
+     */
+    var settingsCompact: Boolean
+        get() = if (::prefs.isInitialized) prefs.getBoolean("settings_layout_compact", true) else true
+        set(value) {
+            if (::prefs.isInitialized) prefs.edit { putBoolean("settings_layout_compact", value) }
+            _settingsCompactFlow.value = value
+        }
+
+    /** 记下「已看过布局切换提示」；只在用户主动关掉提示卡时调用 */
+    fun markSettingsLayoutHintSeen() {
+        if (::prefs.isInitialized) prefs.edit { putBoolean("settings_layout_hint_seen", true) }
+        _settingsLayoutHintSeenFlow.value = true
+    }
 
     /**
      * 作答输入方式（跨页面／跨启动持久）：true=手写输入，false=键盘输入。

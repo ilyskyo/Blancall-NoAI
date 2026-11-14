@@ -57,6 +57,18 @@
     <string name="import_action">Import</string>
     <string name="back">Back</string>
     <string name="settings">Settings</string>
+    <!-- ── Settings layout: compact (overview + detail) / full (flat sections) ── -->
+    <string name="settings_layout_compact">Compact</string>
+    <string name="settings_layout_full">Full</string>
+    <string name="settings_layout_hint">Long-press the title to switch layout</string>
+    <string name="settings_layout_hint_sub">The layout is remembered next time</string>
+    <string name="settings_hint_got_it">Got it</string>
+    <string name="settings_search_hint">Search settings</string>
+    <string name="settings_search_empty">No matching settings</string>
+    <string name="settings_value_on">On</string>
+    <string name="settings_value_off">Off</string>
+    <string name="settings_count_on">%1$d on</string>
+    <string name="settings_item_theme_mode">Theme</string>
     <string name="add_card">Add card</string>
     <string name="edit_card_config">Edit card settings</string>
     <string name="delete_card">Delete card</string>
@@ -953,6 +965,10 @@
     <plurals name="a11y_calendar_heatmap">
         <item quantity="one">Study calendar: %1$d day, %2$d sessions. Each row is a weekday, each column a week</item>
         <item quantity="other">Study calendar: %1$d days, %2$d sessions. Each row is a weekday, each column a week</item>
+    </plurals>
+<plurals name="a11y_calendar_year_heatmap">
+        <item quantity="one">Study calendar: %1$d day, %2$d sessions. Each row is a month, each column a day of that month</item>
+        <item quantity="other">Study calendar: %1$d days, %2$d sessions. Each row is a month, each column a day of that month</item>
     </plurals>
     <string name="achievement_unlocked_notice">New achievement: %1$s</string>
     <string name="achievement_earned_on">Earned on %1$s</string>

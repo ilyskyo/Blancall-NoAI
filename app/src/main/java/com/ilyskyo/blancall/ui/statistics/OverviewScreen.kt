@@ -113,6 +113,8 @@ import com.ilyskyo.blancall.algorithm.WeaknessMath
 import com.ilyskyo.blancall.algorithm.presetRange
 import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
 import com.ilyskyo.blancall.ui.common.AmbientBackground
 import com.ilyskyo.blancall.ui.common.BackButton
 import com.ilyskyo.blancall.ui.common.rememberAutoHideNavBarOnScroll
@@ -757,6 +759,48 @@ fun OverviewScreen(navController: NavController, onBack: (() -> Unit)? = null) {
         // 满格后回退超过 OVERVIEW_FLOW_PULL_CANCEL_SLACK 才算主动撤回：抬手时的
         // 几像素回带不再把「已画满」误判成「没拉满」。
         val flowListState = rememberLazyListState()
+        // ── 从子页面回来时把列表放回原处（按内容，不是按序号）──
+        // LazyListState 自带的恢复只存 index + 段内偏移，**不存条目 key**（已核 foundation 1.12
+        // 的 LazyListState.Saver 字节码：save 出来就是 listOf(firstVisibleItemIndex,
+        // firstVisibleItemScrollOffset)）。而本页顶部有几张条件条目（到期预测占位 / 句子记忆），
+        // 它们要等异步数据到位才出现 —— 返回后的第一次测量面对的是一份**更短的**条目表，
+        // 恢复出来的 index 于是落到了下面第 N 张卡上。更糟的是 LazyListScrollPosition 会把这次
+        // 「第一可见项」的 key 锁存下来：等条目补齐、index 整体下移时，它反过来按 key 把那张
+        // **错的卡**钉在顶部（updateScrollPositionIfTheFirstItemWasMoved），错误不会自愈。
+        // 对策：离开时记下 index + 偏移 + 当时的条目总数；回来等条目总数补回一致（此时 index 与
+        // 离开时同义）再 requestScrollToItem 落一次 —— 它会清掉 key 锁存，下一次测量重新认锚点。
+        // 条目总数对不上说明数据本身变了，这时不硬搬 index（硬搬会把「上面多了一张卡」的情况
+        // 反向拉偏一格），交给 LazyList 按 key 保锚点。
+        var overviewAnchorIndex by rememberSaveable { mutableStateOf(-1) }
+        var overviewAnchorOffset by rememberSaveable { mutableStateOf(0) }
+        var overviewAnchorCount by rememberSaveable { mutableStateOf(-1) }
+        DisposableEffect(flowListState) {
+            onDispose {
+                overviewAnchorIndex = flowListState.firstVisibleItemIndex
+                overviewAnchorOffset = flowListState.firstVisibleItemScrollOffset
+                overviewAnchorCount = flowListState.layoutInfo.totalItemsCount
+            }
+        }
+        LaunchedEffect(Unit) {
+            val targetIndex = overviewAnchorIndex
+            val targetOffset = overviewAnchorOffset
+            val targetCount = overviewAnchorCount
+            // 首次进入、或离开时本来就在顶部：没有需要校正的位置
+            if (targetIndex <= 0 || targetCount <= 0) return@LaunchedEffect
+            // 等条目补齐（超时就不动：宁可保持现状，也不要在错误的时机拽一下）
+            val settled = withTimeoutOrNull(800L) {
+                snapshotFlow { flowListState.layoutInfo.totalItemsCount }
+                    .first { it == targetCount }
+            } != null
+            if (!settled) return@LaunchedEffect
+            // 等的这几帧里用户自己滑了：以他的手势为准
+            if (flowListState.isScrollInProgress) return@LaunchedEffect
+            if (flowListState.firstVisibleItemIndex != targetIndex ||
+                flowListState.firstVisibleItemScrollOffset != targetOffset
+            ) {
+                flowListState.requestScrollToItem(targetIndex, targetOffset)
+            }
+        }
         // 唯一的位移真值：拖动时**同步**写入，绘制也从它读。
         // Animatable 只用来驱动「没拉满 → 回弹」那一段动画，不再承担手势状态。
         // 旧实现把 Animatable 当手势真值，snapTo 走协程，抬手判定可能读到上一帧的旧值：

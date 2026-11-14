@@ -59,6 +59,18 @@
     <string name="import_action">Импорт</string>
     <string name="back">Назад</string>
     <string name="settings">Настройки</string>
+    <!-- ── Вид экрана настроек: краткий (обзор + подробности) / полный (все разделы) ── -->
+    <string name="settings_layout_compact">Кратко</string>
+    <string name="settings_layout_full">Полностью</string>
+    <string name="settings_layout_hint">Долгое нажатие на заголовок меняет вид</string>
+    <string name="settings_layout_hint_sub">Выбранный вид сохранится</string>
+    <string name="settings_hint_got_it">Понятно</string>
+    <string name="settings_search_hint">Поиск по настройкам</string>
+    <string name="settings_search_empty">Ничего не найдено</string>
+    <string name="settings_value_on">Вкл.</string>
+    <string name="settings_value_off">Выкл.</string>
+    <string name="settings_count_on">%1$d вкл.</string>
+    <string name="settings_item_theme_mode">Тема</string>
     <string name="add_card">Добавить карточку</string>
     <string name="edit_card_config">Настроить карточку</string>
     <string name="delete_card">Удалить карточку</string>
@@ -1060,6 +1072,12 @@
         <item quantity="few">Календарь занятий: %1$d дня, всего %2$d. Строка — день недели, столбец — неделя</item>
         <item quantity="many">Календарь занятий: %1$d дней, всего %2$d. Строка — день недели, столбец — неделя</item>
         <item quantity="other">Календарь занятий: %1$d дней, всего %2$d. Строка — день недели, столбец — неделя</item>
+    </plurals>
+<plurals name="a11y_calendar_year_heatmap">
+        <item quantity="one">Календарь занятий: %1$d день, всего %2$d. Строка — месяц, столбец — день месяца</item>
+        <item quantity="few">Календарь занятий: %1$d дня, всего %2$d. Строка — месяц, столбец — день месяца</item>
+        <item quantity="many">Календарь занятий: %1$d дней, всего %2$d. Строка — месяц, столбец — день месяца</item>
+        <item quantity="other">Календарь занятий: %1$d дней, всего %2$d. Строка — месяц, столбец — день месяца</item>
     </plurals>
     <string name="achievement_unlocked_notice">Новое достижение: %1$s</string>
     <string name="achievement_earned_on">Получено %1$s</string>

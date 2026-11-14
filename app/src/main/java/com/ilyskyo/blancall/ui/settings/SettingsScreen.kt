@@ -18,6 +18,7 @@ import android.provider.MediaStore
 import android.provider.Settings
 import android.util.Log
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -29,7 +30,13 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.onLongClick
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
@@ -111,6 +118,7 @@ import com.ilyskyo.blancall.ui.common.GlassButton
 import com.ilyskyo.blancall.ui.common.GlassCard
 import com.ilyskyo.blancall.ui.common.GlassSwitch
 import com.ilyskyo.blancall.ui.common.Motion
+import com.ilyskyo.blancall.ui.common.StateSwap
 import com.ilyskyo.blancall.ui.common.MotionFade
 import com.ilyskyo.blancall.ui.common.LocalIsLargeScreen
 import com.ilyskyo.blancall.ui.common.MarkdownText
@@ -153,6 +161,14 @@ import java.util.Locale
 private fun localeNameStyle(choice: AppLocale, base: TextStyle): TextStyle =
     if (choice == AppLocale.FollowSystem) base
     else base.copy(fontFamily = FontFamily(Font(languageLabelFontRes(choice))))
+
+/**
+ * 设置页当前该呈现哪一种形态 —— [StateSwap] 的 targetState。
+ *
+ * 三态合一：紧凑顶层 / 完整布局 / 某一组的二级页。带 groupId 而不是枚举，
+ * 与 rememberSaveable 那份状态同源，转屏重建后两处不会各说各话。
+ */
+private data class SettingsScreenKey(val compact: Boolean, val groupId: String?)
 
 @Composable
 fun SettingsScreen(navController: NavController) {
@@ -364,339 +380,578 @@ fun SettingsScreen(navController: NavController) {
                 .widthIn(max = 600.dp)
                 .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 20.dp)
         ) {
+        // ── 布局双态（渐进式披露）──
+        // 紧凑 = 1 级概览 + 通用 2 级详情页；完整 = 现有分区原样平铺（逐字保留，老用户的安全区）。
+        // 双态的意义：展开态承担「原位保护」（NN/g Spatial Memory 要求常用区在原位留副本），
+        // 收起态承担「两级结构 + 搜索」（Android 官方对 15+ 项设置的要求），两者不冲突。
+        val compactLayout by AppPrefs.settingsCompactFlow.collectAsState()
+        val layoutHintSeen by AppPrefs.settingsLayoutHintSeenFlow.collectAsState()
+        // 当前打开的是哪一组；null = 1 级（概览 / 完整布局）。完整布局下恒为 null。
+        // 存 id 而不是枚举本身：rememberSaveable 只认可序列化类型，转屏 / 分屏重建后
+        // 才还能停在原来那一页（平板上分屏拖动分隔线会反复重建 Activity）。
+        var activeGroupId by rememberSaveable { mutableStateOf<String?>(null) }
+        val activeGroup = activeGroupId?.let { id ->
+            SettingsGroup.entries.firstOrNull { it.name == id }
+        }
+        // 搜索词提到页面这一级：进出二级页时概览整体离开组合，留在概览内部会丢 ——
+        // 返回后搜索框空着、列表却还是筛选后的样子，用户得重输一遍（Baymard 点过的失效模式）。
+        var overviewQuery by rememberSaveable { mutableStateOf("") }
+        // 两种形态各记各的滚动位置：切过去还能回到自己上次停的地方（空间记忆），
+        // 也不会因为另一种形态更短而被夹到顶部去。
+        val overviewScroll = rememberScrollState()
+        val expandedScroll = rememberScrollState()
+        // 每组都从顶部进入：remember(activeGroup) 换组即新建状态，天然回到 0 且不闪一帧
+        val detailScroll = remember(activeGroup) { ScrollState(0) }
+        // 切换只改状态：转场交给下面那个 StateSwap（进出各两百毫秒的交叉淡出）
+        val switchLayout: (Boolean) -> Unit = { toCompact ->
+            if (toCompact != compactLayout) {
+                activeGroupId = null
+                AppPrefs.settingsCompact = toCompact
+            }
+        }
+        // 二级页里的系统返回键先回 1 级，不能直接退出设置页（Baymard：子页返回「2 steps back」是头号翻车）
+        BackHandler(enabled = activeGroup != null) { activeGroupId = null }
+
         // 顶部返回按钮 + 标题
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            BackButton(onClick = { navController.popBackStack() })
+            BackButton(onClick = {
+                if (activeGroup != null) activeGroupId = null else navController.popBackStack()
+            })
             Spacer(Modifier.width(12.dp))
-            Text(stringResource(com.ilyskyo.blancall.R.string.settings), style = MaterialTheme.typography.headlineMedium, color = MaterialTheme.colorScheme.onBackground)
+            // 标题区同时是长按热区（48dp 高、占满剩余宽度）。
+            // 只留长按这一个入口是用户 2026-11-13 的决定（撤掉胶囊与双击）；
+            // 读屏用户走 semantics 上的 onLongClick 动作，不必真的按住不放。
+            val toggleLabel = stringResource(
+                if (compactLayout) com.ilyskyo.blancall.R.string.settings_layout_full
+                else com.ilyskyo.blancall.R.string.settings_layout_compact
+            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .heightIn(min = 48.dp)
+                    .pointerInput(Unit) {
+                        detectTapGestures(onLongPress = { switchLayout(!compactLayout) })
+                    }
+                    .semantics {
+                        onLongClick(label = toggleLabel) {
+                            switchLayout(!compactLayout)
+                            return@onLongClick true
+                        }
+                    },
+                contentAlignment = Alignment.CenterStart
+            ) {
+                Text(
+                    text = activeGroup?.let { settingsGroupTitle(it) }
+                        ?: stringResource(com.ilyskyo.blancall.R.string.settings),
+                    style = MaterialTheme.typography.headlineMedium,
+                    color = MaterialTheme.colorScheme.onBackground,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
 
         Spacer(Modifier.height(24.dp))
 
-        Column(
-            modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            // ── 外观 ──
-            Text(stringResource(com.ilyskyo.blancall.R.string.appearance), style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.primary)
+        // 两态交叉淡出：新旧两份同时在场两百毫秒，换来的是**没有空白帧**。
+        // 单棵树原地换形态一定会有空档 —— 换形态那一帧的耗时被动画时钟一口吃掉，
+        // 慢机器上看到的就是「白了一下」。这里宁可多背一份组合，也不要那一闪。
+        StateSwap(
+            targetState = SettingsScreenKey(compact = compactLayout, groupId = activeGroupId),
+            label = "settingsLayout",
+            modifier = Modifier.weight(1f)
+        ) { key ->
+            val showSection: (SettingsGroup) -> Boolean = { group -> !key.compact || key.groupId == group.name }
+            val sectionTitlesVisible = key.groupId == null
 
-            GlassCard(
-                backdrop = false,
-                modifier = Modifier.fillMaxWidth(),
-                shape = SmoothRoundedCornerShape(14.dp)
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(
+                        when {
+                            key.groupId != null -> detailScroll
+                            key.compact -> overviewScroll
+                            else -> expandedScroll
+                        }
+                    ),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Column(Modifier.padding(4.dp)) {
-                    // 浅色米黄底色开关（深色模式始终纯黑，不受此开关影响）
-                    val lightBeige by AppPrefs.lightBeigeBackgroundFlow.collectAsState()
+                // 1 级概览（只在紧凑布局的顶层出现；完整布局与二级页都直接摊开各自的分区）
+                if (key.compact && key.groupId == null) {
+                    SettingsCompactOverview(
+                        query = overviewQuery,
+                        onQueryChange = { overviewQuery = it },
+                        hintVisible = !layoutHintSeen,
+                        onDismissHint = { AppPrefs.markSettingsLayoutHintSeen() },
+                        onOpenGroup = { group -> activeGroupId = group.name }
+                    )
+                }
+                if (showSection(SettingsGroup.APPEARANCE)) {
+                    // ── 外观 ──
+                    SettingsSectionTitle(R.string.appearance, visible = sectionTitlesVisible)
 
-                    // 主题模式：固定 3 行列表（与米黄底色开关无关）
-                    OptionRow(
-                        label = stringResource(com.ilyskyo.blancall.R.string.theme_light),
-                        selected = themeMode == ThemeMode.LIGHT,
-                        onClick = { ThemeManager.setThemeMode(ThemeMode.LIGHT) }
-                    )
-                    OptionDivider(
-                        faded = themeMode == ThemeMode.LIGHT || themeMode == ThemeMode.DARK
-                    )
-                    OptionRow(
-                        label = stringResource(com.ilyskyo.blancall.R.string.theme_dark),
-                        selected = themeMode == ThemeMode.DARK,
-                        onClick = { ThemeManager.setThemeMode(ThemeMode.DARK) }
-                    )
-                    OptionDivider(
-                        faded = themeMode == ThemeMode.DARK || themeMode == ThemeMode.SYSTEM
-                    )
-                    OptionRow(
-                        label = stringResource(com.ilyskyo.blancall.R.string.theme_system),
-                        selected = themeMode == ThemeMode.SYSTEM,
-                        onClick = { ThemeManager.setThemeMode(ThemeMode.SYSTEM) }
-                    )
+                    GlassCard(
+                        backdrop = false,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = SmoothRoundedCornerShape(14.dp)
+                    ) {
+                        Column(Modifier.padding(4.dp)) {
+                            // 浅色米黄底色开关（深色模式始终纯黑，不受此开关影响）
+                            val lightBeige by AppPrefs.lightBeigeBackgroundFlow.collectAsState()
 
-                    HorizontalDivider(Modifier.padding(horizontal = 16.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-                    // ── 界面语言 ──
-                    // 语言名用各自语言的写法（见 AppLocale 注释）：切换入口若跟着当前语言走，
-                    // 换错一次就找不到回来的那一项。「跟随系统」是模式不是语言，跟着界面走。
-                    // 13 以上走框架 LocaleManager，13 以下走本地 tag + attachBaseContext 注入，
-                    // 两条通道都能切，所以不按版本设门。
-                    // 七个选项不再整列摊在设置页里（那会占掉大半屏）：
-                    // 点这一行就地弹出选项卡，选完立刻收起。
-                    val localeContext = LocalContext.current
-                    val currentLocale = AppLocale.current(localeContext)
-                    // 语言字形是标题的「第五个字」：尺寸与间隙都按 sp 换算，
-                    // 跟随系统字号一起缩放，否则大字号下会缩成一个小点。
-                    val localeDensity = LocalDensity.current
-                    val languageGlyphSize = with(localeDensity) { 18.sp.toDp() }
-                    val languageGlyphWidth = languageGlyphSize * 28f / 24f
-                    val languageGlyphGap = with(localeDensity) { 1.5.sp.toDp() }
-                    // 字形视框中「文」的墨迹重心偏高约 0.8sp，与汉字正文视觉居中对齐时微微下沉
-                    val languageGlyphDrop = with(localeDensity) { 0.8.sp.toDp() }
-                    var showLocaleMenu by remember { mutableStateOf(false) }
-                    val localeLabel: @Composable (AppLocale) -> String = { choice: AppLocale ->
-                        if (choice == AppLocale.FollowSystem)
-                            stringResource(com.ilyskyo.blancall.R.string.theme_system) else choice.nativeName
-                    }
-                    Box {
-                        Surface(
-                            onClick = { showLocaleMenu = true },
-                            color = MaterialTheme.colorScheme.surface,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
+                            // 主题模式：固定 3 行列表（与米黄底色开关无关）
+                            OptionRow(
+                                label = stringResource(com.ilyskyo.blancall.R.string.theme_light),
+                                selected = themeMode == ThemeMode.LIGHT,
+                                onClick = { ThemeManager.setThemeMode(ThemeMode.LIGHT) }
+                            )
+                            OptionDivider(
+                                faded = themeMode == ThemeMode.LIGHT || themeMode == ThemeMode.DARK
+                            )
+                            OptionRow(
+                                label = stringResource(com.ilyskyo.blancall.R.string.theme_dark),
+                                selected = themeMode == ThemeMode.DARK,
+                                onClick = { ThemeManager.setThemeMode(ThemeMode.DARK) }
+                            )
+                            OptionDivider(
+                                faded = themeMode == ThemeMode.DARK || themeMode == ThemeMode.SYSTEM
+                            )
+                            OptionRow(
+                                label = stringResource(com.ilyskyo.blancall.R.string.theme_system),
+                                selected = themeMode == ThemeMode.SYSTEM,
+                                onClick = { ThemeManager.setThemeMode(ThemeMode.SYSTEM) }
+                            )
+
+                            HorizontalDivider(Modifier.padding(horizontal = 16.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                            // ── 界面语言 ──
+                            // 语言名用各自语言的写法（见 AppLocale 注释）：切换入口若跟着当前语言走，
+                            // 换错一次就找不到回来的那一项。「跟随系统」是模式不是语言，跟着界面走。
+                            // 13 以上走框架 LocaleManager，13 以下走本地 tag + attachBaseContext 注入，
+                            // 两条通道都能切，所以不按版本设门。
+                            // 七个选项不再整列摊在设置页里（那会占掉大半屏）：
+                            // 点这一行就地弹出选项卡，选完立刻收起。
+                            val localeContext = LocalContext.current
+                            val currentLocale = AppLocale.current(localeContext)
+                            // 语言字形是标题的「第五个字」：尺寸与间隙都按 sp 换算，
+                            // 跟随系统字号一起缩放，否则大字号下会缩成一个小点。
+                            val localeDensity = LocalDensity.current
+                            val languageGlyphSize = with(localeDensity) { 18.sp.toDp() }
+                            val languageGlyphWidth = languageGlyphSize * 28f / 24f
+                            val languageGlyphGap = with(localeDensity) { 1.5.sp.toDp() }
+                            // 字形视框中「文」的墨迹重心偏高约 0.8sp，与汉字正文视觉居中对齐时微微下沉
+                            val languageGlyphDrop = with(localeDensity) { 0.8.sp.toDp() }
+                            var showLocaleMenu by remember { mutableStateOf(false) }
+                            val localeLabel: @Composable (AppLocale) -> String = { choice: AppLocale ->
+                                if (choice == AppLocale.FollowSystem)
+                                    stringResource(com.ilyskyo.blancall.R.string.theme_system) else choice.nativeName
+                            }
+                            Box {
+                                Surface(
+                                    onClick = { showLocaleMenu = true },
+                                    color = MaterialTheme.colorScheme.surface,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        Modifier.padding(horizontal = 16.dp, vertical = 14.dp).fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            // 「文A」字形紧跟标题，当成第五个字：认语言入口靠图形不靠汉字，
+                                            // 换成看不懂的语言时也能一眼找到这一行。
+                                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                                Text(stringResource(com.ilyskyo.blancall.R.string.ui_language),
+                                                    style = MaterialTheme.typography.bodyLarge,
+                                                    color = MaterialTheme.colorScheme.onSurface)
+                                                Spacer(Modifier.width(languageGlyphGap))
+                                                AppIcon(
+                                                    kind = AppIconKind.Language,
+                                                    modifier = Modifier
+                                                        .height(languageGlyphSize)
+                                                        .width(languageGlyphWidth)
+                                                        .offset(y = languageGlyphDrop),
+                                                    tint = MaterialTheme.colorScheme.onSurface
+                                                )
+                                            }
+                                            Spacer(Modifier.height(2.dp))
+                                            Text(stringResource(com.ilyskyo.blancall.R.string.ui_language_desc),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.padding(end = 16.dp))
+                                        }
+                                        Column(horizontalAlignment = Alignment.End) {
+                                            Text(localeLabel(currentLocale),
+                                                style = localeNameStyle(currentLocale, MaterialTheme.typography.labelMedium),
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.primary)
+                                        }
+                                    }
+                                }
+                                GlassDropdownMenu(
+                                    expanded = showLocaleMenu,
+                                    onDismissRequest = { showLocaleMenu = false }
+                                ) {
+                                    AppLocale.entries.forEach { choice ->
+                                        val picked = currentLocale == choice
+                                        GlassMenuItem(
+                                            onClick = {
+                                                showLocaleMenu = false
+                                                // 13+ 由框架重建，13 以下由 AppLocale.apply 自己 recreate
+                                                AppLocale.apply(localeContext, choice)
+                                            },
+                                            label = {
+                                                Text(localeLabel(choice),
+                                                    style = localeNameStyle(choice, MaterialTheme.typography.bodyMedium),
+                                                    color = MaterialTheme.colorScheme.onSurface)
+                                            },
+                                            trailing = {
+                                                if (picked) AppIcon(
+                                                    kind = AppIconKind.Check,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            HorizontalDivider(Modifier.padding(horizontal = 16.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                             Row(
-                                Modifier.padding(horizontal = 16.dp, vertical = 14.dp).fillMaxWidth(),
+                                Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column(Modifier.weight(1f)) {
-                                    // 「文A」字形紧跟标题，当成第五个字：认语言入口靠图形不靠汉字，
-                                    // 换成看不懂的语言时也能一眼找到这一行。
-                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                        Text(stringResource(com.ilyskyo.blancall.R.string.ui_language),
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            color = MaterialTheme.colorScheme.onSurface)
-                                        Spacer(Modifier.width(languageGlyphGap))
-                                        AppIcon(
-                                            kind = AppIconKind.Language,
-                                            modifier = Modifier
-                                                .height(languageGlyphSize)
-                                                .width(languageGlyphWidth)
-                                                .offset(y = languageGlyphDrop),
-                                            tint = MaterialTheme.colorScheme.onSurface
-                                        )
-                                    }
-                                    Spacer(Modifier.height(2.dp))
-                                    Text(stringResource(com.ilyskyo.blancall.R.string.ui_language_desc),
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.beige_background), style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface)
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.beige_background_desc),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(end = 16.dp))
                                 }
-                                Column(horizontalAlignment = Alignment.End) {
-                                    Text(localeLabel(currentLocale),
-                                        style = localeNameStyle(currentLocale, MaterialTheme.typography.labelMedium),
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.primary)
-                                }
-                            }
-                        }
-                        GlassDropdownMenu(
-                            expanded = showLocaleMenu,
-                            onDismissRequest = { showLocaleMenu = false }
-                        ) {
-                            AppLocale.entries.forEach { choice ->
-                                val picked = currentLocale == choice
-                                GlassMenuItem(
-                                    onClick = {
-                                        showLocaleMenu = false
-                                        // 13+ 由框架重建，13 以下由 AppLocale.apply 自己 recreate
-                                        AppLocale.apply(localeContext, choice)
-                                    },
-                                    label = {
-                                        Text(localeLabel(choice),
-                                            style = localeNameStyle(choice, MaterialTheme.typography.bodyMedium),
-                                            color = MaterialTheme.colorScheme.onSurface)
-                                    },
-                                    trailing = {
-                                        if (picked) AppIcon(
-                                            kind = AppIconKind.Check,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
+                                GlassSwitch(
+                                    checked = lightBeige,
+                                    onCheckedChange = { AppPrefs.lightBeigeBackgroundEnabled = it }
                                 )
                             }
-                        }
-                    }
 
-                    HorizontalDivider(Modifier.padding(horizontal = 16.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-                    Row(
-                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(stringResource(com.ilyskyo.blancall.R.string.beige_background), style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface)
-                            Text(stringResource(com.ilyskyo.blancall.R.string.beige_background_desc),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(end = 16.dp))
-                        }
-                        GlassSwitch(
-                            checked = lightBeige,
-                            onCheckedChange = { AppPrefs.lightBeigeBackgroundEnabled = it }
-                        )
-                    }
-
-                    // 页面灰色底（默认关 = 与卡片同色，即旧版观感）；开启后底色深一档、卡片靠面差立起来。
-                    // 存储语义仍是 flatBackground=true 表示「同色」，这里只把开关的极性倒过来：
-                    // 用户理解的是「打开=灰底」，不是「关掉同色」。
-                    val flatBackground by AppearanceStore.state.collectAsState()
-                    HorizontalDivider(Modifier.padding(horizontal = 16.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-                    Row(
-                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(stringResource(com.ilyskyo.blancall.R.string.flat_background),
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface)
-                            Text(stringResource(com.ilyskyo.blancall.R.string.flat_background_desc),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(end = 16.dp))
-                        }
-                        GlassSwitch(
-                            checked = !flatBackground.flatBackground,
-                            onCheckedChange = { on ->
-                                AppearanceStore.update { it.copy(flatBackground = !on) }
-                            }
-                        )
-                    }
-
-                    HorizontalDivider(Modifier.padding(horizontal = 16.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-                    // ── 界面字体（标题/正文族）──
-                    // 内置霞鹜文楷与阅读页共用同一份 ttf，不额外增包体；
-                    // 「系统衬线」在某些国产 ROM 上会退化成黑体，选内置楷体可绕开机型差异。
-                    val appearance by AppearanceStore.state.collectAsState()
-                    var showFontMenu by remember { mutableStateOf(false) }
-                    val fontLabelRes = when (appearance.uiFont) {
-                        AppearanceSnapshot.FONT_SANS -> com.ilyskyo.blancall.R.string.ui_font_sans
-                        AppearanceSnapshot.FONT_XWWK -> com.ilyskyo.blancall.R.string.ui_font_xwwk
-                        else -> com.ilyskyo.blancall.R.string.ui_font_serif
-                    }
-                    Box {
-                        Surface(
-                            onClick = { showFontMenu = true },
-                            color = MaterialTheme.colorScheme.surface,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
+                            // 页面灰色底（默认关 = 与卡片同色，即旧版观感）；开启后底色深一档、卡片靠面差立起来。
+                            // 存储语义仍是 flatBackground=true 表示「同色」，这里只把开关的极性倒过来：
+                            // 用户理解的是「打开=灰底」，不是「关掉同色」。
+                            val flatBackground by AppearanceStore.state.collectAsState()
+                            HorizontalDivider(Modifier.padding(horizontal = 16.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
                             Row(
-                                Modifier.padding(horizontal = 16.dp, vertical = 14.dp).fillMaxWidth(),
+                                Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column(Modifier.weight(1f)) {
-                                    Text(stringResource(com.ilyskyo.blancall.R.string.ui_font),
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.flat_background),
                                         style = MaterialTheme.typography.bodyLarge,
                                         color = MaterialTheme.colorScheme.onSurface)
-                                    Text(stringResource(com.ilyskyo.blancall.R.string.ui_font_desc),
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.flat_background_desc),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(end = 16.dp))
                                 }
-                                Text(stringResource(fontLabelRes),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.primary)
-                            }
-                        }
-                        GlassDropdownMenu(
-                            expanded = showFontMenu,
-                            onDismissRequest = { showFontMenu = false }
-                        ) {
-                            listOf(
-                                AppearanceSnapshot.FONT_SERIF to com.ilyskyo.blancall.R.string.ui_font_serif,
-                                AppearanceSnapshot.FONT_SANS to com.ilyskyo.blancall.R.string.ui_font_sans,
-                                AppearanceSnapshot.FONT_XWWK to com.ilyskyo.blancall.R.string.ui_font_xwwk,
-                            ).forEach { (value, labelRes) ->
-                                val picked = appearance.uiFont == value
-                                GlassMenuItem(
-                                    onClick = {
-                                        showFontMenu = false
-                                        AppearanceStore.update { it.copy(uiFont = value) }
-                                    },
-                                    label = {
-                                        Text(stringResource(labelRes),
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurface)
-                                    },
-                                    trailing = {
-                                        if (picked) AppIcon(
-                                            kind = AppIconKind.Check,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(18.dp)
-                                        )
+                                GlassSwitch(
+                                    checked = !flatBackground.flatBackground,
+                                    onCheckedChange = { on ->
+                                        AppearanceStore.update { it.copy(flatBackground = !on) }
                                     }
                                 )
                             }
+
+                            HorizontalDivider(Modifier.padding(horizontal = 16.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                            // ── 界面字体（标题/正文族）──
+                            // 内置霞鹜文楷与阅读页共用同一份 ttf，不额外增包体；
+                            // 「系统衬线」在某些国产 ROM 上会退化成黑体，选内置楷体可绕开机型差异。
+                            val appearance by AppearanceStore.state.collectAsState()
+                            var showFontMenu by remember { mutableStateOf(false) }
+                            val fontLabelRes = when (appearance.uiFont) {
+                                AppearanceSnapshot.FONT_SANS -> com.ilyskyo.blancall.R.string.ui_font_sans
+                                AppearanceSnapshot.FONT_XWWK -> com.ilyskyo.blancall.R.string.ui_font_xwwk
+                                else -> com.ilyskyo.blancall.R.string.ui_font_serif
+                            }
+                            Box {
+                                Surface(
+                                    onClick = { showFontMenu = true },
+                                    color = MaterialTheme.colorScheme.surface,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        Modifier.padding(horizontal = 16.dp, vertical = 14.dp).fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(stringResource(com.ilyskyo.blancall.R.string.ui_font),
+                                                style = MaterialTheme.typography.bodyLarge,
+                                                color = MaterialTheme.colorScheme.onSurface)
+                                            Text(stringResource(com.ilyskyo.blancall.R.string.ui_font_desc),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.padding(end = 16.dp))
+                                        }
+                                        Text(stringResource(fontLabelRes),
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
+                                GlassDropdownMenu(
+                                    expanded = showFontMenu,
+                                    onDismissRequest = { showFontMenu = false }
+                                ) {
+                                    listOf(
+                                        AppearanceSnapshot.FONT_SERIF to com.ilyskyo.blancall.R.string.ui_font_serif,
+                                        AppearanceSnapshot.FONT_SANS to com.ilyskyo.blancall.R.string.ui_font_sans,
+                                        AppearanceSnapshot.FONT_XWWK to com.ilyskyo.blancall.R.string.ui_font_xwwk,
+                                    ).forEach { (value, labelRes) ->
+                                        val picked = appearance.uiFont == value
+                                        GlassMenuItem(
+                                            onClick = {
+                                                showFontMenu = false
+                                                AppearanceStore.update { it.copy(uiFont = value) }
+                                            },
+                                            label = {
+                                                Text(stringResource(labelRes),
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = MaterialTheme.colorScheme.onSurface)
+                                            },
+                                            trailing = {
+                                                if (picked) AppIcon(
+                                                    kind = AppIconKind.Check,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            HorizontalDivider(Modifier.padding(horizontal = 16.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                            // ── 界面字号 ──
+                            FontScaleSlider(current = appearance.uiFontScale)
+
+                            HorizontalDivider(Modifier.padding(horizontal = 16.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                            // ── 玻璃染色（液态玻璃是否吸取主题色）──
+                            Row(
+                                Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.glass_tint),
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface)
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.glass_tint_desc),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(end = 16.dp))
+                                }
+                                GlassSwitch(
+                                    checked = appearance.glassTint,
+                                    onCheckedChange = { v -> AppearanceStore.update { it.copy(glassTint = v) } }
+                                )
+                            }
+
+                            HorizontalDivider(Modifier.padding(horizontal = 16.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                            // ── 导航栏液态玻璃开关（关闭后底部导航栏回退纯色底）──
+                            val navGlass by AppPrefs.navLiquidGlassFlow.collectAsState()
+                            Row(
+                                Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.nav_glass), style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface)
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.nav_glass_desc),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(end = 16.dp))
+                                }
+                                GlassSwitch(
+                                    checked = navGlass,
+                                    onCheckedChange = { AppPrefs.navLiquidGlassEnabled = it }
+                                )
+                            }
+
+                            HorizontalDivider(Modifier.padding(horizontal = 16.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                            // ── 触感强度（本 app 自己的四档）──
+                            // 不去镜像系统的全局触感开关：直振本来就是为绕开「定制 ROM 把触感
+                            // 弱化到无感」而写的（见 ui/common/Haptics.kt），镜像开关等于把那个
+                            // 老问题重新请回来。想关，就用这里的「关」。
+                            val hapticLevel by AppPrefs.hapticLevelFlow.collectAsState()
+                            var showHapticMenu by remember { mutableStateOf(false) }
+                            // 存进偏好的是字符串档名；认不出来时按「标准」显示，不给空标签
+                            val hapticLabelRes = hapticLevelChoices
+                                .firstOrNull { it.first == hapticLevel }?.second
+                                ?: hapticLevelChoices[1].second
+                            Box {
+                                Surface(
+                                    onClick = { showHapticMenu = true },
+                                    color = MaterialTheme.colorScheme.surface,
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Row(
+                                        Modifier.padding(horizontal = 16.dp, vertical = 14.dp).fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Column(Modifier.weight(1f)) {
+                                            Text(stringResource(com.ilyskyo.blancall.R.string.haptic_strength), style = MaterialTheme.typography.bodyLarge,
+                                                color = MaterialTheme.colorScheme.onSurface)
+                                            Spacer(Modifier.height(2.dp))
+                                            Text(stringResource(com.ilyskyo.blancall.R.string.haptic_strength_desc),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                modifier = Modifier.padding(end = 16.dp))
+                                        }
+                                        Column(horizontalAlignment = Alignment.End) {
+                                            Text(stringResource(hapticLabelRes),
+                                                style = MaterialTheme.typography.labelMedium,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = MaterialTheme.colorScheme.primary)
+                                        }
+                                    }
+                                }
+                                GlassDropdownMenu(
+                                    expanded = showHapticMenu,
+                                    onDismissRequest = { showHapticMenu = false }
+                                ) {
+                                    hapticLevelChoices.forEach { (value, labelId) ->
+                                        val picked = hapticLevel == value
+                                        GlassMenuItem(
+                                            onClick = {
+                                                showHapticMenu = false
+                                                AppPrefs.setHapticLevel(value)
+                                            },
+                                            label = {
+                                                Text(stringResource(labelId),
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = MaterialTheme.colorScheme.onSurface)
+                                            },
+                                            trailing = {
+                                                if (picked) AppIcon(
+                                                    kind = AppIconKind.Check,
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(18.dp)
+                                                )
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+
+                            HorizontalDivider(Modifier.padding(horizontal = 16.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                            // ── 首页副标题（点击编辑；首页品牌栏收起时也能从这里修改）──
+                            Row(
+                                Modifier
+                                    .fillMaxWidth()
+                                    .pressClick { showSubtitleDialog = true }
+                                    .padding(horizontal = 16.dp, vertical = 10.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.home_subtitle), style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface)
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.home_subtitle_desc),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(end = 16.dp))
+                                }
+                                Text(stringResource(com.ilyskyo.blancall.R.string.edit), style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.primary)
+                            }
+
+                            // 内置素材库已移至下方「拓展功能」分组
                         }
                     }
 
-                    HorizontalDivider(Modifier.padding(horizontal = 16.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-                    // ── 界面字号 ──
-                    FontScaleSlider(current = appearance.uiFontScale)
+                    Spacer(Modifier.height(8.dp))
+                }
 
-                    HorizontalDivider(Modifier.padding(horizontal = 16.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-                    // ── 玻璃染色（液态玻璃是否吸取主题色）──
-                    Row(
-                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                if (showSection(SettingsGroup.THEME_COLOR)) {
+                    // ── 主题色 ──
+                    SettingsSectionTitle(R.string.theme_color, visible = sectionTitlesVisible)
+
+                    GlassCard(
+                        backdrop = false,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = SmoothRoundedCornerShape(14.dp)
                     ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(stringResource(com.ilyskyo.blancall.R.string.glass_tint),
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface)
-                            Text(stringResource(com.ilyskyo.blancall.R.string.glass_tint_desc),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(end = 16.dp))
+                        val appearance by AppearanceStore.state.collectAsState()
+                        val isDark = isBlancallDark()
+                        var showCustomPicker by remember { mutableStateOf(false) }
+                        val accentIndex = appearance.accentIndex
+                        // 6 颗 40dp + 5×8dp = 280dp。可用宽度 = 屏宽 − 页面 40 − 卡片 32 = 288dp（360dp 机型），
+                        // 留 8dp 余量。旧版 44dp + 12dp = 324dp 在 360dp 屏溢出 36dp，居中排列 ⇒ 首尾各被裁 18dp。
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 14.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            // 根据系统深色模式选择 primaryDark/primaryLight，保证深色下对比度
+                            AccentPresets.forEachIndexed { index, preset ->
+                                val isSelected = !appearance.useCustomAccent && index == accentIndex
+                                val accentColor = if (isDark) preset.primaryDark else preset.primaryLight
+                                Surface(
+                                    onClick = { AppearanceStore.setAccentIndex(index) },
+                                    shape = RoundedCornerShape(50),
+                                    color = if (isSelected) accentColor.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surface,
+                                    modifier = Modifier.size(40.dp),
+                                    border = if (isSelected)
+                                        BorderStroke(2.5.dp, accentColor)
+                                    else
+                                        BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                                ) {
+                                    Box(
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Surface(
+                                            modifier = Modifier.size(22.dp),
+                                            shape = RoundedCornerShape(50),
+                                            color = accentColor,
+                                            content = {}
+                                        )
+                                        if (isSelected) {
+                                            AppIcon(
+                                                kind = AppIconKind.Check,
+                                                tint = accentColor,
+                                                modifier = Modifier.size(13.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
                         }
-                        GlassSwitch(
-                            checked = appearance.glassTint,
-                            onCheckedChange = { v -> AppearanceStore.update { it.copy(glassTint = v) } }
-                        )
-                    }
 
-                    HorizontalDivider(Modifier.padding(horizontal = 16.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-                    // ── 导航栏液态玻璃开关（关闭后底部导航栏回退纯色底）──
-                    val navGlass by AppPrefs.navLiquidGlassFlow.collectAsState()
-                    Row(
-                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(stringResource(com.ilyskyo.blancall.R.string.nav_glass), style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface)
-                            Text(stringResource(com.ilyskyo.blancall.R.string.nav_glass_desc),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(end = 16.dp))
-                        }
-                        GlassSwitch(
-                            checked = navGlass,
-                            onCheckedChange = { AppPrefs.navLiquidGlassEnabled = it }
-                        )
-                    }
+                        HorizontalDivider(Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
 
-                    HorizontalDivider(Modifier.padding(horizontal = 16.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-                    // ── 触感强度（本 app 自己的四档）──
-                    // 不去镜像系统的全局触感开关：直振本来就是为绕开「定制 ROM 把触感
-                    // 弱化到无感」而写的（见 ui/common/Haptics.kt），镜像开关等于把那个
-                    // 老问题重新请回来。想关，就用这里的「关」。
-                    val hapticLevel by AppPrefs.hapticLevelFlow.collectAsState()
-                    var showHapticMenu by remember { mutableStateOf(false) }
-                    // 存进偏好的是字符串档名；认不出来时按「标准」显示，不给空标签
-                    val hapticLabelRes = hapticLevelChoices
-                        .firstOrNull { it.first == hapticLevel }?.second
-                        ?: hapticLevelChoices[1].second
-                    Box {
+                        // ── 自定义主题色（色环自由取色）──
                         Surface(
-                            onClick = { showHapticMenu = true },
+                            onClick = { showCustomPicker = true },
                             color = MaterialTheme.colorScheme.surface,
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -706,1098 +961,969 @@ fun SettingsScreen(navController: NavController) {
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Column(Modifier.weight(1f)) {
-                                    Text(stringResource(com.ilyskyo.blancall.R.string.haptic_strength), style = MaterialTheme.typography.bodyLarge,
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.theme_color_custom),
+                                        style = MaterialTheme.typography.bodyLarge,
                                         color = MaterialTheme.colorScheme.onSurface)
-                                    Spacer(Modifier.height(2.dp))
-                                    Text(stringResource(com.ilyskyo.blancall.R.string.haptic_strength_desc),
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.theme_color_custom_desc),
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(end = 16.dp))
                                 }
-                                Column(horizontalAlignment = Alignment.End) {
-                                    Text(stringResource(hapticLabelRes),
-                                        style = MaterialTheme.typography.labelMedium,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = MaterialTheme.colorScheme.primary)
-                                }
-                            }
-                        }
-                        GlassDropdownMenu(
-                            expanded = showHapticMenu,
-                            onDismissRequest = { showHapticMenu = false }
-                        ) {
-                            hapticLevelChoices.forEach { (value, labelId) ->
-                                val picked = hapticLevel == value
-                                GlassMenuItem(
-                                    onClick = {
-                                        showHapticMenu = false
-                                        AppPrefs.setHapticLevel(value)
-                                    },
-                                    label = {
-                                        Text(stringResource(labelId),
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            color = MaterialTheme.colorScheme.onSurface)
-                                    },
-                                    trailing = {
-                                        if (picked) AppIcon(
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    val dot = if (appearance.useCustomAccent) Color(appearance.customArgb)
+                                    else MaterialTheme.colorScheme.outlineVariant
+                                    Box(
+                                        Modifier
+                                            .size(20.dp)
+                                            .clip(RoundedCornerShape(50))
+                                            .background(dot)
+                                            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(50))
+                                    )
+                                    if (appearance.useCustomAccent) {
+                                        Spacer(Modifier.width(8.dp))
+                                        AppIcon(
                                             kind = AppIconKind.Check,
                                             tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(18.dp)
+                                            modifier = Modifier.size(16.dp)
                                         )
                                     }
-                                )
+                                }
                             }
                         }
-                    }
 
-                    HorizontalDivider(Modifier.padding(horizontal = 16.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-                    // ── 首页副标题（点击编辑；首页品牌栏收起时也能从这里修改）──
-                    Row(
-                        Modifier
-                            .fillMaxWidth()
-                            .pressClick { showSubtitleDialog = true }
-                            .padding(horizontal = 16.dp, vertical = 10.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(stringResource(com.ilyskyo.blancall.R.string.home_subtitle), style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface)
-                            Text(stringResource(com.ilyskyo.blancall.R.string.home_subtitle_desc),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(end = 16.dp))
-                        }
-                        Text(stringResource(com.ilyskyo.blancall.R.string.edit), style = MaterialTheme.typography.labelMedium,
-                            color = MaterialTheme.colorScheme.primary)
-                    }
-
-                    // 内置素材库已移至下方「拓展功能」分组
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            // ── 主题色 ──
-            Text(stringResource(com.ilyskyo.blancall.R.string.theme_color), style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.primary)
-
-            GlassCard(
-                backdrop = false,
-                modifier = Modifier.fillMaxWidth(),
-                shape = SmoothRoundedCornerShape(14.dp)
-            ) {
-                val appearance by AppearanceStore.state.collectAsState()
-                val isDark = isBlancallDark()
-                var showCustomPicker by remember { mutableStateOf(false) }
-                val accentIndex = appearance.accentIndex
-                // 6 颗 40dp + 5×8dp = 280dp。可用宽度 = 屏宽 − 页面 40 − 卡片 32 = 288dp（360dp 机型），
-                // 留 8dp 余量。旧版 44dp + 12dp = 324dp 在 360dp 屏溢出 36dp，居中排列 ⇒ 首尾各被裁 18dp。
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // 根据系统深色模式选择 primaryDark/primaryLight，保证深色下对比度
-                    AccentPresets.forEachIndexed { index, preset ->
-                        val isSelected = !appearance.useCustomAccent && index == accentIndex
-                        val accentColor = if (isDark) preset.primaryDark else preset.primaryLight
-                        Surface(
-                            onClick = { AppearanceStore.setAccentIndex(index) },
-                            shape = RoundedCornerShape(50),
-                            color = if (isSelected) accentColor.copy(alpha = 0.15f) else MaterialTheme.colorScheme.surface,
-                            modifier = Modifier.size(40.dp),
-                            border = if (isSelected)
-                                BorderStroke(2.5.dp, accentColor)
-                            else
-                                BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
-                        ) {
-                            Box(
-                                modifier = Modifier.fillMaxSize(),
-                                contentAlignment = Alignment.Center
+                        // ── 跟随系统取色（Android 12+ 动态取色）──
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                            HorizontalDivider(Modifier.padding(horizontal = 16.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                            Row(
+                                Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Surface(
-                                    modifier = Modifier.size(22.dp),
-                                    shape = RoundedCornerShape(50),
-                                    color = accentColor,
-                                    content = {}
-                                )
-                                if (isSelected) {
-                                    AppIcon(
-                                        kind = AppIconKind.Check,
-                                        tint = accentColor,
-                                        modifier = Modifier.size(13.dp)
-                                    )
+                                Column(Modifier.weight(1f)) {
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.material_you),
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface)
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.material_you_desc),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(end = 16.dp))
                                 }
-                            }
-                        }
-                    }
-                }
-
-                HorizontalDivider(Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-
-                // ── 自定义主题色（色环自由取色）──
-                Surface(
-                    onClick = { showCustomPicker = true },
-                    color = MaterialTheme.colorScheme.surface,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        Modifier.padding(horizontal = 16.dp, vertical = 14.dp).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(stringResource(com.ilyskyo.blancall.R.string.theme_color_custom),
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface)
-                            Text(stringResource(com.ilyskyo.blancall.R.string.theme_color_custom_desc),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(end = 16.dp))
-                        }
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            val dot = if (appearance.useCustomAccent) Color(appearance.customArgb)
-                            else MaterialTheme.colorScheme.outlineVariant
-                            Box(
-                                Modifier
-                                    .size(20.dp)
-                                    .clip(RoundedCornerShape(50))
-                                    .background(dot)
-                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(50))
-                            )
-                            if (appearance.useCustomAccent) {
-                                Spacer(Modifier.width(8.dp))
-                                AppIcon(
-                                    kind = AppIconKind.Check,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(16.dp)
+                                GlassSwitch(
+                                    checked = appearance.materialYou,
+                                    onCheckedChange = { v -> AppearanceStore.update { it.copy(materialYou = v) } }
                                 )
                             }
                         }
-                    }
-                }
 
-                // ── 跟随系统取色（Android 12+ 动态取色）──
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    HorizontalDivider(Modifier.padding(horizontal = 16.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
-                    Row(
-                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(stringResource(com.ilyskyo.blancall.R.string.material_you),
-                                style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface)
-                            Text(stringResource(com.ilyskyo.blancall.R.string.material_you_desc),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(end = 16.dp))
+                        if (showCustomPicker) {
+                            // 单独抽一层：GlassModalBottomSheet 的签名里带 SheetState（实验性 M3 API），
+                            // 调用点必须 OptIn —— 把 OptIn 关在这个小组件里，别污染整个设置页。
+                            CustomAccentSheet(
+                                appearance = appearance,
+                                onDismiss = { showCustomPicker = false }
+                            )
                         }
-                        GlassSwitch(
-                            checked = appearance.materialYou,
-                            onCheckedChange = { v -> AppearanceStore.update { it.copy(materialYou = v) } }
-                        )
                     }
+
+                    Spacer(Modifier.height(8.dp))
                 }
 
-                if (showCustomPicker) {
-                    // 单独抽一层：GlassModalBottomSheet 的签名里带 SheetState（实验性 M3 API），
-                    // 调用点必须 OptIn —— 把 OptIn 关在这个小组件里，别污染整个设置页。
-                    CustomAccentSheet(
-                        appearance = appearance,
-                        onDismiss = { showCustomPicker = false }
-                    )
-                }
-            }
+                if (showSection(SettingsGroup.FEATURES)) {
+                    // ── 特性 ──
+                    SettingsSectionTitle(R.string.features, visible = sectionTitlesVisible)
 
-            Spacer(Modifier.height(8.dp))
-
-            // ── 特性 ──
-            Text(stringResource(com.ilyskyo.blancall.R.string.features), style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.primary)
-
-            GlassCard(
-                backdrop = false,
-                modifier = Modifier.fillMaxWidth(),
-                shape = SmoothRoundedCornerShape(14.dp)
-            ) {
-                // 段落首行缩进开关（导入时给未缩进段落补两格；关闭后不再新增缩进）
-                val autoIndentEnabled by AppPrefs.autoIndentEnabledFlow.collectAsState()
-                Row(
-                    Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(stringResource(com.ilyskyo.blancall.R.string.indent_first_line), style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface)
-                        Text(stringResource(com.ilyskyo.blancall.R.string.indent_first_line_desc),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(end = 16.dp))
-                    }
-                    GlassSwitch(
-                        checked = autoIndentEnabled,
-                        onCheckedChange = { AppPrefs.autoIndentEnabled = it }
-                    )
-                }
-
-                HorizontalDivider(
-                    Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-                )
-
-                // 错题墨迹保留（错题回顾）：学习统计的练习历史中回看答错空的手写笔迹
-                val keepInk by AppPrefs.keepInkEnabledFlow.collectAsState()
-                Row(
-                    Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(stringResource(com.ilyskyo.blancall.R.string.keep_wrong_ink), style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface)
-                        Text(stringResource(com.ilyskyo.blancall.R.string.keep_wrong_ink_desc),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(end = 16.dp))
-                    }
-                    GlassSwitch(
-                        checked = keepInk,
-                        onCheckedChange = { AppPrefs.keepInkEnabled = it }
-                    )
-                }
-
-                HorizontalDivider(
-                    Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-                )
-
-                // 清空已存墨迹（开关只拦新增，已存数据需手动清）
-                val inkContext = LocalContext.current
-                val inkResources = LocalResources.current
-                val inkScope = rememberCoroutineScope()
-                var confirmClearInk by remember { mutableStateOf(false) }
-                Row(
-                    Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(stringResource(com.ilyskyo.blancall.R.string.clear_saved_ink), style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.weight(1f))
-                    TextButton(onClick = { confirmClearInk = true }) {
-                        Text(stringResource(com.ilyskyo.blancall.R.string.clear))
-                    }
-                }
-                if (confirmClearInk) {
-                    // 墨迹是用户手写的内容、删了重建不了，必须二次确认：
-                    // 这一行紧挨「保留错题墨迹」开关，误触概率不低，而旧实现单击即删。
-                    DeleteConfirmDialog(
-                        title = stringResource(com.ilyskyo.blancall.R.string.clear_ink_confirm_title),
-                        message = stringResource(com.ilyskyo.blancall.R.string.clear_ink_confirm_msg),
-                        onConfirm = {
-                            confirmClearInk = false
-                            inkScope.launch {
-                                withContext(Dispatchers.IO) {
-                                    InkStore.getInstance(
-                                        inkContext.filesDir.resolve("ink").absolutePath
-                                    ).clearAll()
-                                }
-                                Toast.makeText(inkContext, inkResources.getString(com.ilyskyo.blancall.R.string.ink_cleared_toast), Toast.LENGTH_SHORT).show()
-                            }
-                        },
-                        onDismiss = { confirmClearInk = false },
-                    )
-                }
-
-                HorizontalDivider(
-                    Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-                )
-
-                // ── 句子卡片：点按翻页动画 ──
-                // 只影响「点按评级按钮换卡」那一段飞出；手动上下滑是翻卡手势本体，不能关。
-                val tapExitEnabled by AppPrefs.sentenceTapExitEnabledFlow.collectAsState()
-                val tapExitSpeed by AppPrefs.sentenceTapExitSpeedFlow.collectAsState()
-                Row(
-                    Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(stringResource(com.ilyskyo.blancall.R.string.sentence_card_anim_title),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface)
-                        Text(stringResource(com.ilyskyo.blancall.R.string.sentence_card_anim_desc),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(end = 16.dp))
-                    }
-                    GlassSwitch(
-                        checked = tapExitEnabled,
-                        onCheckedChange = { AppPrefs.sentenceTapExitEnabled = it }
-                    )
-                }
-                AnimatedVisibility(
-                    visible = tapExitEnabled,
-                    enter = fadeIn(MotionFade.alpha(MotionFade.enter)) +
-                        expandVertically(Motion.contentSize()),
-                    exit = fadeOut(MotionFade.alpha(MotionFade.exit)) +
-                        shrinkVertically(Motion.contentSize())
-                ) {
-                    Column(Modifier.fillMaxWidth()) {
+                    GlassCard(
+                        backdrop = false,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = SmoothRoundedCornerShape(14.dp)
+                    ) {
+                        // 段落首行缩进开关（导入时给未缩进段落补两格；关闭后不再新增缩进）
+                        val autoIndentEnabled by AppPrefs.autoIndentEnabledFlow.collectAsState()
                         Row(
-                            Modifier.padding(start = 16.dp, end = 16.dp, top = 2.dp).fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Text(stringResource(com.ilyskyo.blancall.R.string.sentence_card_anim_speed),
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurface)
-                            Text(
-                                stringResource(
-                                    com.ilyskyo.blancall.R.string.sentence_card_anim_speed_value,
-                                    (Motion.cardTapExitSeconds(tapExitSpeed) * 1000).roundToInt()
-                                ),
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.primary
-                            )
-                        }
-                        Slider(
-                            value = tapExitSpeed,
-                            // 拖动只改内存（每帧落盘会在 AtomicFiles 的 fsync 上卡 UI），松手再落盘
-                            onValueChange = { AppPrefs.previewSentenceTapExitSpeed(it) },
-                            onValueChangeFinished = { AppPrefs.flushSentenceTapExitSpeed() },
-                            valueRange = 0f..1f,
-                            steps = 9,
-                            modifier = Modifier.padding(horizontal = 16.dp)
-                        )
-                        // 预览卡：同一份 Motion 谱子 + 同一段位移算式，拖动每跨一格就飞一次
-                        SentenceTapExitPreview(
-                            enabled = true,
-                            speed = tapExitSpeed,
-                            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 2.dp)
-                        )
-                        Text(
-                            stringResource(com.ilyskyo.blancall.R.string.sentence_card_anim_preview_hint),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 14.dp)
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            // ── 复习 ──
-            Text(stringResource(com.ilyskyo.blancall.R.string.memory_plan), style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.primary)
-
-            GlassCard(
-                backdrop = false,
-                modifier = Modifier.fillMaxWidth(),
-                shape = SmoothRoundedCornerShape(14.dp)
-            ) {
-                val templateId by AppPrefs.reviewTemplateFlow.collectAsState()
-                val templates = listOf(ReviewTemplate.SPRINT, ReviewTemplate.STANDARD, ReviewTemplate.DEEP)
-                Column(Modifier.padding(4.dp)) {
-                    templates.forEachIndexed { idx, template ->
-                        val isSelected = template.id == templateId
-                        OptionRow(
-                            // B2-1/S3：计划名按 id 取资源（name 字段已从算法层移除）
-                            label = when (template.id) {
-                                "sprint" -> stringResource(com.ilyskyo.blancall.R.string.plan_name_sprint)
-                                "deep" -> stringResource(com.ilyskyo.blancall.R.string.plan_name_deep)
-                                else -> stringResource(com.ilyskyo.blancall.R.string.plan_name_standard)
-                            },
-                            description = when (template.id) {
-                                "sprint" -> stringResource(com.ilyskyo.blancall.R.string.plan_aggressive)
-                                "deep" -> stringResource(com.ilyskyo.blancall.R.string.plan_relaxed)
-                                else -> stringResource(com.ilyskyo.blancall.R.string.plan_balanced)
-                            },
-                            selected = isSelected,
-                            onClick = { AppPrefs.reviewTemplateId = template.id }
-                        )
-                        if (idx < templates.size - 1) {
-                            OptionDivider(
-                                faded = isSelected || templates[idx + 1].id == templateId
-                            )
-                        }
-                    }
-                    // 「每天学多久」是首页今日计划的输入，不属于提醒；
-                    // 放在这里而不是提醒卡片的折叠区，关掉提醒后设置仍然可见。
-                    HorizontalDivider(
-                        Modifier.padding(horizontal = 16.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-                    )
-                    StudyDurationSettings()
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            // ── 学习提醒 ──
-            Text(stringResource(com.ilyskyo.blancall.R.string.study_reminder), style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.primary)
-
-            ReminderSettingsCard()
-
-            Spacer(Modifier.height(8.dp))
-
-            // ── 帮助 ──
-            Text(stringResource(com.ilyskyo.blancall.R.string.help_section), style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.primary)
-
-            GlassCard(
-                backdrop = false,
-                modifier = Modifier.fillMaxWidth(),
-                shape = SmoothRoundedCornerShape(14.dp)
-            ) {
-                Surface(
-                    onClick = { navController.navigateOnce("guide") },
-                    color = MaterialTheme.colorScheme.surface,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        Modifier.padding(horizontal = 16.dp, vertical = 14.dp).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            AppIcon(
-                                AppIconKind.School,
-                                modifier = Modifier.size(20.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.width(10.dp))
-                            Text(stringResource(com.ilyskyo.blancall.R.string.guided_tour), style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface)
-                        }
-                        AppIcon(
-                            AppIconKind.ChevronRight,
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-                HorizontalDivider(
-                    Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-                )
-                Surface(
-                    // 一次性引导看过后就再也不会弹了，必须有出口能重来 ——
-                    // 否则用户误关一次，等于永久失去「长按可以做什么」这条信息
-                    onClick = { AppPrefs.resetCoachMarks() },
-                    color = MaterialTheme.colorScheme.surface,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        Modifier.padding(horizontal = 16.dp, vertical = 14.dp).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            AppIcon(
-                                kind = AppIconKind.Refresh,
-                                modifier = Modifier.size(20.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.width(10.dp))
-                            Column {
-                                Text(
-                                    stringResource(com.ilyskyo.blancall.R.string.coach_reset),
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Text(
-                                    stringResource(com.ilyskyo.blancall.R.string.coach_reset_desc),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    }
-                }
-                HorizontalDivider(
-                    Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-                )
-                Surface(
-                    onClick = { navController.navigateOnce("help") },
-                    color = MaterialTheme.colorScheme.surface,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        Modifier.padding(horizontal = 16.dp, vertical = 14.dp).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            AppIcon(
-                                AppIconKind.Library,
-                                modifier = Modifier.size(20.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.width(10.dp))
-                            Text(stringResource(com.ilyskyo.blancall.R.string.help_about), style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface)
-                        }
-                        AppIcon(
-                            AppIconKind.ChevronRight,
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            // ── 内容管理 ──
-            Text(stringResource(com.ilyskyo.blancall.R.string.content_management), style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.primary)
-
-            GlassCard(
-                backdrop = false,
-                modifier = Modifier.fillMaxWidth(),
-                shape = SmoothRoundedCornerShape(14.dp)
-            ) {
-                Surface(
-                    onClick = { navController.navigateOnce("tag_manager") },
-                    color = MaterialTheme.colorScheme.surface,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Row(
-                        Modifier.padding(horizontal = 16.dp, vertical = 14.dp).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            AppIcon(
-                                kind = AppIconKind.Tag,
-                                modifier = Modifier.size(20.dp),
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Spacer(Modifier.width(10.dp))
-                            Column {
-                                Text(stringResource(com.ilyskyo.blancall.R.string.article_tags), style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurface)
-                                Text(stringResource(com.ilyskyo.blancall.R.string.article_tags_desc),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                        AppIcon(
-                            AppIconKind.ChevronRight,
-                            modifier = Modifier.size(16.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            // ── 数据（学习数据整机备份，换机/重装可一键迁移） ──
-            Text(stringResource(com.ilyskyo.blancall.R.string.data_section), style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.primary)
-
-            GlassCard(
-                backdrop = false,
-                modifier = Modifier.fillMaxWidth(),
-                shape = SmoothRoundedCornerShape(14.dp)
-            ) {
-                Column(Modifier.padding(4.dp)) {
-                    // 体积可见性：只报数 + 超预算时给一句提示，不做任何删除动作。
-                    // 没有记录文件时整行连同分隔线一起不出现 —— 显示「当前 0 B」会被读成
-                    // 「有记录但很小」，而事实是「还没有记录」。
-                    recordsSizeBytes?.let { size ->
-                        Row(
-                            Modifier.padding(horizontal = 16.dp, vertical = 10.dp).fillMaxWidth(),
+                            Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Column(Modifier.weight(1f)) {
-                                Text(stringResource(com.ilyskyo.blancall.R.string.data_records_size_title),
-                                    style = MaterialTheme.typography.bodyLarge,
+                                Text(stringResource(com.ilyskyo.blancall.R.string.indent_first_line), style = MaterialTheme.typography.bodyLarge,
                                     color = MaterialTheme.colorScheme.onSurface)
-                                Text(
-                                    stringResource(com.ilyskyo.blancall.R.string.data_records_size_value,
-                                        formatFileSize(size)),
+                                Text(stringResource(com.ilyskyo.blancall.R.string.indent_first_line_desc),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(end = 16.dp)
-                                )
-                                if (size >= RECORDS_SIZE_BUDGET_BYTES) {
-                                    Spacer(Modifier.height(2.dp))
-                                    Text(stringResource(com.ilyskyo.blancall.R.string.data_records_size_warn),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.tertiary,
-                                        modifier = Modifier.padding(end = 16.dp))
-                                }
+                                    modifier = Modifier.padding(end = 16.dp))
                             }
-                            // 归档出口（审计 2.2-15）：只在记录多到能归档时才做动作；
-                            // 数量不足时按钮仍在（教用户有这个能力），点击给一句「暂无需归档」
-                            TextButton(onClick = {
-                                backupScope.launch {
-                                    val total = withContext(Dispatchers.IO) {
-                                        archiveRecordRepo.awaitLoaded()
-                                        archiveRecordRepo.records.value.size
-                                    }
-                                    archiveCandidateCount =
-                                        (total - RecordRepository.ARCHIVE_KEEP_RECENT).coerceAtLeast(0)
-                                    if (archiveCandidateCount <= 0) {
-                                        Toast.makeText(
-                                            backupContext,
-                                            backupResources.getString(com.ilyskyo.blancall.R.string.data_archive_none),
-                                            Toast.LENGTH_LONG
-                                        ).show()
-                                    } else {
-                                        archiveDialogVisible = true
-                                    }
-                                }
-                            }) {
-                                Text(stringResource(com.ilyskyo.blancall.R.string.data_archive_action))
-                            }
+                            GlassSwitch(
+                                checked = autoIndentEnabled,
+                                onCheckedChange = { AppPrefs.autoIndentEnabled = it }
+                            )
                         }
 
                         HorizontalDivider(
                             Modifier.padding(horizontal = 16.dp),
                             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
                         )
-                    }
 
-                    Row(
-                        Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(stringResource(com.ilyskyo.blancall.R.string.export_backup), style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface)
-                            Text(stringResource(com.ilyskyo.blancall.R.string.export_backup_desc),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(end = 16.dp))
-                        }
-                        TextButton(onClick = {
-                            // 先选类别，再选文件：见页面顶部的 BackupPickerSheet
-                            backupPickerVisible = true
-                        }) { Text(stringResource(com.ilyskyo.blancall.R.string.export_action)) }
-                    }
-
-                    HorizontalDivider(
-                        Modifier.padding(horizontal = 16.dp),
-                        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
-                    )
-
-                    Row(
-                        Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(Modifier.weight(1f)) {
-                            Text(stringResource(com.ilyskyo.blancall.R.string.import_backup), style = MaterialTheme.typography.bodyLarge,
-                                color = MaterialTheme.colorScheme.onSurface)
-                            Text(stringResource(com.ilyskyo.blancall.R.string.import_backup_desc),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(end = 16.dp))
-                        }
-                        TextButton(onClick = {
-                            // 放开 MIME 过滤：部分文件管理器返回的备份类型不固定，
-                            // 内容合法性由导入时的备份清单校验兜底
-                            backupImportLauncher.launch(arrayOf("*/*"))
-                        }) { Text(stringResource(com.ilyskyo.blancall.R.string.import_action)) }
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            // ── 拓展功能 ──
-            Text(stringResource(com.ilyskyo.blancall.R.string.extensions), style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.primary)
-
-            GlassCard(
-                backdrop = false,
-                modifier = Modifier.fillMaxWidth(),
-                shape = SmoothRoundedCornerShape(14.dp)
-            ) {
-                // ── 内置素材库：多库各自可启用，未来可继续追加 ──
-                Text(stringResource(com.ilyskyo.blancall.R.string.built_in_library), style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
-                val enabledSet by AppPrefs.builtInLibraryKeysFlow.collectAsState()
-                Row(
-                    Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(stringResource(com.ilyskyo.blancall.R.string.western_thoughts), style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface)
-                    }
-                    GlassSwitch(
-                        checked = "western" in enabledSet,
-                        onCheckedChange = { AppPrefs.setLibraryEnabled("western", it) }
-                    )
-                }
-                Row(
-                    Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(stringResource(com.ilyskyo.blancall.R.string.library_gaokao), style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface)
-                    }
-                    GlassSwitch(
-                        checked = "gaokao" in enabledSet,
-                        onCheckedChange = { AppPrefs.setLibraryEnabled("gaokao", it) }
-                    )
-                }
-                // 预留更多库：在此 Row 之后追加即可（如化学句子大全）
-
-                HorizontalDivider(
-                    modifier = Modifier.padding(horizontal = 16.dp),
-                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
-                )
-                // 内容包：用户自己的 zip（txt/md + 清单），可浏览、可一键全文导入
-                Row(
-                    Modifier.padding(horizontal = 16.dp, vertical = 10.dp).fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            stringResource(com.ilyskyo.blancall.R.string.content_pack_title),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            stringResource(com.ilyskyo.blancall.R.string.content_pack_settings_desc),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(end = 16.dp)
-                        )
-                    }
-                    GlassButton(
-                        onClick = { navController.navigateOnce("content_packs") },
-                        modifier = Modifier.height(34.dp)
-                    ) {
-                        Text(
-                            stringResource(com.ilyskyo.blancall.R.string.import_action),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-                // 数据互换：人类可读 JSON 导出 + CSV 回灌
-                Row(
-                    Modifier.padding(horizontal = 16.dp, vertical = 10.dp).fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(
-                            stringResource(com.ilyskyo.blancall.R.string.interchange_title),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                        Text(
-                            stringResource(com.ilyskyo.blancall.R.string.interchange_settings_desc),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(end = 16.dp)
-                        )
-                    }
-                    GlassButton(
-                        onClick = { navController.navigateOnce("data_interchange") },
-                        modifier = Modifier.height(34.dp)
-                    ) {
-                        Text(
-                            stringResource(com.ilyskyo.blancall.R.string.open),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            // ── 关于 ──
-            Text(stringResource(com.ilyskyo.blancall.R.string.about_section), style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.SemiBold,
-                color = MaterialTheme.colorScheme.primary)
-
-            GlassCard(
-                backdrop = false,
-                modifier = Modifier.fillMaxWidth(),
-                shape = SmoothRoundedCornerShape(14.dp)
-            ) {
-                Column(Modifier.padding(16.dp)) {
-                    Text("Blancall", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurface)
-                    Spacer(Modifier.height(2.dp))
-                    Text("Fill the blank, recall the knowledge.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.height(6.dp))
-                    Text(stringResource(com.ilyskyo.blancall.R.string.app_tagline),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(6.dp))
-                    Text(stringResource(com.ilyskyo.blancall.R.string.app_features_line),
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
-                }
-            }
-
-            Spacer(Modifier.height(8.dp))
-
-            // ── 赞赏区 ──
-            // 整块可被「隐藏该区域」收起。隐藏态是**会话级**的（SettingsSessionState，
-            // 只在内存里，不落盘）：本次使用不再出现，软件重新启动后自动恢复。
-            if (!SettingsSessionState.donationHidden) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(stringResource(com.ilyskyo.blancall.R.string.donation_heading), style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary)
-                    // 圆圈按钮：右边缘与下方卡片的右边框对齐，提示这一行可以点
-                    Box {
-                        Box(
-                            modifier = Modifier
-                                .size(26.dp)
-                                .clip(CircleShape)
-                                .border(
-                                    1.dp,
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
-                                    CircleShape
-                                )
-                                .pressClick(tier = PressTier.Icon) { showDonationMenu = true },
-                            contentAlignment = Alignment.Center
+                        // 错题墨迹保留（错题回顾）：学习统计的练习历史中回看答错空的手写笔迹
+                        val keepInk by AppPrefs.keepInkEnabledFlow.collectAsState()
+                        Row(
+                            Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            AppIcon(
-                                kind = AppIconKind.MoreVert,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(16.dp),
-                                contentDescription = stringResource(com.ilyskyo.blancall.R.string.more)
+                            Column(Modifier.weight(1f)) {
+                                Text(stringResource(com.ilyskyo.blancall.R.string.keep_wrong_ink), style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface)
+                                Text(stringResource(com.ilyskyo.blancall.R.string.keep_wrong_ink_desc),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(end = 16.dp))
+                            }
+                            GlassSwitch(
+                                checked = keepInk,
+                                onCheckedChange = { AppPrefs.keepInkEnabled = it }
                             )
                         }
-                        GlassDropdownMenu(
-                            expanded = showDonationMenu,
-                            onDismissRequest = { showDonationMenu = false }
+
+                        HorizontalDivider(
+                            Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                        )
+
+                        // 清空已存墨迹（开关只拦新增，已存数据需手动清）
+                        val inkContext = LocalContext.current
+                        val inkResources = LocalResources.current
+                        val inkScope = rememberCoroutineScope()
+                        var confirmClearInk by remember { mutableStateOf(false) }
+                        Row(
+                            Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            GlassMenuItem(
-                                onClick = {
-                                    showDonationMenu = false
-                                    SettingsSessionState.donationHidden = true
+                            Text(stringResource(com.ilyskyo.blancall.R.string.clear_saved_ink), style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.weight(1f))
+                            TextButton(onClick = { confirmClearInk = true }) {
+                                Text(stringResource(com.ilyskyo.blancall.R.string.clear))
+                            }
+                        }
+                        if (confirmClearInk) {
+                            // 墨迹是用户手写的内容、删了重建不了，必须二次确认：
+                            // 这一行紧挨「保留错题墨迹」开关，误触概率不低，而旧实现单击即删。
+                            DeleteConfirmDialog(
+                                title = stringResource(com.ilyskyo.blancall.R.string.clear_ink_confirm_title),
+                                message = stringResource(com.ilyskyo.blancall.R.string.clear_ink_confirm_msg),
+                                onConfirm = {
+                                    confirmClearInk = false
+                                    inkScope.launch {
+                                        withContext(Dispatchers.IO) {
+                                            InkStore.getInstance(
+                                                inkContext.filesDir.resolve("ink").absolutePath
+                                            ).clearAll()
+                                        }
+                                        Toast.makeText(inkContext, inkResources.getString(com.ilyskyo.blancall.R.string.ink_cleared_toast), Toast.LENGTH_SHORT).show()
+                                    }
                                 },
-                                label = {
+                                onDismiss = { confirmClearInk = false },
+                            )
+                        }
+
+                        HorizontalDivider(
+                            Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                        )
+
+                        // ── 句子卡片：点按翻页动画 ──
+                        // 只影响「点按评级按钮换卡」那一段飞出；手动上下滑是翻卡手势本体，不能关。
+                        val tapExitEnabled by AppPrefs.sentenceTapExitEnabledFlow.collectAsState()
+                        val tapExitSpeed by AppPrefs.sentenceTapExitSpeedFlow.collectAsState()
+                        Row(
+                            Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(stringResource(com.ilyskyo.blancall.R.string.sentence_card_anim_title),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface)
+                                Text(stringResource(com.ilyskyo.blancall.R.string.sentence_card_anim_desc),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(end = 16.dp))
+                            }
+                            GlassSwitch(
+                                checked = tapExitEnabled,
+                                onCheckedChange = { AppPrefs.sentenceTapExitEnabled = it }
+                            )
+                        }
+                        AnimatedVisibility(
+                            visible = tapExitEnabled,
+                            enter = fadeIn(MotionFade.alpha(MotionFade.enter)) +
+                                expandVertically(Motion.contentSize()),
+                            exit = fadeOut(MotionFade.alpha(MotionFade.exit)) +
+                                shrinkVertically(Motion.contentSize())
+                        ) {
+                            Column(Modifier.fillMaxWidth()) {
+                                Row(
+                                    Modifier.padding(start = 16.dp, end = 16.dp, top = 2.dp).fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.sentence_card_anim_speed),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface)
+                                    Text(
+                                        stringResource(
+                                            com.ilyskyo.blancall.R.string.sentence_card_anim_speed_value,
+                                            (Motion.cardTapExitSeconds(tapExitSpeed) * 1000).roundToInt()
+                                        ),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                                Slider(
+                                    value = tapExitSpeed,
+                                    // 拖动只改内存（每帧落盘会在 AtomicFiles 的 fsync 上卡 UI），松手再落盘
+                                    onValueChange = { AppPrefs.previewSentenceTapExitSpeed(it) },
+                                    onValueChangeFinished = { AppPrefs.flushSentenceTapExitSpeed() },
+                                    valueRange = 0f..1f,
+                                    steps = 9,
+                                    modifier = Modifier.padding(horizontal = 16.dp)
+                                )
+                                // 预览卡：同一份 Motion 谱子 + 同一段位移算式，拖动每跨一格就飞一次
+                                SentenceTapExitPreview(
+                                    enabled = true,
+                                    speed = tapExitSpeed,
+                                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 2.dp)
+                                )
+                                Text(
+                                    stringResource(com.ilyskyo.blancall.R.string.sentence_card_anim_preview_hint),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 14.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                if (showSection(SettingsGroup.REVIEW)) {
+                    // ── 复习 ──
+                    SettingsSectionTitle(R.string.memory_plan, visible = sectionTitlesVisible)
+
+                    GlassCard(
+                        backdrop = false,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = SmoothRoundedCornerShape(14.dp)
+                    ) {
+                        val templateId by AppPrefs.reviewTemplateFlow.collectAsState()
+                        val templates = listOf(ReviewTemplate.SPRINT, ReviewTemplate.STANDARD, ReviewTemplate.DEEP)
+                        Column(Modifier.padding(4.dp)) {
+                            templates.forEachIndexed { idx, template ->
+                                val isSelected = template.id == templateId
+                                OptionRow(
+                                    // B2-1/S3：计划名按 id 取资源（name 字段已从算法层移除）
+                                    label = when (template.id) {
+                                        "sprint" -> stringResource(com.ilyskyo.blancall.R.string.plan_name_sprint)
+                                        "deep" -> stringResource(com.ilyskyo.blancall.R.string.plan_name_deep)
+                                        else -> stringResource(com.ilyskyo.blancall.R.string.plan_name_standard)
+                                    },
+                                    description = when (template.id) {
+                                        "sprint" -> stringResource(com.ilyskyo.blancall.R.string.plan_aggressive)
+                                        "deep" -> stringResource(com.ilyskyo.blancall.R.string.plan_relaxed)
+                                        else -> stringResource(com.ilyskyo.blancall.R.string.plan_balanced)
+                                    },
+                                    selected = isSelected,
+                                    onClick = { AppPrefs.reviewTemplateId = template.id }
+                                )
+                                if (idx < templates.size - 1) {
+                                    OptionDivider(
+                                        faded = isSelected || templates[idx + 1].id == templateId
+                                    )
+                                }
+                            }
+                            // 「每天学多久」是首页今日计划的输入，不属于提醒；
+                            // 放在这里而不是提醒卡片的折叠区，关掉提醒后设置仍然可见。
+                            HorizontalDivider(
+                                Modifier.padding(horizontal = 16.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                            )
+                            StudyDurationSettings()
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                if (showSection(SettingsGroup.REMINDER)) {
+                    // ── 学习提醒 ──
+                    SettingsSectionTitle(R.string.study_reminder, visible = sectionTitlesVisible)
+
+                    ReminderSettingsCard()
+
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                if (showSection(SettingsGroup.HELP)) {
+                    // ── 帮助 ──
+                    SettingsSectionTitle(R.string.help_section, visible = sectionTitlesVisible)
+
+                    GlassCard(
+                        backdrop = false,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = SmoothRoundedCornerShape(14.dp)
+                    ) {
+                        Surface(
+                            onClick = { navController.navigateOnce("guide") },
+                            color = MaterialTheme.colorScheme.surface,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 16.dp, vertical = 14.dp).fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    AppIcon(
+                                        AppIconKind.School,
+                                        modifier = Modifier.size(20.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.guided_tour), style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface)
+                                }
+                                AppIcon(
+                                    AppIconKind.ChevronRight,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                        HorizontalDivider(
+                            Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                        )
+                        Surface(
+                            // 一次性引导看过后就再也不会弹了，必须有出口能重来 ——
+                            // 否则用户误关一次，等于永久失去「长按可以做什么」这条信息
+                            onClick = { AppPrefs.resetCoachMarks() },
+                            color = MaterialTheme.colorScheme.surface,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 16.dp, vertical = 14.dp).fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    AppIcon(
+                                        kind = AppIconKind.Refresh,
+                                        modifier = Modifier.size(20.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(Modifier.width(10.dp))
                                     Column {
-                                        Text(stringResource(com.ilyskyo.blancall.R.string.donation_hide),
-                                            style = MaterialTheme.typography.bodyMedium,
+                                        Text(
+                                            stringResource(com.ilyskyo.blancall.R.string.coach_reset),
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Text(
+                                            stringResource(com.ilyskyo.blancall.R.string.coach_reset_desc),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                        HorizontalDivider(
+                            Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                        )
+                        Surface(
+                            onClick = { navController.navigateOnce("help") },
+                            color = MaterialTheme.colorScheme.surface,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 16.dp, vertical = 14.dp).fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    AppIcon(
+                                        AppIconKind.Library,
+                                        modifier = Modifier.size(20.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.help_about), style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface)
+                                }
+                                AppIcon(
+                                    AppIconKind.ChevronRight,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                if (showSection(SettingsGroup.CONTENT)) {
+                    // ── 内容管理 ──
+                    SettingsSectionTitle(R.string.content_management, visible = sectionTitlesVisible)
+
+                    GlassCard(
+                        backdrop = false,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = SmoothRoundedCornerShape(14.dp)
+                    ) {
+                        Surface(
+                            onClick = { navController.navigateOnce("tag_manager") },
+                            color = MaterialTheme.colorScheme.surface,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 16.dp, vertical = 14.dp).fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    AppIcon(
+                                        kind = AppIconKind.Tag,
+                                        modifier = Modifier.size(20.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Column {
+                                        Text(stringResource(com.ilyskyo.blancall.R.string.article_tags), style = MaterialTheme.typography.bodyLarge,
                                             color = MaterialTheme.colorScheme.onSurface)
-                                        Spacer(Modifier.height(2.dp))
-                                        Text(stringResource(com.ilyskyo.blancall.R.string.donation_hide_hint),
+                                        Text(stringResource(com.ilyskyo.blancall.R.string.article_tags_desc),
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                 }
-                            )
-                            GlassMenuItem(
-                                onClick = {
-                                    showDonationMenu = false
-                                    startSaveDonationQr()
-                                },
-                                label = {
-                                    Text(stringResource(com.ilyskyo.blancall.R.string.donation_save_qr),
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurface)
-                                }
-                            )
-                        }
-                    }
-                }
-
-                GlassCard(
-                    backdrop = false,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = SmoothRoundedCornerShape(14.dp)
-                ) {
-                    val qrSide = if (LocalIsLargeScreen) 200.dp else 168.dp
-                    Column(
-                        modifier = Modifier.padding(20.dp).fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        Text(stringResource(com.ilyskyo.blancall.R.string.donation_statement),
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            textAlign = TextAlign.Center)
-                        Spacer(Modifier.height(6.dp))
-                        Text(stringResource(com.ilyskyo.blancall.R.string.donation_invite),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
-                            textAlign = TextAlign.Center)
-                        Spacer(Modifier.height(16.dp))
-                        // 二维码必须「白底黑码」才能被相机识别：这里的 Color.White 是刚性要求，
-                        // 不要换成 colorScheme.surface 或半透明白，深色模式下会掉对比度导致扫不出。
-                        // clip 必须写在 background 之前，否则圆角不生效（background(shape) 只画底、不裁内容）。
-                        Box(
-                            modifier = Modifier
-                                .size(qrSide)
-                                .clip(SmoothRoundedCornerShape(14.dp))
-                                .background(Color.White)
-                        ) {
-                            Image(
-                                painter = painterResource(id = R.drawable.appreciation_qr_card),
-                                contentDescription = stringResource(com.ilyskyo.blancall.R.string.donation_qr),
-                                modifier = Modifier.fillMaxSize(),
-                                contentScale = ContentScale.Fit
-                            )
-                        }
-                    }
-                }
-            }
-
-            // ── 赞赏码保存完成弹窗 ──
-            AnimatedOverlayPresence(target = donationSavedDir) { dir ->
-                BlancallAlertDialog(
-                    onDismissRequest = { donationSavedDir = null },
-                    title = {
-                        Text(stringResource(com.ilyskyo.blancall.R.string.donation_saved_title),
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface)
-                    },
-                    text = {
-                        Text(stringResource(com.ilyskyo.blancall.R.string.donation_saved_body, dir),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    },
-                    confirmButton = {
-                        TextButton(onClick = {
-                            donationSavedDir = null
-                            launchWeChat(donationContext)
-                        }) { Text(stringResource(com.ilyskyo.blancall.R.string.donation_open_wechat)) }
-                    },
-                    dismissButton = {
-                        TextButton(onClick = { donationSavedDir = null }) {
-                            Text(stringResource(com.ilyskyo.blancall.R.string.done))
-                        }
-                    }
-                )
-            }
-
-            // ── 版本号 ──
-            val context = LocalContext.current
-            val versionName = remember {
-                runCatching {
-                    @Suppress("DEPRECATION")
-                    context.packageManager.getPackageInfo(context.packageName, 0).versionName
-                }.getOrNull() ?: ""
-            }
-            Spacer(Modifier.height(24.dp))
-            Text(
-                "Blancall v$versionName",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                modifier = Modifier.fillMaxWidth(),
-                textAlign = TextAlign.Center
-            )
-
-            // ── 隐私政策入口（可随时再次查看）──
-            var showLegalDialog by remember { mutableStateOf(false) }
-            var privacyText by remember { mutableStateOf("") }
-            LaunchedEffect(Unit) {
-                privacyText = withContext(Dispatchers.IO) {
-                    runCatching {
-                        context.assets.open("PRIVACY.md").bufferedReader().use { it.readText() }
-                    }.getOrDefault("")
-                }
-            }
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth(),
-                horizontalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    stringResource(com.ilyskyo.blancall.R.string.privacy_policy),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier
-                        .pressClick {
-                            showLegalDialog = true
-                        }
-                        .padding(top = 6.dp, bottom = 8.dp)
-                )
-            }
-
-            if (showLegalDialog) {
-                BlancallAlertDialog(
-                    onDismissRequest = { showLegalDialog = false },
-                    shape = SmoothRoundedCornerShape(28.dp),
-                    containerColor = MaterialTheme.colorScheme.surface,
-                    title = {
-                        Column(Modifier.padding(top = 4.dp)) {
-                            Text(stringResource(com.ilyskyo.blancall.R.string.privacy_policy),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface)
-                            Spacer(Modifier.height(2.dp))
-                            Text(stringResource(com.ilyskyo.blancall.R.string.privacy_dialog_subtitle),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        }
-                    },
-                    text = {
-                        Column {
-                            Spacer(Modifier.height(8.dp))
-                            // 圆角卡片容器内滚动查看（assets/PRIVACY.md）
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(SmoothRoundedCornerShape(16.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
-                                    .heightIn(max = 420.dp)
-                                    .verticalScroll(rememberScrollState())
-                                    .padding(horizontal = 14.dp, vertical = 10.dp)
-                            ) {
-                                MarkdownText(text = privacyText)
+                                AppIcon(
+                                    AppIconKind.ChevronRight,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
-                    },
-                    confirmButton = {
-                        TextButton(onClick = { showLegalDialog = false }) {
-                            Text(stringResource(com.ilyskyo.blancall.R.string.close), color = MaterialTheme.colorScheme.primary)
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                if (showSection(SettingsGroup.DATA)) {
+                    // ── 数据（学习数据整机备份，换机/重装可一键迁移） ──
+                    SettingsSectionTitle(R.string.data_section, visible = sectionTitlesVisible)
+
+                    GlassCard(
+                        backdrop = false,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = SmoothRoundedCornerShape(14.dp)
+                    ) {
+                        Column(Modifier.padding(4.dp)) {
+                            // 体积可见性：只报数 + 超预算时给一句提示，不做任何删除动作。
+                            // 没有记录文件时整行连同分隔线一起不出现 —— 显示「当前 0 B」会被读成
+                            // 「有记录但很小」，而事实是「还没有记录」。
+                            recordsSizeBytes?.let { size ->
+                                Row(
+                                    Modifier.padding(horizontal = 16.dp, vertical = 10.dp).fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text(stringResource(com.ilyskyo.blancall.R.string.data_records_size_title),
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = MaterialTheme.colorScheme.onSurface)
+                                        Text(
+                                            stringResource(com.ilyskyo.blancall.R.string.data_records_size_value,
+                                                formatFileSize(size)),
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.padding(end = 16.dp)
+                                        )
+                                        if (size >= RECORDS_SIZE_BUDGET_BYTES) {
+                                            Spacer(Modifier.height(2.dp))
+                                            Text(stringResource(com.ilyskyo.blancall.R.string.data_records_size_warn),
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.tertiary,
+                                                modifier = Modifier.padding(end = 16.dp))
+                                        }
+                                    }
+                                    // 归档出口（审计 2.2-15）：只在记录多到能归档时才做动作；
+                                    // 数量不足时按钮仍在（教用户有这个能力），点击给一句「暂无需归档」
+                                    TextButton(onClick = {
+                                        backupScope.launch {
+                                            val total = withContext(Dispatchers.IO) {
+                                                archiveRecordRepo.awaitLoaded()
+                                                archiveRecordRepo.records.value.size
+                                            }
+                                            archiveCandidateCount =
+                                                (total - RecordRepository.ARCHIVE_KEEP_RECENT).coerceAtLeast(0)
+                                            if (archiveCandidateCount <= 0) {
+                                                Toast.makeText(
+                                                    backupContext,
+                                                    backupResources.getString(com.ilyskyo.blancall.R.string.data_archive_none),
+                                                    Toast.LENGTH_LONG
+                                                ).show()
+                                            } else {
+                                                archiveDialogVisible = true
+                                            }
+                                        }
+                                    }) {
+                                        Text(stringResource(com.ilyskyo.blancall.R.string.data_archive_action))
+                                    }
+                                }
+
+                                HorizontalDivider(
+                                    Modifier.padding(horizontal = 16.dp),
+                                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                                )
+                            }
+
+                            Row(
+                                Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.export_backup), style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface)
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.export_backup_desc),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(end = 16.dp))
+                                }
+                                TextButton(onClick = {
+                                    // 先选类别，再选文件：见页面顶部的 BackupPickerSheet
+                                    backupPickerVisible = true
+                                }) { Text(stringResource(com.ilyskyo.blancall.R.string.export_action)) }
+                            }
+
+                            HorizontalDivider(
+                                Modifier.padding(horizontal = 16.dp),
+                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                            )
+
+                            Row(
+                                Modifier.padding(horizontal = 16.dp, vertical = 4.dp).fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.import_backup), style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface)
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.import_backup_desc),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(end = 16.dp))
+                                }
+                                TextButton(onClick = {
+                                    // 放开 MIME 过滤：部分文件管理器返回的备份类型不固定，
+                                    // 内容合法性由导入时的备份清单校验兜底
+                                    backupImportLauncher.launch(arrayOf("*/*"))
+                                }) { Text(stringResource(com.ilyskyo.blancall.R.string.import_action)) }
+                            }
                         }
                     }
-                )
+
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                if (showSection(SettingsGroup.EXTENSIONS)) {
+                    // ── 拓展功能 ──
+                    SettingsSectionTitle(R.string.extensions, visible = sectionTitlesVisible)
+
+                    GlassCard(
+                        backdrop = false,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = SmoothRoundedCornerShape(14.dp)
+                    ) {
+                        // ── 内置素材库：多库各自可启用，未来可继续追加 ──
+                        Text(stringResource(com.ilyskyo.blancall.R.string.built_in_library), style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
+                        val enabledSet by AppPrefs.builtInLibraryKeysFlow.collectAsState()
+                        Row(
+                            Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(stringResource(com.ilyskyo.blancall.R.string.western_thoughts), style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface)
+                            }
+                            GlassSwitch(
+                                checked = "western" in enabledSet,
+                                onCheckedChange = { AppPrefs.setLibraryEnabled("western", it) }
+                            )
+                        }
+                        Row(
+                            Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(stringResource(com.ilyskyo.blancall.R.string.library_gaokao), style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface)
+                            }
+                            GlassSwitch(
+                                checked = "gaokao" in enabledSet,
+                                onCheckedChange = { AppPrefs.setLibraryEnabled("gaokao", it) }
+                            )
+                        }
+                        // 预留更多库：在此 Row 之后追加即可（如化学句子大全）
+
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                        )
+                        // 内容包：用户自己的 zip（txt/md + 清单），可浏览、可一键全文导入
+                        Row(
+                            Modifier.padding(horizontal = 16.dp, vertical = 10.dp).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    stringResource(com.ilyskyo.blancall.R.string.content_pack_title),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    stringResource(com.ilyskyo.blancall.R.string.content_pack_settings_desc),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(end = 16.dp)
+                                )
+                            }
+                            GlassButton(
+                                onClick = { navController.navigateOnce("content_packs") },
+                                modifier = Modifier.height(34.dp)
+                            ) {
+                                Text(
+                                    stringResource(com.ilyskyo.blancall.R.string.import_action),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                        // 数据互换：人类可读 JSON 导出 + CSV 回灌
+                        Row(
+                            Modifier.padding(horizontal = 16.dp, vertical = 10.dp).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    stringResource(com.ilyskyo.blancall.R.string.interchange_title),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    stringResource(com.ilyskyo.blancall.R.string.interchange_settings_desc),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(end = 16.dp)
+                                )
+                            }
+                            GlassButton(
+                                onClick = { navController.navigateOnce("data_interchange") },
+                                modifier = Modifier.height(34.dp)
+                            ) {
+                                Text(
+                                    stringResource(com.ilyskyo.blancall.R.string.open),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                if (showSection(SettingsGroup.ABOUT)) {
+                    // ── 关于 ──
+                    SettingsSectionTitle(R.string.about_section, visible = sectionTitlesVisible)
+
+                    GlassCard(
+                        backdrop = false,
+                        modifier = Modifier.fillMaxWidth(),
+                        shape = SmoothRoundedCornerShape(14.dp)
+                    ) {
+                        Column(Modifier.padding(16.dp)) {
+                            Text("Blancall", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface)
+                            Spacer(Modifier.height(2.dp))
+                            Text("Fill the blank, recall the knowledge.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary)
+                            Spacer(Modifier.height(6.dp))
+                            Text(stringResource(com.ilyskyo.blancall.R.string.app_tagline),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Spacer(Modifier.height(6.dp))
+                            Text(stringResource(com.ilyskyo.blancall.R.string.app_features_line),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f))
+                        }
+                    }
+
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                if (showSection(SettingsGroup.DONATION)) {
+                    // ── 赞赏区 ──
+                    // 整块可被「隐藏该区域」收起。隐藏态是**会话级**的（SettingsSessionState，
+                    // 只在内存里，不落盘）：本次使用不再出现，软件重新启动后自动恢复。
+                    if (!SettingsSessionState.donationHidden) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            // 二级页里标题栏已经写着「支持 Blancall」，这一行只留右侧动作按钮；
+                            // 单子项时 SpaceBetween 会把按钮推到左边，所以按是否显示标题切排列
+                            horizontalArrangement = if (sectionTitlesVisible) Arrangement.SpaceBetween
+                            else Arrangement.End,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            if (sectionTitlesVisible) {
+                                Text(stringResource(com.ilyskyo.blancall.R.string.donation_heading), style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.primary)
+                            }
+                            // 圆圈按钮：右边缘与下方卡片的右边框对齐，提示这一行可以点
+                            Box {
+                                Box(
+                                    modifier = Modifier
+                                        .size(26.dp)
+                                        .clip(CircleShape)
+                                        .border(
+                                            1.dp,
+                                            MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
+                                            CircleShape
+                                        )
+                                        .pressClick(tier = PressTier.Icon) { showDonationMenu = true },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    AppIcon(
+                                        kind = AppIconKind.MoreVert,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp),
+                                        contentDescription = stringResource(com.ilyskyo.blancall.R.string.more)
+                                    )
+                                }
+                                GlassDropdownMenu(
+                                    expanded = showDonationMenu,
+                                    onDismissRequest = { showDonationMenu = false }
+                                ) {
+                                    GlassMenuItem(
+                                        onClick = {
+                                            showDonationMenu = false
+                                            SettingsSessionState.donationHidden = true
+                                            // 二级页里藏掉的正是这一页的全部内容：留在原地会看到一片空白
+                                            activeGroupId = null
+                                        },
+                                        label = {
+                                            Column {
+                                                Text(stringResource(com.ilyskyo.blancall.R.string.donation_hide),
+                                                    style = MaterialTheme.typography.bodyMedium,
+                                                    color = MaterialTheme.colorScheme.onSurface)
+                                                Spacer(Modifier.height(2.dp))
+                                                Text(stringResource(com.ilyskyo.blancall.R.string.donation_hide_hint),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                        }
+                                    )
+                                    GlassMenuItem(
+                                        onClick = {
+                                            showDonationMenu = false
+                                            startSaveDonationQr()
+                                        },
+                                        label = {
+                                            Text(stringResource(com.ilyskyo.blancall.R.string.donation_save_qr),
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurface)
+                                        }
+                                    )
+                                }
+                            }
+                        }
+
+                        GlassCard(
+                            backdrop = false,
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = SmoothRoundedCornerShape(14.dp)
+                        ) {
+                            val qrSide = if (LocalIsLargeScreen) 200.dp else 168.dp
+                            Column(
+                                modifier = Modifier.padding(20.dp).fillMaxWidth(),
+                                horizontalAlignment = Alignment.CenterHorizontally
+                            ) {
+                                Text(stringResource(com.ilyskyo.blancall.R.string.donation_statement),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    textAlign = TextAlign.Center)
+                                Spacer(Modifier.height(6.dp))
+                                Text(stringResource(com.ilyskyo.blancall.R.string.donation_invite),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
+                                    textAlign = TextAlign.Center)
+                                Spacer(Modifier.height(16.dp))
+                                // 二维码必须「白底黑码」才能被相机识别：这里的 Color.White 是刚性要求，
+                                // 不要换成 colorScheme.surface 或半透明白，深色模式下会掉对比度导致扫不出。
+                                // clip 必须写在 background 之前，否则圆角不生效（background(shape) 只画底、不裁内容）。
+                                Box(
+                                    modifier = Modifier
+                                        .size(qrSide)
+                                        .clip(SmoothRoundedCornerShape(14.dp))
+                                        .background(Color.White)
+                                ) {
+                                    Image(
+                                        painter = painterResource(id = R.drawable.appreciation_qr_card),
+                                        contentDescription = stringResource(com.ilyskyo.blancall.R.string.donation_qr),
+                                        modifier = Modifier.fillMaxSize(),
+                                        contentScale = ContentScale.Fit
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // ── 赞赏码保存完成弹窗 ──
+                    AnimatedOverlayPresence(target = donationSavedDir) { dir ->
+                        BlancallAlertDialog(
+                            onDismissRequest = { donationSavedDir = null },
+                            title = {
+                                Text(stringResource(com.ilyskyo.blancall.R.string.donation_saved_title),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurface)
+                            },
+                            text = {
+                                Text(stringResource(com.ilyskyo.blancall.R.string.donation_saved_body, dir),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    donationSavedDir = null
+                                    launchWeChat(donationContext)
+                                }) { Text(stringResource(com.ilyskyo.blancall.R.string.donation_open_wechat)) }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { donationSavedDir = null }) {
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.done))
+                                }
+                            }
+                        )
+                    }
+                }
+
+                // 版本号与隐私政策都要用 context（隐私那一段要读 assets/PRIVACY.md），
+                // 两段分属两个渲染门、不再共享作用域，所以在门的上一层取一次
+                val context = LocalContext.current
+
+                if (showSection(SettingsGroup.ABOUT)) {
+                    // ── 版本号 ──
+                    val versionName = remember {
+                        runCatching {
+                            @Suppress("DEPRECATION")
+                            context.packageManager.getPackageInfo(context.packageName, 0).versionName
+                        }.getOrNull() ?: ""
+                    }
+                    Spacer(Modifier.height(24.dp))
+                    Text(
+                        "Blancall v$versionName",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.fillMaxWidth(),
+                        textAlign = TextAlign.Center
+                    )
+                }
+
+                if (showSection(SettingsGroup.ABOUT)) {
+                    // ── 隐私政策入口（可随时再次查看）──
+                    var showLegalDialog by remember { mutableStateOf(false) }
+                    var privacyText by remember { mutableStateOf("") }
+                    LaunchedEffect(Unit) {
+                        privacyText = withContext(Dispatchers.IO) {
+                            runCatching {
+                                context.assets.open("PRIVACY.md").bufferedReader().use { it.readText() }
+                            }.getOrDefault("")
+                        }
+                    }
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            stringResource(com.ilyskyo.blancall.R.string.privacy_policy),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier
+                                .pressClick {
+                                    showLegalDialog = true
+                                }
+                                .padding(top = 6.dp, bottom = 8.dp)
+                        )
+                    }
+
+                    if (showLegalDialog) {
+                        BlancallAlertDialog(
+                            onDismissRequest = { showLegalDialog = false },
+                            shape = SmoothRoundedCornerShape(28.dp),
+                            containerColor = MaterialTheme.colorScheme.surface,
+                            title = {
+                                Column(Modifier.padding(top = 4.dp)) {
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.privacy_policy),
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurface)
+                                    Spacer(Modifier.height(2.dp))
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.privacy_dialog_subtitle),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            },
+                            text = {
+                                Column {
+                                    Spacer(Modifier.height(8.dp))
+                                    // 圆角卡片容器内滚动查看（assets/PRIVACY.md）
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(SmoothRoundedCornerShape(16.dp))
+                                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f))
+                                            .heightIn(max = 420.dp)
+                                            .verticalScroll(rememberScrollState())
+                                            .padding(horizontal = 14.dp, vertical = 10.dp)
+                                    ) {
+                                        MarkdownText(text = privacyText)
+                                    }
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(onClick = { showLegalDialog = false }) {
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.close), color = MaterialTheme.colorScheme.primary)
+                                }
+                            }
+                        )
+                    }
+                }
             }
         }
     }
@@ -2076,6 +2202,29 @@ private val hapticLevelChoices = listOf(
     "strong" to com.ilyskyo.blancall.R.string.haptic_strong,
     "off" to com.ilyskyo.blancall.R.string.haptic_off,
 )
+
+/**
+ * 设置分区标题。
+ *
+ * 只在「1 级」写标题：完整布局与紧凑布局的顶层，标题把分区串成目录；进了 2 级页之后，
+ * 标题栏已经写着同一个分区名，正文里再写一遍等于同一句话说两次。
+ * 判定由调用点传 [visible]，组件本身不猜 —— 这条规则将来要改也只改一处，不会散在 12 个分区里。
+ */
+@Composable
+private fun SettingsSectionTitle(titleRes: Int, visible: Boolean) {
+    SettingsSectionTitle(stringResource(titleRes), visible)
+}
+
+@Composable
+private fun SettingsSectionTitle(text: String, visible: Boolean) {
+    if (!visible) return
+    Text(
+        text = text,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.primary
+    )
+}
 
 /**
  * 单选项行。

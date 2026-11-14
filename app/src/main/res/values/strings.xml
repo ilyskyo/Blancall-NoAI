@@ -56,6 +56,18 @@
     <string name="import_action">导入</string>
     <string name="back">返回</string>
     <string name="settings">设置</string>
+    <!-- ── 设置页布局：紧凑（概览 + 二级页）/ 完整（分区平铺）── -->
+    <string name="settings_layout_compact">紧凑布局</string>
+    <string name="settings_layout_full">完整布局</string>
+    <string name="settings_layout_hint">长按标题可切换布局</string>
+    <string name="settings_layout_hint_sub">布局会记住，下次打开还是这个样子</string>
+    <string name="settings_hint_got_it">知道了</string>
+    <string name="settings_search_hint">搜索设置项</string>
+    <string name="settings_search_empty">没有匹配的设置项</string>
+    <string name="settings_value_on">已开启</string>
+    <string name="settings_value_off">已关闭</string>
+    <string name="settings_count_on">%1$d 项开启</string>
+    <string name="settings_item_theme_mode">深浅模式</string>
     <string name="add_card">添加卡片</string>
     <string name="edit_card_config">编辑卡片配置</string>
     <string name="delete_card">删除卡片</string>
@@ -903,6 +915,9 @@
     </plurals>
     <plurals name="a11y_calendar_heatmap">
         <item quantity="other">学习日历，%1$d 天，共 %2$d 次练习；每行一个星期几，每列一个星期</item>
+    </plurals>
+<plurals name="a11y_calendar_year_heatmap">
+        <item quantity="other">学习日历，%1$d 天，共 %2$d 次练习；每行一个月，每列是该月的第几天</item>
     </plurals>
     <string name="achievement_unlocked_notice">解锁新成就：%1$s</string>
     <string name="achievement_earned_on">获得于 %1$s</string>

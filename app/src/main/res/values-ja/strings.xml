@@ -56,6 +56,18 @@
     <string name="import_action">取り込み</string>
     <string name="back">戻る</string>
     <string name="settings">設定</string>
+    <!-- ── 設定画面のレイアウト：コンパクト（一覧＋詳細）/ 全体（区画を並べる）── -->
+    <string name="settings_layout_compact">コンパクト表示</string>
+    <string name="settings_layout_full">全体表示</string>
+    <string name="settings_layout_hint">タイトルを長押しすると表示を切り替えられます</string>
+    <string name="settings_layout_hint_sub">選んだ表示は次回も使われます</string>
+    <string name="settings_hint_got_it">わかりました</string>
+    <string name="settings_search_hint">設定を検索</string>
+    <string name="settings_search_empty">一致する設定がありません</string>
+    <string name="settings_value_on">オン</string>
+    <string name="settings_value_off">オフ</string>
+    <string name="settings_count_on">%1$d 件オン</string>
+    <string name="settings_item_theme_mode">ライト/ダーク</string>
     <string name="add_card">カードを追加</string>
     <string name="edit_card_config">カード設定を編集</string>
     <string name="delete_card">カードを削除</string>
@@ -902,6 +914,9 @@
     </plurals>
     <plurals name="a11y_calendar_heatmap">
         <item quantity="other">学習カレンダー：%1$d 日、合計 %2$d 回。行は曜日、列は週</item>
+    </plurals>
+<plurals name="a11y_calendar_year_heatmap">
+        <item quantity="other">学習カレンダー：%1$d 日、合計 %2$d 回。行は月、列はその月の日</item>
     </plurals>
     <string name="achievement_unlocked_notice">実績を解除しました：%1$s</string>
     <string name="achievement_earned_on">獲得日：%1$s</string>

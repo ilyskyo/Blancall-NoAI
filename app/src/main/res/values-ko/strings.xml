@@ -56,6 +56,18 @@
     <string name="import_action">가져오기</string>
     <string name="back">뒤로</string>
     <string name="settings">설정</string>
+    <!-- ── 설정 화면 레이아웃: 컴팩트(개요 + 상세) / 전체(구역 나열) ── -->
+    <string name="settings_layout_compact">컴팩트 보기</string>
+    <string name="settings_layout_full">전체 보기</string>
+    <string name="settings_layout_hint">제목을 길게 누르면 보기가 전환됩니다</string>
+    <string name="settings_layout_hint_sub">선택한 보기는 다음에도 유지됩니다</string>
+    <string name="settings_hint_got_it">확인</string>
+    <string name="settings_search_hint">설정 검색</string>
+    <string name="settings_search_empty">일치하는 설정이 없습니다</string>
+    <string name="settings_value_on">켜짐</string>
+    <string name="settings_value_off">꺼짐</string>
+    <string name="settings_count_on">%1$d개 켜짐</string>
+    <string name="settings_item_theme_mode">라이트/다크</string>
     <string name="add_card">카드 추가</string>
     <string name="edit_card_config">카드 설정 편집</string>
     <string name="delete_card">카드 삭제</string>
@@ -902,6 +914,9 @@
     </plurals>
     <plurals name="a11y_calendar_heatmap">
         <item quantity="other">학습 캘린더: %1$d일, 총 %2$d회. 행은 요일, 열은 주</item>
+    </plurals>
+<plurals name="a11y_calendar_year_heatmap">
+        <item quantity="other">학습 캘린더: %1$d일, 총 %2$d회. 행은 월, 열은 그 달의 날짜</item>
     </plurals>
     <string name="achievement_unlocked_notice">새 업적 달성: %1$s</string>
     <string name="achievement_earned_on">획득일: %1$s</string>

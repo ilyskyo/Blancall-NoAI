@@ -4,6 +4,7 @@
 package com.ilyskyo.blancall.algorithm
 
 import java.time.DayOfWeek
+import java.time.YearMonth
 import java.time.temporal.ChronoUnit
 import java.time.LocalDate
 
@@ -142,5 +143,72 @@ fun heatmapCellMetrics(weeks: Int, availableWidth: Float): HeatmapMetrics {
     val fit = (availableWidth - gap * (weeks - 1)).coerceAtLeast(0f) / weeks
     val cell = if (fit >= HEATMAP_MAX_CELL_DP) HEATMAP_MAX_CELL_DP
     else fit.coerceAtLeast(HEATMAP_MIN_CELL_DP)
+    return HeatmapMetrics(cell = cell, gap = gap)
+}
+
+// ───────────────────────── 一年档：月 × 日矩阵 ─────────────────────────
+
+/**
+ * 一年档的一行 = 一个自然月，[cells] 固定 31 格（列 0 = 1 号）。
+ *
+ * 超出该月天数（2 月 30 日）、或不在所选区间内的格子为 null —— 与周列版同一套约定：
+ * null = 不画，0 = 那天真的练了 0 次。
+ */
+data class HeatmapMonthRow(val yearMonth: YearMonth, val cells: List<HeatmapCell?>)
+
+/** 一年档的分界：超过这个天数就换成「月 × 日」矩阵，见 [heatmapYearMatrix] 的注释 */
+const val HEATMAP_YEAR_MATRIX_MIN_DAYS = 200
+
+/**
+ * 把一年（或任意长区间）铺成「行 = 月份、列 = 该月第几天」的矩阵。
+ *
+ * 为什么一年档不能沿用周列版：53 列要塞进手机卡片 ~280dp 的可用宽度，
+ * 每格只剩 4~5dp + 1dp 间距，画出来是一整片看不出边界的噪点，行标签更是
+ * 8sp 的字挤进 5dp 行高、七行直接叠成一坨竖线（2026-11-11 用户报「近一年很丑」）。
+ * 换成 31 列 × 12~13 行后每格能到 8dp、整张图高 110~130dp，月份还自带行标签，
+ * 密度分布（哪个月练得多）一眼可见 —— 一年档真正要看的就是这个。
+ *
+ * 行数由区间首尾所在月决定：近一年通常跨 13 个自然月（如 2025-11 → 2026-11）。
+ */
+fun heatmapYearMatrix(range: DateRange, countOn: (LocalDate) -> Int): List<HeatmapMonthRow> {
+    val firstMonth = YearMonth.from(range.start)
+    val lastMonth = YearMonth.from(range.end)
+    val months = ChronoUnit.MONTHS.between(firstMonth, lastMonth).toInt() + 1
+    return List(months) { offset ->
+        val ym = firstMonth.plusMonths(offset.toLong())
+        val cells = List(31) { dayIndex ->
+            val day = dayIndex + 1
+            if (day > ym.lengthOfMonth()) {
+                null
+            } else {
+                val date = ym.atDay(day)
+                if (date in range) HeatmapCell(date, countOn(date)) else null
+            }
+        }
+        HeatmapMonthRow(ym, cells)
+    }
+}
+
+/** 一年档单格边长上限（dp）：31 列都吃得下时也别把格子撑成积木 */
+private const val YEAR_MAX_CELL_DP = 10f
+
+/** 一年档单格边长下限（dp）：再小就和周列版一样糊了 */
+private const val YEAR_MIN_CELL_DP = 3f
+
+/** 一年档格子间距（dp）：格子在 6~9dp 区间时 1.5dp 的缝最清楚，不糊成一片也不散开 */
+private const val YEAR_CELL_GAP_DP = 1.5f
+
+/**
+ * 一年档的格子尺寸：横向固定 31 列（不是「区间内天数」，因为矩阵列就是月内日期）。
+ *
+ * 与 [heatmapCellMetrics] 分开是因为上限不同：周列版短区间允许 16dp 的大格，
+ * 而这里 31 列天然吃不满宽度，格子越大越像积木，10dp 封顶。
+ *
+ * @param availableWidth 月份标签列之外可用于网格的宽度（dp）
+ */
+fun heatmapYearCellMetrics(availableWidth: Float): HeatmapMetrics {
+    val gap = YEAR_CELL_GAP_DP
+    val fit = (availableWidth - gap * 30f).coerceAtLeast(0f) / 31f
+    val cell = fit.coerceIn(YEAR_MIN_CELL_DP, YEAR_MAX_CELL_DP)
     return HeatmapMetrics(cell = cell, gap = gap)
 }

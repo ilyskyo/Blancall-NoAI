@@ -16,6 +16,14 @@ The standard (NoAI) edition **contains no AI modules whatsoever**: no AI integra
 
 ## Screenshots
 
+| Home | My articles |
+|:---:|:---:|
+| <img src="docs/screenshots/home.png" width="320" alt="Home"> | <img src="docs/screenshots/articles.png" width="320" alt="My articles"> |
+
+| Practice modes | Mistakes |
+|:---:|:---:|
+| <img src="docs/screenshots/modes.png" width="320" alt="Practice modes"> | <img src="docs/screenshots/mistakes.png" width="320" alt="Mistakes"> |
+
 | Article page | Practice |
 |:---:|:---:|
 | <img src="docs/screenshots/reader.png" width="320" alt="Article page"> | <img src="docs/screenshots/practice.png" width="320" alt="Practice"> |

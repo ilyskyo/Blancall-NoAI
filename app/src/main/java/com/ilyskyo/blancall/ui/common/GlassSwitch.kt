@@ -50,7 +50,9 @@ fun GlassSwitch(
     val trackColor by animateColorAsState(
         targetValue = when {
             checked -> accent
-            isDark -> Color(0xFF3A3A3C)
+            // 必须比最亮的深色面（菜单/浮层 surfaceContainerHigh #3A3A3C）再亮一档：
+            // 同色时轨道与浮层融为一体，关态开关只剩一个悬空的白色圆点。
+            isDark -> Color(0xFF636366)
             else -> Color(0xFFE3E3E8)
         },
         // 底色是**颜色**，按词表走 tween（原来是一条裸 `spring(stiffness = 900f)` ——
