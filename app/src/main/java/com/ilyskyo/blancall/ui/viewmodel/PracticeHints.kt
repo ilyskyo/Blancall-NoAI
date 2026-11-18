@@ -28,6 +28,21 @@ import kotlinx.coroutines.launch
                     if (cur.length >= expected.length) break
                     val ch = expected[cur.length]                       // 下一个应填的字
                     val v0 = blankInputVersions[blankIndex] ?: 0
+                    // ── 单字空：不淡显，到点直接强填 ──
+                    // 淡显的意义是「给半个线索让你有东西可接」，一个字的答案没有「半个」——
+                    // 把那个字淡出来等于直接把答案写出来，弱提示退化成给答案。
+                    // 所以这类空只剩强填：等到多字空「淡显完成」的那个时刻直接填上，然后收工。
+                    if (!fadesInFirstChar(expected.length)) {
+                        delay(HINT_SINGLE_CHAR_FILL_MS)
+                        if (v0 != (blankInputVersions[blankIndex] ?: 0)) break
+                        if (currentAnswerText(blankIndex).isEmpty()) {
+                            setAnswerText(blankIndex, ch.toString())
+                            _strongHintCount.value += 1
+                            // 记下这个空：提交时整篇评级要封顶到 HARD（见 resolveRating）
+                            strongHintedBlanks += blankIndex
+                        }
+                        break
+                    }
                     delay(if (firstWait) HINT_FIRST_WAIT_MS else 0L)    // 首次 10s；强填后下一字立即淡显
                     if (v0 != (blankInputVersions[blankIndex] ?: 0)) break  // 用户新输入打断（外层会重启）
                     // 弱提示：淡显下一字（UI 端 5s 淡入动画）
@@ -238,4 +253,22 @@ internal const val HINT_FIRST_WAIT_MS = 10_000L
 internal const val HINT_FADE_MS = 5_000L
 /** 淡显完成后再等待时长（到点未输入则自动填入） */
 internal const val HINT_AFTER_WAIT_MS = 5_000L
+
+/**
+ * 单字空（答案只有 1 个字）从开始到强填的等待。
+ *
+ * 刻意等于「首次静默 + 淡显时长」：多字空在这个时刻刚好把提示字淡完，单字空则直接填上 ——
+ * **帮助到达的时间点一致**，只是单字空不给那半个线索。比多字空的 20s（再 +5s 观察）早 5 秒：
+ * 一个字的答案多等 5 秒也变不出线索来。
+ *
+ * 为什么单独一条：字词挖空的空大多是 1 个字，若照多字空那样先淡显首字，
+ * 「弱提示」就等于把整个答案写出来 —— 那不是提示，是给答案。
+ */
+internal const val HINT_SINGLE_CHAR_FILL_MS = HINT_FIRST_WAIT_MS + HINT_FADE_MS
+
+/**
+ * 这个空要不要先淡显首字：只有 1 个字的答案不给淡显（淡显＝给答案）。
+ * 句子挖空的单字分句同样适用 —— 判据是「答案长度」，不是模式。
+ */
+internal fun fadesInFirstChar(expectedLength: Int): Boolean = expectedLength > 1
 

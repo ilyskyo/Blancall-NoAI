@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Blancall Pro</string>
+    <string name="app_name">Blancall</string>
     <string name="nav_home">ホーム</string>
     <string name="nav_articles">マイ記事</string>
     <string name="nav_stats">データ</string>
@@ -67,6 +67,11 @@
     <string name="settings_value_on">オン</string>
     <string name="settings_value_off">オフ</string>
     <string name="settings_count_on">%1$d 件オン</string>
+    <string name="settings_entry_study">学習とリマインダー</string>
+    <string name="settings_entry_reading">読書と練習</string>
+    <string name="settings_entry_content">コンテンツとデータ</string>
+    <string name="settings_entry_about">このアプリについて</string>
+    <string name="settings_group_more">他 %1$d 件</string>
     <string name="settings_item_theme_mode">ライト/ダーク</string>
     <string name="add_card">カードを追加</string>
     <string name="edit_card_config">カード設定を編集</string>
@@ -354,15 +359,16 @@
     <string name="hint_punctuation_toggle">句読点のヒント</string>
     <string name="hint_punctuation_desc">空欄内の読点などをそのまま表示（例：「＿＿，＿＿」）</string>
     <string name="hint_content_toggle">内容のヒント</string>
-    <string name="hint_content_desc">10 秒後に頭文字を淡く表示し、さらに 5 秒で自動入力</string>
-    <string name="hint_preview_both">空欄に「3 字」／10 秒で頭文字、15 秒で補完</string>
+    <string name="hint_content_desc">10 秒後に次の 1 文字を淡く表示、20 秒で入力</string>
+    <string name="hint_content_desc_reverse">全文の書き取り：10 秒後に次の 1 文字、20 秒で入力</string>
+    <string name="hint_content_desc_word">10 秒後に次の 1 文字を淡く表示、20 秒で入力。1 文字の空欄は 15 秒で直接入力</string>
+    <string name="hint_preview_both">空欄に「3 字」／10 秒で次の 1 文字、20 秒で入力（1 文字の空欄は 15 秒）</string>
     <string name="hint_preview_length">空欄に「3 字」／文字は出さない</string>
-    <string name="hint_preview_content">空欄は番号のみ／10 秒で頭文字</string>
-    <string name="hint_preview_none">空欄は番号のみ、ヒントなし</string>
-    <string name="hint_preview_punct">空欄内の句読点を表示（入力する文字は出しません）</string>
+    <string name="hint_preview_content">空欄に文字数を出さない／10 秒で次の 1 文字、20 秒で入力</string>
+    <string name="hint_preview_none">空欄には何も出さない</string>
     <string name="coach_got_it">了解</string>
     <string name="coach_practice_more_title">ここを長押し</string>
-    <string name="coach_practice_more_body">文字数・句読点・内容のヒントを個別に切り替えられます。</string>
+    <string name="coach_practice_more_body">3 つのヒントは個別に切り替えできます（使える項目はモードで変わります）</string>
     <string name="coach_practice_title_title">タイトルを左右にドラッグ</string>
     <string name="coach_practice_title_body">文・単語・逆書きの 3 モードを素早く切り替えます。</string>
     <string name="coach_home_long_title">カードを長押し</string>
@@ -1380,6 +1386,20 @@
     <string name="font_mono">等幅</string>
     <string name="font_xwwk">霞鶩文楷</string>
     <string name="handwriting_segment_unrecognized">この区間は認識できませんでした。書き直せます。</string>
+
+    <string name="handwriting_symbol_bar">記号バーを表示</string>
+    <string name="handwriting_symbol_bar_desc">手書きエリア下のワンタップ記号行。オフにすると書き込み領域が広がります</string>
+    <string name="handwriting_symbols">記号バーの内容</string>
+    <string name="handwriting_symbols_desc">よく使う記号を選択。下の欄で独自の文字も追加できます</string>
+    <string name="handwriting_symbols_count">中国語 %1$d · 英語 %2$d</string>
+    <string name="handwriting_auto_commit_weak">低い確度でもそのまま確定</string>
+    <string name="handwriting_auto_commit_weak_desc">不確かな字で選択を止めません。複数字・難字の判定は残ります</string>
+    <string name="handwriting_symbols_sheet_title">記号バーの内容</string>
+    <string name="handwriting_symbols_cjk">中国語</string>
+    <string name="handwriting_symbols_latin">英語</string>
+    <string name="handwriting_symbols_add">追加の文字</string>
+    <string name="handwriting_symbols_add_hint">プリセットにない文字を入力</string>
+    <string name="handwriting_symbols_reset">既定に戻す</string>
     <string name="reminder_freq_daily">毎日</string>
     <string name="reminder_freq_five">週5日</string>
     <string name="reminder_freq_three">週3日</string>
@@ -1414,7 +1434,10 @@
     <!-- ── Std 欢迎页 ── -->
     <string name="welcome_tagline">空欄ではなく、思い出す。</string>
     <string name="welcome_privacy_body">Blancall は完全に本機で動作し、ネットワークに接続しません。個人情報を収集・送信・共有しません。</string>
-    <string name="welcome_developer">ilyskyo が開発し、無料で提供しています。</string>
+    <string name="welcome_developer_prefix">ilyskyo が開発し、</string>
+    <string name="welcome_developer_link">オープンソース</string>
+    <string name="welcome_developer_suffix">として無料で提供しています。</string>
+    <string name="welcome_link_failed">このリンクを開けるブラウザが見つかりません</string>
     <string name="welcome_support_prefix">お役に立てたなら、ぜひ</string>
     <string name="welcome_support_link">ここから開発者を支援してください</string>
     <string name="welcome_privacy_link">プライバシーポリシー</string>

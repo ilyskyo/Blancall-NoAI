@@ -13,6 +13,7 @@ import com.ilyskyo.blancall.algorithm.ArticleMemoryReads
 import com.ilyskyo.blancall.algorithm.MemoryModelConfig
 import com.ilyskyo.blancall.algorithm.PracticeCoverage
 import com.ilyskyo.blancall.algorithm.BlancallGenerator
+import com.ilyskyo.blancall.algorithm.ClozeTokens
 import com.ilyskyo.blancall.algorithm.CrossTextReview
 import com.ilyskyo.blancall.algorithm.DictationMistakes
 import com.ilyskyo.blancall.algorithm.DictationScorer
@@ -1226,7 +1227,12 @@ class PracticeViewModel(application: Application) : AndroidViewModel(application
         val bySentence = blanks.filter { it.s in sentences.indices }
             .groupBy { it.s }
             .mapValues { (s, list) ->
-                RangeOps.normalizeClampedRanges(sentences[s].length, list.map { it.a until it.b })
+                val raw = list.map { it.a until it.b }
+                // 字词模式的空只吃实义字符：旧配置里躺着 `书》`、`红·楼`（编辑器旧实现把标点
+                // 并进前一个字），这里再收敛一次 —— 列表/首页卡片直接开练不会经过编辑器。
+                // 句子 / 反向模式保留原区间语义（整句、复句）。
+                if (modeStr == "WORD") ClozeTokens.contentRanges(sentences[s], raw)
+                else RangeOps.normalizeClampedRanges(sentences[s].length, raw)
             }
             .filterValues { it.isNotEmpty() }
         if (bySentence.isEmpty()) return false

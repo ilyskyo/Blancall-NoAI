@@ -342,6 +342,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
         derivedStateOf { dictationResult?.clauses?.sumOf { c -> c.count { !it.isWhitespace() } } ?: 0 }
     }
     val showHint by vm.showHint.collectAsStateWithLifecycle()
+    // 预览文案跟着开关实时变：把"组合"翻译成"你会看到什么"
     val hintPreview = stringResource(
         when {
             hintLength && showHint -> com.ilyskyo.blancall.R.string.hint_preview_both
@@ -350,10 +351,17 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
             else -> com.ilyskyo.blancall.R.string.hint_preview_none
         }
     )
-    // 标点提示不参与上面「字数 × 内容」的四组合，单独追加一行说明它此刻有没有在起作用
-    val hintPreviewPunct = if (hintPunctuation) {
-        stringResource(com.ilyskyo.blancall.R.string.hint_preview_punct)
-    } else null
+    // 内容提示的说明按模式分开写：字词挖空的空大多只有 1 个字（不淡显、15 秒直接补全），
+    // 反向默写是整段输入 —— 一句通用文案必然说错其中一种。
+    val hintContentDesc = stringResource(
+        when (mode) {
+            BlancallMode.WORD -> com.ilyskyo.blancall.R.string.hint_content_desc_word
+            BlancallMode.REVERSE -> com.ilyskyo.blancall.R.string.hint_content_desc_reverse
+            else -> com.ilyskyo.blancall.R.string.hint_content_desc
+        }
+    )
+    // 标点提示不再单独追加预览行：它与「标点提示」这一行自己的说明完全重复，
+    // 在英文/俄文里要多占三行，整套面板会被顶到必须滚动才看得全。
     val fontScale by vm.fontScale.collectAsStateWithLifecycle()
     val blankCountWarning by vm.blankCountWarning.collectAsStateWithLifecycle()
 
@@ -699,49 +707,58 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                             )
                         },
                     )
-                    GlassMenuItem(
-                        onClick = { vm.toggleHintLength() },
-                        label = {
-                            Column {
-                                Text(
-                                    stringResource(com.ilyskyo.blancall.R.string.hint_length_toggle),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface,
+                    // 字数提示：只对「按空作答」的模式有意义（句子 / 字词都是每个空旁标字数）。
+                    // 反向默写是整段输入，没有「这一空几个字」这回事 —— 摆在那里只是空转。
+                    if (mode != BlancallMode.REVERSE) {
+                        GlassMenuItem(
+                            onClick = { vm.toggleHintLength() },
+                            label = {
+                                Column {
+                                    Text(
+                                        stringResource(com.ilyskyo.blancall.R.string.hint_length_toggle),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                    )
+                                    Text(
+                                        stringResource(com.ilyskyo.blancall.R.string.hint_length_desc),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            },
+                            trailing = {
+                                GlassSwitch(checked = hintLength, onCheckedChange = { vm.toggleHintLength() })
+                            },
+                        )
+                    }
+                    // 标点提示只对「句子挖空」有意义 —— 只有那一模式会把分句间的标点卷进空里。
+                    // 字词挖空的空只覆盖实义字（标点留在正文里、始终看得见），反向默写按分句卡片
+                    // 挖一词，标点同样不进空；把开关摆在那里却按不动任何东西，比没有更糟。
+                    if (mode == BlancallMode.SENTENCE) {
+                        GlassMenuItem(
+                            onClick = { vm.toggleHintPunctuation() },
+                            label = {
+                                Column {
+                                    Text(
+                                        stringResource(com.ilyskyo.blancall.R.string.hint_punctuation_toggle),
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                    )
+                                    Text(
+                                        stringResource(com.ilyskyo.blancall.R.string.hint_punctuation_desc),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            },
+                            trailing = {
+                                GlassSwitch(
+                                    checked = hintPunctuation,
+                                    onCheckedChange = { vm.toggleHintPunctuation() }
                                 )
-                                Text(
-                                    stringResource(com.ilyskyo.blancall.R.string.hint_length_desc),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        },
-                        trailing = {
-                            GlassSwitch(checked = hintLength, onCheckedChange = { vm.toggleHintLength() })
-                        },
-                    )
-                    GlassMenuItem(
-                        onClick = { vm.toggleHintPunctuation() },
-                        label = {
-                            Column {
-                                Text(
-                                    stringResource(com.ilyskyo.blancall.R.string.hint_punctuation_toggle),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    color = MaterialTheme.colorScheme.onSurface,
-                                )
-                                Text(
-                                    stringResource(com.ilyskyo.blancall.R.string.hint_punctuation_desc),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        },
-                        trailing = {
-                            GlassSwitch(
-                                checked = hintPunctuation,
-                                onCheckedChange = { vm.toggleHintPunctuation() }
-                            )
-                        },
-                    )
+                            },
+                        )
+                    }
                     GlassMenuItem(
                         onClick = { vm.toggleHint() },
                         label = {
@@ -752,7 +769,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                                     color = MaterialTheme.colorScheme.onSurface,
                                 )
                                 Text(
-                                    stringResource(com.ilyskyo.blancall.R.string.hint_content_desc),
+                                    hintContentDesc,
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -762,27 +779,26 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                             GlassSwitch(checked = showHint, onCheckedChange = { vm.toggleHint() })
                         },
                     )
-                    GlassMenuDivider()
-                    GlassMenuItem(
-                        enabled = false,
-                        onClick = {},
-                        label = {
-                            Column {
-                                Text(
-                                    hintPreview,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                                if (hintPreviewPunct != null) {
+                    // 预览：把"开关的组合"翻译成"用户实际会看到什么"——
+                    // 光看开关名，很难想象"只开字数"和"同时开"的差别。
+                    // 反向默写只剩内容提示一个开关（字数/标点在这个模式都不存在），
+                    // 组合只有「给字 / 不给字」两种，开关说明已经说完了，不再重复。
+                    if (mode != BlancallMode.REVERSE) {
+                        GlassMenuDivider()
+                        GlassMenuItem(
+                            enabled = false,
+                            onClick = {},
+                            label = {
+                                Column {
                                     Text(
-                                        hintPreviewPunct,
+                                        hintPreview,
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
-                            }
-                        },
-                    )
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -967,6 +983,7 @@ fun PracticeScreen(navController: NavController, articleIds: List<Long>, initial
                             checkResults = checkResults,
                             isSubmitted = isSubmitted,
                             hintChars = hintChars,
+                            showBlankLength = hintLength,
                             weakHints = weakHintCount,
                             strongHints = strongHintCount,
                             onViewArticleData = viewArticleData,

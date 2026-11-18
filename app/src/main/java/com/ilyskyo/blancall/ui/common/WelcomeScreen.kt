@@ -3,6 +3,9 @@
 
 package com.ilyskyo.blancall.ui.common
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import com.ilyskyo.blancall.ui.common.pressClick
 import androidx.compose.foundation.Image
@@ -19,11 +22,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -101,8 +107,25 @@ fun WelcomeScreen(
                 textAlign = TextAlign.Center
             )
             Spacer(Modifier.height(12.dp))
+            // 开发者说明：「开源方式」是可点的 GitHub Releases 链接（本版仓库，可直接取 APK）
+            val devPrefix = stringResource(com.ilyskyo.blancall.R.string.welcome_developer_prefix)
+            val devLink = stringResource(com.ilyskyo.blancall.R.string.welcome_developer_link)
+            val devSuffix = stringResource(com.ilyskyo.blancall.R.string.welcome_developer_suffix)
+            val devLinkColor = MaterialTheme.colorScheme.primary
             Text(
-                stringResource(com.ilyskyo.blancall.R.string.welcome_developer),
+                buildAnnotatedString {
+                    append(devPrefix)
+                    withLink(
+                        LinkAnnotation.Clickable(
+                            tag = "github_releases",
+                            styles = TextLinkStyles(
+                                style = SpanStyle(color = devLinkColor, fontWeight = FontWeight.SemiBold)
+                            ),
+                            linkInteractionListener = { openGithubReleases(context) }
+                        )
+                    ) { append(devLink) }
+                    append(devSuffix)
+                },
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurface,
                 textAlign = TextAlign.Center
@@ -246,5 +269,28 @@ fun WelcomeScreen(
                 }
             }
         )
+    }
+}
+
+/** 本版（标准版）GitHub Releases 页：可下载 APK，也可取源码自行构建。 */
+private const val GITHUB_RELEASES_URL = "https://github.com/ilyskyo/Blancall-NoAI/releases"
+
+/**
+ * 打开 Releases 外链。
+ *
+ * 标准版未声明 INTERNET 权限，这里只发 ACTION_VIEW 交给系统浏览器去联网；
+ * 设备上没有可处理 http 的应用时 startActivity 会抛 ActivityNotFoundException，
+ * 捕获后给一句提示，绝不让欢迎页崩掉。
+ */
+private fun openGithubReleases(context: Context) {
+    val opened = runCatching {
+        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(GITHUB_RELEASES_URL)))
+    }.isSuccess
+    if (!opened) {
+        Toast.makeText(
+            context,
+            context.getString(R.string.welcome_link_failed),
+            Toast.LENGTH_SHORT
+        ).show()
     }
 }

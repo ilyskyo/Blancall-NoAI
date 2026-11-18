@@ -67,6 +67,11 @@
     <string name="settings_value_on">已开启</string>
     <string name="settings_value_off">已关闭</string>
     <string name="settings_count_on">%1$d 项开启</string>
+    <string name="settings_entry_study">学习与提醒</string>
+    <string name="settings_entry_reading">阅读与练习</string>
+    <string name="settings_entry_content">内容与数据</string>
+    <string name="settings_entry_about">关于与支持</string>
+    <string name="settings_group_more">另 %1$d 项</string>
     <string name="settings_item_theme_mode">深浅模式</string>
     <string name="add_card">添加卡片</string>
     <string name="edit_card_config">编辑卡片配置</string>
@@ -354,15 +359,16 @@
     <string name="hint_punctuation_toggle">标点提示</string>
     <string name="hint_punctuation_desc">空内的逗号、顿号等照原样显示（如「＿＿，＿＿」）</string>
     <string name="hint_content_toggle">内容提示</string>
-    <string name="hint_content_desc">停 10 秒淡显首字，再 5 秒自动补全</string>
-    <string name="hint_preview_both">空位显示「3 字」；10 秒后淡显首字，15 秒补全</string>
+    <string name="hint_content_desc">停 10 秒淡显下一个字，20 秒补全</string>
+    <string name="hint_content_desc_reverse">整段默写：停 10 秒淡显下一个字，20 秒自动填入</string>
+    <string name="hint_content_desc_word">停 10 秒淡显下一个字，20 秒补全；一个字的空 15 秒直接补全</string>
+    <string name="hint_preview_both">空位显示「3 字」；10 秒后淡显下一个字，20 秒补全（一个字的空 15 秒直接补全）</string>
     <string name="hint_preview_length">空位显示「3 字」；不给字</string>
-    <string name="hint_preview_content">空位只显示序号；10 秒后淡显首字</string>
-    <string name="hint_preview_none">空位只显示序号，完全不给提示</string>
-    <string name="hint_preview_punct">空内标点照原样显示，不给出要默写的字</string>
+    <string name="hint_preview_content">空位不显示字数码；10 秒后淡显下一个字，20 秒补全</string>
+    <string name="hint_preview_none">空位不显示任何提示</string>
     <string name="coach_got_it">知道了</string>
     <string name="coach_practice_more_title">长按这里</string>
-    <string name="coach_practice_more_body">可以分别开关字数提示、标点提示与内容提示，按需要组合。</string>
+    <string name="coach_practice_more_body">三种提示可以分开开关，能用哪几项随模式而定</string>
     <string name="coach_practice_title_title">左右拖标题</string>
     <string name="coach_practice_title_body">快速切换句子 / 字词 / 反向三种练习模式。</string>
     <string name="coach_home_long_title">长按卡片</string>
@@ -1386,6 +1392,20 @@
     <string name="font_mono">等宽</string>
     <string name="font_xwwk">霞鹜文楷</string>
     <string name="handwriting_segment_unrecognized">这一段没认出来，可以重写</string>
+
+    <string name="handwriting_symbol_bar">启用符号栏</string>
+    <string name="handwriting_symbol_bar_desc">手写板下方的一键符号行；关掉后书写区更高</string>
+    <string name="handwriting_symbols">符号栏内容</string>
+    <string name="handwriting_symbols_desc">勾选常用符号，末尾可补自己常用的字符</string>
+    <string name="handwriting_symbols_count">中文 %1$d · 英文 %2$d</string>
+    <string name="handwriting_auto_commit_weak">低相似度也直接上屏</string>
+    <string name="handwriting_auto_commit_weak_desc">不再为不确定的字停下选字；疑似连写多字与生僻字仍会拦截</string>
+    <string name="handwriting_symbols_sheet_title">符号栏内容</string>
+    <string name="handwriting_symbols_cjk">中文</string>
+    <string name="handwriting_symbols_latin">英文</string>
+    <string name="handwriting_symbols_add">补充字符</string>
+    <string name="handwriting_symbols_add_hint">输入预设里没有的字符</string>
+    <string name="handwriting_symbols_reset">恢复默认</string>
     <string name="reminder_freq_daily">每天</string>
     <string name="reminder_freq_five">每周5天</string>
     <string name="reminder_freq_three">每周3天</string>
@@ -1420,7 +1440,11 @@
     <!-- ── Std 欢迎页 ── -->
     <string name="welcome_tagline">不是清空，是召回。</string>
     <string name="welcome_privacy_body">Blancall 完全运行在本地，不联网。不收集、传输或共享你的任何个人信息。</string>
-    <string name="welcome_developer">软件由 ilyskyo 开发，向你免费提供。</string>
+    <!-- 开发者说明拆三段：中间那段是蓝色链接，点击打开本版 GitHub Releases 页 -->
+    <string name="welcome_developer_prefix">软件由 ilyskyo 开发，以</string>
+    <string name="welcome_developer_link">开源方式</string>
+    <string name="welcome_developer_suffix">免费提供。</string>
+    <string name="welcome_link_failed">未找到可打开网页的浏览器</string>
     <string name="welcome_support_prefix">如果帮助到了你，欢迎</string>
     <string name="welcome_support_link">点击此处支持开发者</string>
     <string name="welcome_privacy_link">《隐私政策》</string>

@@ -67,6 +67,11 @@
     <string name="settings_value_on">已開啟</string>
     <string name="settings_value_off">已關閉</string>
     <string name="settings_count_on">%1$d 項開啟</string>
+    <string name="settings_entry_study">學習與提醒</string>
+    <string name="settings_entry_reading">閱讀與練習</string>
+    <string name="settings_entry_content">內容與資料</string>
+    <string name="settings_entry_about">關於與支持</string>
+    <string name="settings_group_more">另 %1$d 項</string>
     <string name="settings_item_theme_mode">深淺模式</string>
     <string name="add_card">添加卡片</string>
     <string name="edit_card_config">編輯卡片設定</string>
@@ -354,15 +359,16 @@
     <string name="hint_punctuation_toggle">標點提示</string>
     <string name="hint_punctuation_desc">空內的逗號、頓號等照原樣顯示（如「＿＿，＿＿」）</string>
     <string name="hint_content_toggle">內容提示</string>
-    <string name="hint_content_desc">停 10 秒淡顯首字，再 5 秒自動補全</string>
-    <string name="hint_preview_both">空位顯示「3 字」；10 秒後淡顯首字，15 秒補全</string>
+    <string name="hint_content_desc">停 10 秒淡顯下一個字，20 秒補全</string>
+    <string name="hint_content_desc_reverse">整段默寫：停 10 秒淡顯下一個字，20 秒自動填入</string>
+    <string name="hint_content_desc_word">停 10 秒淡顯下一個字，20 秒補全；一個字的空 15 秒直接補全</string>
+    <string name="hint_preview_both">空位顯示「3 字」；10 秒後淡顯下一個字，20 秒補全（一個字的空 15 秒直接補全）</string>
     <string name="hint_preview_length">空位顯示「3 字」；不給字</string>
-    <string name="hint_preview_content">空位只顯示序號；10 秒後淡顯首字</string>
-    <string name="hint_preview_none">空位只顯示序號，完全不給提示</string>
-    <string name="hint_preview_punct">空內標點照原樣顯示，不給出要默寫的字</string>
+    <string name="hint_preview_content">空位不顯示字數碼；10 秒後淡顯下一個字，20 秒補全</string>
+    <string name="hint_preview_none">空位不顯示任何提示</string>
     <string name="coach_got_it">知道了</string>
     <string name="coach_practice_more_title">長按這裡</string>
-    <string name="coach_practice_more_body">可以分別開關字數提示、標點提示與內容提示，按需要組合。</string>
+    <string name="coach_practice_more_body">三種提示可以分開開關，能用哪幾項隨模式而定</string>
     <string name="coach_practice_title_title">左右拖標題</string>
     <string name="coach_practice_title_body">快速切換句子 / 字詞 / 反向三種練習模式。</string>
     <string name="coach_home_long_title">長按卡片</string>
@@ -1379,6 +1385,20 @@
     <string name="font_mono">等寬</string>
     <string name="font_xwwk">霞鶩文楷</string>
     <string name="handwriting_segment_unrecognized">這一段沒認出來，可以重寫</string>
+
+    <string name="handwriting_symbol_bar">啟用符號列</string>
+    <string name="handwriting_symbol_bar_desc">手寫板下方的一鍵符號列；關掉後書寫區更高</string>
+    <string name="handwriting_symbols">符號列內容</string>
+    <string name="handwriting_symbols_desc">勾選常用符號，末尾可補自己常用的字元</string>
+    <string name="handwriting_symbols_count">中文 %1$d · 英文 %2$d</string>
+    <string name="handwriting_auto_commit_weak">低相似度也直接上屏</string>
+    <string name="handwriting_auto_commit_weak_desc">不再為不確定的字停下選字；疑似連寫多字與生僻字仍會攔截</string>
+    <string name="handwriting_symbols_sheet_title">符號列內容</string>
+    <string name="handwriting_symbols_cjk">中文</string>
+    <string name="handwriting_symbols_latin">英文</string>
+    <string name="handwriting_symbols_add">補充字元</string>
+    <string name="handwriting_symbols_add_hint">輸入預設裡沒有的字元</string>
+    <string name="handwriting_symbols_reset">還原預設</string>
     <string name="reminder_freq_daily">每天</string>
     <string name="reminder_freq_five">每週5天</string>
     <string name="reminder_freq_three">每週3天</string>
@@ -1413,7 +1433,10 @@
     <!-- ── Std 欢迎页 ── -->
     <string name="welcome_tagline">不是清空，是召回。</string>
     <string name="welcome_privacy_body">Blancall 完全執行於本機，不連網。不收集、傳輸或分享你的任何個人資訊。</string>
-    <string name="welcome_developer">軟體由 ilyskyo 開發，向你免費提供。</string>
+    <string name="welcome_developer_prefix">軟體由 ilyskyo 開發，以</string>
+    <string name="welcome_developer_link">開源方式</string>
+    <string name="welcome_developer_suffix">免費提供。</string>
+    <string name="welcome_link_failed">找不到可開啟網頁的瀏覽器</string>
     <string name="welcome_support_prefix">如果幫助到了你，歡迎</string>
     <string name="welcome_support_link">點此支持開發者</string>
     <string name="welcome_privacy_link">《隱私政策》</string>

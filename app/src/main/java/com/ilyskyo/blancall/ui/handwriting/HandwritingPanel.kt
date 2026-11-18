@@ -63,6 +63,7 @@ import com.ilyskyo.blancall.ui.common.pressFeedback
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import com.ilyskyo.blancall.ui.common.StylusPresence
 import com.ilyskyo.blancall.ui.common.rememberConfirmHaptic
+import com.ilyskyo.blancall.ui.theme.AppPrefs
 import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.Dispatchers
@@ -86,6 +87,10 @@ import kotlin.math.min
  * - 高置信（top-1 ≥ 0.80 且领先 top-2 ≥ 0.15）时**自动上屏**，且该批墨迹以
  *   「收拢→淡出」退场动画消失（[InkBoardView.animateStrokesOut]），与落字同窗口衔接；
  *   否则只展示候选，等用户点选 —— 宁可多一次点选，也不误判。
+ * - 设置里可以关掉这条保守策略（「低相似度不选字」→ `AppPrefs.handwritingAutoCommitWeak`）：
+ *   打开后中文单字与连写都直接取 top-1，候选条只在两道守卫拦人时出现。
+ *   **拉丁整词路径不跟着变**（它用整词阈值与答案先验，是另一套判据）。
+ * - 底部符号栏可关、内容可改（`AppPrefs.handwritingSymbolBar` / `handwritingSymbols*`）。
  *
  * ## 与挖空/输入框的关系
  * 面板只负责「产出字符」，不关心字符最终写到哪儿。调用方通过 [onCharsPicked] 接管。
@@ -245,6 +250,16 @@ fun HandwritingPanel(
     val hintColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
     val density = LocalDensity.current
 
+    // ── 手写偏好（设置页 → 阅读与练习 → 特性）──
+    //
+    // 直接读 AppPrefs 而**不**做成面板参数：这三项回答的是「手写手感」，与「哪个空、
+    // 什么答案、要不要自动上屏」都无关。做成参数的话 4 个调用点全要跟着改一遍，
+    // 双版本同步面白白翻倍，而且漏掉一个调用点就会出现「设置里改了、某个入口没生效」。
+    val symbolBarEnabled by AppPrefs.handwritingSymbolBarFlow.collectAsStateWithLifecycle()
+    val symbolsCjk by AppPrefs.handwritingSymbolsCjkFlow.collectAsStateWithLifecycle()
+    val symbolsLatin by AppPrefs.handwritingSymbolsLatinFlow.collectAsStateWithLifecycle()
+    val autoCommitWeak by AppPrefs.handwritingAutoCommitWeakFlow.collectAsStateWithLifecycle()
+
     val recognizer = remember { HandwritingRecognizer.getInstance(context) }
     val nativeOk = remember { HandwritingRecognizer.isNativeAvailable }
     // 拉丁模型是否随包分发（assets 缺失时英文空只能走键盘，跨文种回退也要跳过）
@@ -358,7 +373,10 @@ fun HandwritingPanel(
             val best = r?.best
             // ⚠️ !pendingRareBlock：期望字表外时**不自动上屏**（真机：写「砯」被切成
             // 「石|水」，「石」高置信上屏成错字）——但候选仍照常展示供用户点选。
-            if (r != null && best != null && r.isConfident && !pendingRareBlock) {
+            //
+            // ⚠️ autoCommitWeak（设置项「低相似度不选字」）只放开「置信度不够」这一条，
+            // **不**放开 pendingRareBlock —— 后者拦的是「这里根本认不出」，不是「认得不够准」。
+            if (r != null && best != null && (r.isConfident || autoCommitWeak) && !pendingRareBlock) {
                 commit.add(best.char)
                 consumedGroups.add(segs[i])
                 segs[i].forEach { consumed.add(it) }
@@ -774,7 +792,10 @@ fun HandwritingPanel(
                     statusText = rareGuardHint
                     return@launch
                 }
-                if (whole != null && whole.isConfident && autoCommit && !guarded) {
+                // autoCommitWeak（设置项「低相似度不选字」）：置信度不达标也直接取 top-1。
+                // guarded（疑似多字切不开）与 rareGuard（期望字表外）**不**受它影响 ——
+                // 那两道拦的是「写错了也不知道」，与「懒得挑字」不是同一件事。
+                if (whole != null && (whole.isConfident || autoCommitWeak) && autoCommit && !guarded) {
                     val best = whole.best ?: return@launch
                     commitChars(listOf(best.char), inkStrokes)
                     val view = inkRef.get()
@@ -975,63 +996,71 @@ fun HandwritingPanel(
                 // 子 View 的消费状态会被互操作层同步回 Compose，LazyColumn 自然就不会滚。
         )
 
-        // ── 操作行：标点快捷 / 清空 / 收起 ──
+        // ── 操作行：符号快捷 / 清空 / 收起 ──
         // ⚠️ 必须放在书写区**外面**，两个理由：
         // ① **互操作的 AndroidView 永远绘制在 Compose 内容之上**，不透明的纸面会把叠上去的
         //    按钮整块盖住；
         // ② 笔落在书写板范围内时事件由 `InkBoardView` 全权处理（它要画墨，必须消费），
         //    叠在板上的按钮用笔也就点不到了（真机反馈「用笔没法点清空」）。
         // 移出后笔/手指都直接命中按钮，代价只是按钮不再叠在墨迹上。
+        //
+        // 符号栏可关（设置页 → 特性 → 启用符号栏）、内容可改（自定义符号栏）。
+        // 关掉后本行只剩清空/收起 —— 此时「SpaceBetween 只有一个子项」会把它推到左边，
+        // 所以对齐方式要跟着切换，否则关掉符号栏后右侧按钮会莫名跳到左边。
+        val symbolList = symbolKeys(script, symbolsCjk, symbolsLatin)
+        val showSymbols = symbolBarEnabled && symbolList.isNotEmpty()
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(top = 2.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
+            horizontalArrangement = if (showSymbols) Arrangement.SpaceBetween else Arrangement.End,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // ── 标点一键插入 ──
+            // ── 符号一键插入 ──
             // 中文 7356 类模型含 14 个标点类（`!"(),.:;?…、。《》`，半角写会映射为全角，
             // 见 [localizePunct]）；但全角 ，？！：； 不在类表内、无法「写」出，
-            // 且高频标点一键插入本就更快 —— 这里与手写识别并存，并非唯一出路。
+            // 且高频符号一键插入本就更快 —— 这里与手写识别并存，并非唯一出路。
             //
-            // ⚠️ 用 FlowRow 而不是 Row：常用标点扩充后一行放不下时自动折行，
+            // ⚠️ 用 FlowRow 而不是 Row：符号超过一行放不下时自动折行，
             // 不会把右侧「清空/收起」挤变形（手机窄屏尤其明显）。
-            FlowRow(
-                modifier = Modifier.weight(1f, fill = false),
-                verticalArrangement = Arrangement.Center
-            ) {
-                punctuationKeys(script).forEach { p ->
-                    val keySrc = remember { MutableInteractionSource() }
-                    Surface(
-                        shape = SmoothRoundedCornerShape(6.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier
-                            .padding(end = 4.dp)
-                            // 标点键：涟漪换成统一的缩放＋亮度（Container 档）。
-                            // pressFeedback 放在 clip 之前、Surface 传入的 modifier 上 ——
-                            // Surface 自己的底色是在这条链**之后**才画的，
-                            // 所以压暗能盖住键面；焦点/悬停高亮也由它补回。
-                            .pressFeedback(keySrc, PressTier.Container, enabled = enabled)
-                            // ⚠️ clip 必须放在 clickable **之前**：clickable 的按压/悬停指示器
-                            // 绘制在它自己的节点边界内，只有链上先 clip 才能把它裁成圆角；
-                            // 否则圆角键上会浮出一个直角灰块（Surface 自己的 shape 只裁剪背景，
-                            // 管不到挂在 modifier 上的 clickable —— 真机复现过）。
-                            //
-                            // 这里刻意**不**改成 Surface(onClick = …) 重载：那个重载会带上
-                            // 48dp 最小交互尺寸，一行 6 个标点会被撑到近 300dp 宽、把操作行挤变形。
-                            .clip(SmoothRoundedCornerShape(6.dp))
-                            .clickable(
-                                interactionSource = keySrc,
-                                indication = null,
-                                enabled = enabled
-                            ) { commitChars(listOf(p)) }
-                    ) {
-                        Text(
-                            p.toString(),
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
-                        )
+            if (showSymbols) {
+                FlowRow(
+                    modifier = Modifier.weight(1f, fill = false),
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    symbolList.forEach { p ->
+                        val keySrc = remember { MutableInteractionSource() }
+                        Surface(
+                            shape = SmoothRoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier
+                                .padding(end = 4.dp)
+                                // 符号键：涟漪换成统一的缩放＋亮度（Container 档）。
+                                // pressFeedback 放在 clip 之前、Surface 传入的 modifier 上 ——
+                                // Surface 自己的底色是在这条链**之后**才画的，
+                                // 所以压暗能盖住键面；焦点/悬停高亮也由它补回。
+                                .pressFeedback(keySrc, PressTier.Container, enabled = enabled)
+                                // ⚠️ clip 必须放在 clickable **之前**：clickable 的按压/悬停指示器
+                                // 绘制在它自己的节点边界内，只有链上先 clip 才能把它裁成圆角；
+                                // 否则圆角键上会浮出一个直角灰块（Surface 自己的 shape 只裁剪背景，
+                                // 管不到挂在 modifier 上的 clickable —— 真机复现过）。
+                                //
+                                // 这里刻意**不**改成 Surface(onClick = …) 重载：那个重载会带上
+                                // 48dp 最小交互尺寸，一行 6 个符号会被撑到近 300dp 宽、把操作行挤变形。
+                                .clip(SmoothRoundedCornerShape(6.dp))
+                                .clickable(
+                                    interactionSource = keySrc,
+                                    indication = null,
+                                    enabled = enabled
+                                ) { commitChars(listOf(p)) }
+                        ) {
+                            Text(
+                                p.toString(),
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
+                            )
+                        }
                     }
                 }
             }
@@ -1230,21 +1259,28 @@ private const val RECOGNIZE_DELAY_MS = 550L
 private const val RECOGNIZE_DELAY_LATIN_MS = 900L
 
 /**
- * 手写态下可一键插入的常用标点（中文）。
+ * 手写态下一键可插入的符号集合（默认值见 [AppPrefs.DEFAULT_SYMBOLS_CJK]）。
  *
- * 现状（2026-09 模型升级后）：中文 7356 类模型**含** 14 个标点类
+ * 为什么还需要这排快捷键（而不是全靠写）：中文 7356 类模型**含** 14 个标点类
  * （`! " ( ) , . : ; ? … 、 。 《 》`），写半角会被映射为全角（见 [localizePunct]）；
- * 但下列全角标点（，？！：；）不在模型类表内、无法「写」出，
- * 且高频标点一键插入本就更快 —— 因此保留这排快捷入口与手写识别并存。
+ * 但全角 ，？！：； 不在模型类表内、根本「写」不出来。高频符号一键插入也本就更快。
+ *
+ * 内容由用户在设置里改（含 ↑↓⇌Δ 这类理科符号），所以这里只剩「怎么解析」。
  */
-private val PUNCT_CJK = listOf('，', '。', '、', '？', '！', '：', '；')
 
-/** 手写态下可一键插入的常用标点（拉丁/英文）。 */
-private val PUNCT_LATIN = listOf(',', '.', '?', '!', ';', ':', '\'', '-')
+/**
+ * 符号串 → 符号键列表。
+ *
+ * 按 UTF-16 码元拆（`toList()`），并丢掉孤立代理项：设置里允许用户自由补字符，
+ * 万一塞进一个 emoji，拆出来就是半个代理对，画在屏幕上是一个豆腐块 ——
+ * 宁可少一个键，也不给用户一个坏键。非 BMP 字符因此不支持（化学/数学符号全在 BMP 内）。
+ */
+internal fun symbolsOf(raw: String): List<Char> =
+    raw.toList().filter { !it.isHighSurrogate() && !it.isLowSurrogate() }
 
-/** 按文种取标点快捷集：当前空的答案是什么语言，就给什么标点。 */
-private fun punctuationKeys(script: HandwritingScript): List<Char> =
-    if (script == HandwritingScript.Latin) PUNCT_LATIN else PUNCT_CJK
+/** 按文种取符号键：当前空的答案是什么语言，就给什么符号。 */
+internal fun symbolKeys(script: HandwritingScript, cjk: String, latin: String): List<Char> =
+    symbolsOf(if (script == HandwritingScript.Latin) latin else cjk)
 
 // ============ 拉丁（英语单词）整词提交 ============
 

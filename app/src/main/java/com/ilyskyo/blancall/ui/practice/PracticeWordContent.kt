@@ -17,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
@@ -43,6 +44,8 @@ internal fun WordClozeContent(
     checkResults: Map<Int, AnswerChecker.CheckDetail>,
     isSubmitted: Boolean,
     hintChars: Map<Int, Char> = emptyMap(),
+    /** 字数提示：每个空旁标出这一空有几个字（与句子挖空同名开关，此前只有句子模式接了） */
+    showBlankLength: Boolean = false,
     weakHints: Int = 0,
     strongHints: Int = 0,
     analysis: String? = null,
@@ -108,6 +111,11 @@ internal fun WordClozeContent(
                                     isSubmitted = isSubmitted,
                                     multiline = false,
                                     hintChar = hintChars[blankIdx],
+                                    // 字数提示：这一个空要填几个字（字词空的长度本来完全看不见，
+                                    // 句子里一律是三格「___」，一空一字还是三字全靠猜）
+                                    lengthHint = if (showBlankLength && !isSubmitted) {
+                                        blank.originalChar.length
+                                    } else null,
                                     // 只有当前目标渲染书写板（就地嵌在本卡里，不弹层）
                                     handwritingTarget = blankIdx == activeBlank,
                                     // 笔点过的空 ← 临时手写（不改默认输入方式开关）
@@ -178,6 +186,8 @@ internal fun BlankCard(
     isSubmitted: Boolean,
     multiline: Boolean,
     hintChar: Char? = null,
+    /** 这一空有几个字（null = 不显示）。只作长度线索，不泄露任何字。 */
+    lengthHint: Int? = null,
     /**
      * 是否为本页的「当前作答目标」。
      *
@@ -232,6 +242,18 @@ internal fun BlankCard(
                 Text(label, style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.primary,
                     fontWeight = FontWeight.SemiBold)
+                // 字数提示：紧贴序号，用最弱的一级文字 —— 它回答"要写几个字"，不该比正文显眼
+                if (!isSubmitted && lengthHint != null) {
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        pluralStringResource(
+                            com.ilyskyo.blancall.R.plurals.hint_length_badge,
+                            lengthHint, lengthHint
+                        ),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
+                    )
+                }
             }
             Spacer(Modifier.height(4.dp))
             AnswerInputField(

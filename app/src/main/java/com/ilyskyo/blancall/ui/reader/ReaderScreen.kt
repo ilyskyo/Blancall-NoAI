@@ -19,18 +19,27 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import com.ilyskyo.blancall.ui.common.BlancallAlertDialog
 import com.ilyskyo.blancall.ui.common.HapticTier
 import com.ilyskyo.blancall.ui.common.Motion
@@ -46,19 +55,25 @@ import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 import com.ilyskyo.blancall.ui.theme.isBlancallDark
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextIndent
 import androidx.compose.ui.text.style.TextOverflow
@@ -134,6 +149,17 @@ fun ReaderScreen(
     var showTextStats by remember { mutableStateOf(false) }
     // 顶栏右侧两行的实测高度：作者行始终占位，标题字号才不会随作者有无跳变
     var headerMetaHeightPx by remember { mutableIntStateOf(0) }
+    // 长按顶栏标题 → 标题就地变成输入框（只编辑标题，不把整页推进编辑态）。
+    // tick 用自增计数而不是 boolean：退出再长按要能重新要到焦点，LaunchedEffect 的 key 必须变化。
+    var titleEditing by remember { mutableStateOf(false) }
+    // 用 TextFieldValue 而不是 String：长按进入编辑时光标要落在标题末尾，
+    // String 版首次聚焦时光标在开头，接着打字会插到最前面
+    var titleDraft by remember { mutableStateOf(TextFieldValue("")) }
+    // 首帧 onFocusChanged 会先报一次「没有焦点」，不挡就会一进编辑态立刻自我保存退出
+    var titleHadFocus by remember { mutableStateOf(false) }
+    var titleFocusTick by remember { mutableIntStateOf(0) }
+    val titleFocusRequester = remember { FocusRequester() }
+    val titleLongPressHaptic = rememberHaptic(HapticTier.Confirm)
     var practiceButtonRect by remember { mutableStateOf(Rect.Zero) }
     // 预测性返回跟手进度：编辑模式下侧滑返回时驱动编辑界面缩放/淡出动画
     // 用 Animatable 而不是 mutableStateOf —— 手势**取消**时要弹簧回位，
@@ -156,6 +182,8 @@ fun ReaderScreen(
     // 兜底（先注册、优先级低）：PredictiveBackHandler 在个别系统/场景下可能不拦截，
     // 保证编辑/阅读模式下返回键一定能退出当前模式，而不是直接退出页面
     BackHandler(enabled = isEditing) { isEditing = false }
+    // 标题内联编辑：返回 = 放弃这一趟改动（回车/点到别处才是保存，撤销路径必须明确）
+    BackHandler(enabled = titleEditing) { titleEditing = false }
     BackHandler(enabled = readingMode) { readingMode = false }
 
     // 编辑模式下拦截预测性返回手势（侧滑返回），先退出编辑模式而非直接返回上一页；
@@ -341,6 +369,32 @@ fun ReaderScreen(
                         textStats.primaryCount,
                         textStats.primaryCount
                     )
+                    // 长按标题 = 标题就地进入可编辑态（作者、正文、底部操作栏都不动）。
+                    // 只注册长按、不注册单击：标题本身没有点击行为，补个空 onClick 会让读屏
+                    // 把它念成一个按了没反应的按钮。
+                    val titleEditLabel = stringResource(com.ilyskyo.blancall.R.string.edit)
+                    val enterTitleEdit: () -> Unit = {
+                        titleLongPressHaptic()
+                        titleDraft = TextFieldValue(art.title, TextRange(art.title.length))
+                        titleHadFocus = false
+                        titleEditing = true
+                        titleFocusTick++
+                    }
+                    // 收起编辑态的两条路：回车 / 点到别处 = 保存；返回键 = 放弃（由 BackHandler 处理）。
+                    // 先挡掉 titleEditing 已为 false 的调用 —— 退出时节点销毁还会再报一次失焦，
+                    // 不挡就会把「返回键放弃」的草稿又存回去。
+                    val commitTitleEdit: () -> Unit = {
+                        if (titleEditing) {
+                            val next = titleDraft.text.trim()
+                            // 空标题不落盘：清空了就当没改，否则列表里出现无标题条目
+                            if (next.isNotEmpty() && next != art.title) {
+                                articleViewModel.updateArticle(art.copy(title = next))
+                                // 本页没有对应 Flow，就地同步一份，避免异步更新竞态时回显旧值
+                                article = art.copy(title = next)
+                            }
+                            titleEditing = false
+                        }
+                    }
                     Row(
                         modifier = Modifier
                             .weight(1f)
@@ -348,18 +402,72 @@ fun ReaderScreen(
                             .heroElement("article/${art.id}"),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text(
-                            text = art.title,
-                            style = MaterialTheme.typography.titleLarge.copy(
-                                fontSize = titleFontSize,
-                                lineHeight = titleFontSize
-                            ),
-                            color = MaterialTheme.colorScheme.onBackground,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false)
-                        )
+                        if (titleEditing) {
+                            // 就地编辑：字号/字重/颜色与静态标题完全一致，只在下面多一条主题色细线，
+                            // 这样「进入编辑态」是同一个标题变活，而不是换了个控件
+                            val caretColor = MaterialTheme.colorScheme.primary
+                            val ruleColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.45f)
+                            BasicTextField(
+                                value = titleDraft,
+                                onValueChange = { titleDraft = it },
+                                singleLine = true,
+                                textStyle = MaterialTheme.typography.titleLarge.copy(
+                                    fontSize = titleFontSize,
+                                    lineHeight = titleFontSize,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onBackground
+                                ),
+                                cursorBrush = SolidColor(caretColor),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                                keyboardActions = KeyboardActions(onDone = { commitTitleEdit() }),
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .focusRequester(titleFocusRequester)
+                                    .onFocusChanged { state ->
+                                        if (state.isFocused) titleHadFocus = true
+                                        else if (titleHadFocus) commitTitleEdit()
+                                    }
+                                    .drawBehind {
+                                        val y = size.height - 1.dp.toPx()
+                                        drawLine(
+                                            color = ruleColor,
+                                            start = Offset(0f, y),
+                                            end = Offset(size.width, y),
+                                            strokeWidth = 1.dp.toPx()
+                                        )
+                                    }
+                            )
+                            // 长按进来就聚焦：键盘直接弹出、光标落在标题末尾，不用再点一次输入框
+                            LaunchedEffect(titleFocusTick) {
+                                withFrameNanos { }
+                                runCatching { titleFocusRequester.requestFocus() }
+                            }
+                        } else {
+                            Text(
+                                text = art.title,
+                                style = MaterialTheme.typography.titleLarge.copy(
+                                    fontSize = titleFontSize,
+                                    lineHeight = titleFontSize
+                                ),
+                                color = MaterialTheme.colorScheme.onBackground,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier
+                                    .weight(1f, fill = false)
+                                    // 命中区就是字形本身（顶栏高度由右侧两行决定，撑高会连带改标题字号），
+                                    // 所以只给长按、不额外拉大触控区
+                                    .pointerInput(art.id) {
+                                        detectTapGestures(onLongPress = { enterTitleEdit() })
+                                    }
+                                    .semantics {
+                                        onLongClick(label = titleEditLabel) {
+                                            enterTitleEdit()
+                                            true
+                                        }
+                                    }
+                            )
+                        }
                         Spacer(modifier = Modifier.width(10.dp))
                         ReaderHeaderMeta(
                             author = art.author,

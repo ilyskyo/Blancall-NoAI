@@ -95,6 +95,10 @@ import org.json.JSONObject
  * - 🔤 字词挖空：长按循环切换粒度（复句→分句→字词→单字→回到复句），点选区间，渲染高亮空框
  * - ✍️ 反向默写：点选句子加入默写（无炸），选中处渲染为分句卡片「N. 挖一词」
  *
+ * 标点（书名号、引号、括号、破折号…）与空白**不可选**：它们照原样留在正文里，
+ * 永远不会被并进空里。旧实现把标点并到前一个 token 上，于是「书」被切成「书」，
+ * 挖掉的是「书》」—— 答案凭空多一个书名号，长按又只能往粗里拆，用户无路可走。
+ *
  * 配置按文章保存多套（CustomClozeStore），blanks 记录「句索引 + 句内区间」，
  * 练习时按配置模式确定性构造对应挖空结果，复用既有判分链路。
  */
@@ -211,8 +215,11 @@ fun CustomClozeEditScreen(
                 cfg.blanks.forEach { b ->
                     if (b.s !in sentences.indices) return@forEach
                     when (cfg.mode) {
-                        // 字词模式：区间按保存原样回放（粒度恢复在下方统一处理）
-                        "WORD" -> selected.getOrPut(b.s) { mutableStateListOf() }.add(b.a until b.b)
+                        // 字词模式：区间回放时先收敛成「只含实义字符」的空。
+                        // 旧配置里躺着 `书》`、`红·楼` 这类跨标点的区间（编辑器旧实现把标点
+                        // 并进前一个字），不收敛就会在练习里要求连书名号一起写出来。
+                        "WORD" -> selected.getOrPut(b.s) { mutableStateListOf() }
+                            .addAll(ClozeTokens.contentRanges(sentences[b.s], listOf(b.a until b.b)))
                         // 句子/反向：复句选择，区间即全句
                         else -> selected.getOrPut(b.s) { mutableStateListOf() }.add(0 until sentences[b.s].length)
                     }
@@ -317,14 +324,14 @@ fun CustomClozeEditScreen(
                 }
                 blanks.sortBy { it.s }
             }
-            // 字词：区间合并
+            // 字词：区间收敛（裁剪越界 + 合并相邻 + 按标点切开 + 两端去标点）
             else -> {
                 selected.forEach { (s, ranges) ->
                     if (s !in sentences.indices) return@forEach
-                    // 统一口径 RangeOps.normalizeClampedRanges：裁剪越界 + 合并相邻/重叠。
-                    // 旧实现 a 可被 coerce 到句长 → (r.last+1).coerceIn(a+1, len) 抛"空区间"崩溃
-                    // （文章变短后恢复旧配置直接保存即触发）
-                    RangeOps.normalizeClampedRanges(sentences[s].length, ranges).forEach { r ->
+                    // 统一口径 ClozeTokens.contentRanges：旧实现存的是用户点选的原区间，
+                    // 标点可能被并进空里（`书》`）—— 保存这一关就把它切成纯实义的空，
+                    // 练习侧再收敛一次（防旧配置直接开练）。
+                    ClozeTokens.contentRanges(sentences[s], ranges).forEach { r ->
                         blanks.add(CustomClozeStore.BlankSpec(s, r.first, r.last + 1))
                     }
                 }
@@ -818,7 +825,9 @@ private fun SentenceEditCard(
             verticalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             tokens.forEach { token ->
-                val selectedNow = isSelectedRange(token.range)
+                // 挖空单位是 token 的**实义区间**：分句级会剥掉尾部标点，标点 token 不自成空
+                val blankRange = token.blankRange
+                val selectedNow = token.selectable && isSelectedRange(blankRange)
                 when {
                     // ── 句子挖空预览：[N] 徽章 + 下划线（SentenceClozeContent 同款）──
                     selectedNow && mode == "SENTENCE" -> {
@@ -840,7 +849,7 @@ private fun SentenceEditCard(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier
                                     .clip(SmoothRoundedCornerShape(6.dp))
-                                    .combinedPress(tier = PressTier.Icon, onClick = { onToggle(token.range) })
+                                    .combinedPress(tier = PressTier.Icon, onClick = { onToggle(blankRange) })
                                     .padding(horizontal = 2.dp, vertical = 4.dp)
                             )
                         }
@@ -856,11 +865,11 @@ private fun SentenceEditCard(
                                 .fillMaxWidth()
                                 .clip(SmoothRoundedCornerShape(10.dp))
                                 .background(MaterialTheme.colorScheme.surfaceVariant)
-                                .combinedPress(tier = PressTier.Card, onClick = { onToggle(token.range) })
+                                .combinedPress(tier = PressTier.Card, onClick = { onToggle(blankRange) })
                                 .padding(10.dp)
                         )
                     }
-                    // ── 字词挖空预览：高亮空框 ──
+                    // ── 字词挖空预览：高亮空框（宽度 = 实义字数）──
                     selectedNow -> {
                         Box(
                             modifier = Modifier
@@ -871,17 +880,28 @@ private fun SentenceEditCard(
                                     MaterialTheme.colorScheme.primary.copy(alpha = 0.55f),
                                     SmoothRoundedCornerShape(6.dp)
                                 )
-                                .combinedPress(tier = PressTier.Icon, onClick = { onToggle(token.range) }, onLongClick = { confirmHaptic(); onExplode() })
+                                .combinedPress(tier = PressTier.Icon, onClick = { onToggle(blankRange) }, onLongClick = { confirmHaptic(); onExplode() })
                                 .padding(horizontal = 8.dp, vertical = 4.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                "＿".repeat(token.text.length.coerceAtLeast(1).coerceAtMost(6)),
+                                "＿".repeat(
+                                    (blankRange.last - blankRange.first + 1).coerceIn(1, 6)
+                                ),
                                 color = MaterialTheme.colorScheme.primary,
                                 fontSize = 15.sp,
                                 lineHeight = 20.sp
                             )
                         }
+                    }
+                    // ── 标点 / 空白：正文的一部分，点它没有反应，也永远不会被挖掉 ──
+                    !token.selectable -> {
+                        Text(
+                            token.text,
+                            fontSize = 15.sp,
+                            lineHeight = 20.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                     // ── 未选中原文 token ──
                     else -> {
@@ -894,7 +914,7 @@ private fun SentenceEditCard(
                                 .clip(SmoothRoundedCornerShape(6.dp))
                                 .combinedPress(
                                     tier = PressTier.Icon,
-                                    onClick = { onToggle(token.range) },
+                                    onClick = { onToggle(blankRange) },
                                     onLongClick = { confirmHaptic(); if (mode == "WORD") onExplode() }
                                 )
                                 .padding(horizontal = 2.dp, vertical = 4.dp)

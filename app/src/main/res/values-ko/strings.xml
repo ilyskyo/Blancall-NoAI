@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Blancall Pro</string>
+    <string name="app_name">Blancall</string>
     <string name="nav_home">홈</string>
     <string name="nav_articles">내 글</string>
     <string name="nav_stats">데이터</string>
@@ -67,6 +67,11 @@
     <string name="settings_value_on">켜짐</string>
     <string name="settings_value_off">꺼짐</string>
     <string name="settings_count_on">%1$d개 켜짐</string>
+    <string name="settings_entry_study">학습 및 알림</string>
+    <string name="settings_entry_reading">읽기 및 연습</string>
+    <string name="settings_entry_content">콘텐츠 및 데이터</string>
+    <string name="settings_entry_about">정보 및 지원</string>
+    <string name="settings_group_more">%1$d개 더</string>
     <string name="settings_item_theme_mode">라이트/다크</string>
     <string name="add_card">카드 추가</string>
     <string name="edit_card_config">카드 설정 편집</string>
@@ -354,15 +359,16 @@
     <string name="hint_punctuation_toggle">문장부호 힌트</string>
     <string name="hint_punctuation_desc">빈칸 안의 쉼표 등 문장부호를 그대로 표시 (예: 「＿＿，＿＿」)</string>
     <string name="hint_content_toggle">내용 힌트</string>
-    <string name="hint_content_desc">10초 후 첫 글자를 흐리게, 5초 뒤 자동 입력</string>
-    <string name="hint_preview_both">빈칸에 「3자」 표시 / 10초 후 첫 글자, 15초 후 채움</string>
+    <string name="hint_content_desc">10초 후 다음 글자를 흐리게, 20초 뒤 자동 입력</string>
+    <string name="hint_content_desc_reverse">전체 받아쓰기: 10초 후 다음 글자를 흐리게, 20초 뒤 자동 입력</string>
+    <string name="hint_content_desc_word">10초 후 다음 글자를 흐리게, 20초 뒤 자동 입력. 한 글자 빈칸은 15초 뒤 바로 입력</string>
+    <string name="hint_preview_both">빈칸에 「3자」 표시 / 10초 후 다음 글자, 20초 후 채움 (한 글자 빈칸은 15초)</string>
     <string name="hint_preview_length">빈칸에 「3자」 표시 / 글자는 주지 않음</string>
-    <string name="hint_preview_content">빈칸에 번호만 / 10초 후 첫 글자</string>
-    <string name="hint_preview_none">빈칸에 번호만, 힌트 없음</string>
-    <string name="hint_preview_punct">빈칸 안의 문장부호를 표시하며, 외울 글자는 주지 않음</string>
+    <string name="hint_preview_content">빈칸에 글자 수 표시 없음 / 10초 후 다음 글자, 20초 후 채움</string>
+    <string name="hint_preview_none">빈칸에 아무 힌트도 표시하지 않음</string>
     <string name="coach_got_it">확인</string>
     <string name="coach_practice_more_title">여기를 길게 누르세요</string>
-    <string name="coach_practice_more_body">글자 수·문장부호·내용 힌트를 따로 켜고 끌 수 있습니다.</string>
+    <string name="coach_practice_more_body">세 가지 힌트는 따로 켜고 끌 수 있으며, 쓸 수 있는 항목은 모드에 따라 달라집니다</string>
     <string name="coach_practice_title_title">제목을 좌우로 끌기</string>
     <string name="coach_practice_title_body">문장 / 단어 / 역방향 모드를 빠르게 전환합니다.</string>
     <string name="coach_home_long_title">카드를 길게 누르세요</string>
@@ -1380,6 +1386,20 @@
     <string name="font_mono">고정폭</string>
     <string name="font_xwwk">샤우원카이</string>
     <string name="handwriting_segment_unrecognized">이 구간을 인식하지 못했습니다. 다시 쓸 수 있습니다.</string>
+
+    <string name="handwriting_symbol_bar">기호 바 사용</string>
+    <string name="handwriting_symbol_bar_desc">필기 영역 아래 한 번에 입력하는 기호 줄. 끄면 필기 영역이 넓어집니다</string>
+    <string name="handwriting_symbols">기호 바 내용</string>
+    <string name="handwriting_symbols_desc">자주 쓰는 기호를 선택하세요. 아래에서 직접 추가할 수도 있습니다</string>
+    <string name="handwriting_symbols_count">중국어 %1$d · 영어 %2$d</string>
+    <string name="handwriting_auto_commit_weak">유사도가 낮아도 바로 입력</string>
+    <string name="handwriting_auto_commit_weak_desc">불확실한 글자에서 선택을 멈추지 않습니다. 여러 글자·희귀자 판정은 그대로 적용됩니다</string>
+    <string name="handwriting_symbols_sheet_title">기호 바 내용</string>
+    <string name="handwriting_symbols_cjk">중국어</string>
+    <string name="handwriting_symbols_latin">영어</string>
+    <string name="handwriting_symbols_add">추가 문자</string>
+    <string name="handwriting_symbols_add_hint">프리셋에 없는 문자 입력</string>
+    <string name="handwriting_symbols_reset">기본값으로 복원</string>
     <string name="reminder_freq_daily">매일</string>
     <string name="reminder_freq_five">주 5일</string>
     <string name="reminder_freq_three">주 3일</string>
@@ -1414,7 +1434,10 @@
     <!-- ── Std 欢迎页 ── -->
     <string name="welcome_tagline">비우는 것이 아니라 기억해 내는 것.</string>
     <string name="welcome_privacy_body">Blancall은 전적으로 기기에서 오프라인으로 실행됩니다. 개인 정보를 수집, 전송, 공유하지 않습니다.</string>
-    <string name="welcome_developer">ilyskyo가 개발하여 무료로 제공합니다.</string>
+    <string name="welcome_developer_prefix">ilyskyo가 개발하여 </string>
+    <string name="welcome_developer_link">오픈소스</string>
+    <string name="welcome_developer_suffix">로 무료 제공합니다.</string>
+    <string name="welcome_link_failed">이 링크를 열 수 있는 브라우저가 없습니다</string>
     <string name="welcome_support_prefix">도움이 되었다면</string>
     <string name="welcome_support_link">여기에서 개발자를 후원하세요</string>
     <string name="welcome_privacy_link">개인정보 처리방침</string>

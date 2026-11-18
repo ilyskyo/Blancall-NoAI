@@ -21,13 +21,20 @@ import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ContentTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.ScrollState
@@ -48,6 +55,7 @@ import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
@@ -59,6 +67,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -118,7 +128,6 @@ import com.ilyskyo.blancall.ui.common.GlassButton
 import com.ilyskyo.blancall.ui.common.GlassCard
 import com.ilyskyo.blancall.ui.common.GlassSwitch
 import com.ilyskyo.blancall.ui.common.Motion
-import com.ilyskyo.blancall.ui.common.StateSwap
 import com.ilyskyo.blancall.ui.common.MotionFade
 import com.ilyskyo.blancall.ui.common.LocalIsLargeScreen
 import com.ilyskyo.blancall.ui.common.MarkdownText
@@ -163,12 +172,52 @@ private fun localeNameStyle(choice: AppLocale, base: TextStyle): TextStyle =
     else base.copy(fontFamily = FontFamily(Font(languageLabelFontRes(choice))))
 
 /**
- * 设置页当前该呈现哪一种形态 —— [StateSwap] 的 targetState。
+ * 设置页当前该呈现哪一种形态 —— 下面那个 AnimatedContent 的 targetState。
  *
- * 三态合一：紧凑顶层 / 完整布局 / 某一组的二级页。带 groupId 而不是枚举，
+ * 三态合一：紧凑顶层 / 完整布局 / 某个入口的二级页。带 entryId 而不是枚举，
  * 与 rememberSaveable 那份状态同源，转屏重建后两处不会各说各话。
+ *
+ * 注意存的是**入口**（[SettingsEntry]）而不是分区（[SettingsGroup]）：
+ * 一级目录行是入口，一个入口可能展开两三个分区（见 SettingsEntry.groups）。
  */
-private data class SettingsScreenKey(val compact: Boolean, val groupId: String?)
+private data class SettingsScreenKey(val compact: Boolean, val entryId: String?)
+
+/** 形态切换时新内容的垂直行程：18dp 够读出方向，又不至于读成「翻页」。 */
+private val SETTINGS_SWAP_EDGE = 18.dp
+
+/**
+ * 新内容起手的纵向缩放。
+ *
+ * 0.985 是「几乎看不出被压缩、但整块确实在长出来」的下限：再小一格（0.97）会在
+ * 大字号下把正文行高拉出可见的变形；完全不缩放又只剩平移，读起来像被推了一下。
+ */
+private const val SETTINGS_SWAP_SCALE = 0.985f
+
+/**
+ * 设置页两种形态之间的转场。
+ *
+ * 进场比退场慢一档（220 对 120）：旧内容先撤，新内容再铺开，中间没有两屏文字互糊的阶段。
+ * 位移一律走 [Motion.itemSlide]（NoBouncy），缩放走 [Motion.reveal] ——
+ * 整块内容的缩放过冲会把页面边缘顶出容器，那是「弹歪了」而不是「有重量」。
+ */
+private fun AnimatedContentTransitionScope<SettingsScreenKey>.settingsSwapTransition(
+    edgePx: Int,
+): ContentTransform {
+    val toExpanded = !targetState.compact
+    // 展开：新内容从上方落下来；收回：新内容从下方升上来
+    val enterOffset = if (toExpanded) -edgePx else edgePx
+    val enter = fadeIn(MotionFade.alpha(MotionFade.itemEnter)) +
+        slideInVertically(Motion.itemSlide()) { enterOffset } +
+        scaleIn(
+            initialScale = SETTINGS_SWAP_SCALE,
+            animationSpec = Motion.reveal(),
+            // 展开时原点在顶边（内容自顶向下长出来），收回时在底边（自底向上收回去）
+            transformOrigin = if (toExpanded) TransformOrigin(0.5f, 0f) else TransformOrigin(0.5f, 1f),
+        )
+    val exit = fadeOut(MotionFade.alpha(MotionFade.exit)) +
+        slideOutVertically(Motion.itemSlide()) { -edgePx / 2 }
+    return enter togetherWith exit
+}
 
 @Composable
 fun SettingsScreen(navController: NavController) {
@@ -386,12 +435,12 @@ fun SettingsScreen(navController: NavController) {
         // 收起态承担「两级结构 + 搜索」（Android 官方对 15+ 项设置的要求），两者不冲突。
         val compactLayout by AppPrefs.settingsCompactFlow.collectAsState()
         val layoutHintSeen by AppPrefs.settingsLayoutHintSeenFlow.collectAsState()
-        // 当前打开的是哪一组；null = 1 级（概览 / 完整布局）。完整布局下恒为 null。
+        // 当前打开的是哪一个入口；null = 1 级（概览 / 完整布局）。完整布局下恒为 null。
         // 存 id 而不是枚举本身：rememberSaveable 只认可序列化类型，转屏 / 分屏重建后
         // 才还能停在原来那一页（平板上分屏拖动分隔线会反复重建 Activity）。
-        var activeGroupId by rememberSaveable { mutableStateOf<String?>(null) }
-        val activeGroup = activeGroupId?.let { id ->
-            SettingsGroup.entries.firstOrNull { it.name == id }
+        var activeEntryId by rememberSaveable { mutableStateOf<String?>(null) }
+        val activeEntry = activeEntryId?.let { id ->
+            SettingsEntry.entries.firstOrNull { it.name == id }
         }
         // 搜索词提到页面这一级：进出二级页时概览整体离开组合，留在概览内部会丢 ——
         // 返回后搜索框空着、列表却还是筛选后的样子，用户得重输一遍（Baymard 点过的失效模式）。
@@ -400,17 +449,21 @@ fun SettingsScreen(navController: NavController) {
         // 也不会因为另一种形态更短而被夹到顶部去。
         val overviewScroll = rememberScrollState()
         val expandedScroll = rememberScrollState()
-        // 每组都从顶部进入：remember(activeGroup) 换组即新建状态，天然回到 0 且不闪一帧
-        val detailScroll = remember(activeGroup) { ScrollState(0) }
-        // 切换只改状态：转场交给下面那个 StateSwap（进出各两百毫秒的交叉淡出）
+        // 每个入口都从顶部进入：remember(activeEntry) 换入口即新建状态，天然回到 0 且不闪一帧
+        val detailScroll = remember(activeEntry) { ScrollState(0) }
+        // 切换只改状态：转场交给下面那个 AnimatedContent（见 settingsSwapTransition）
         val switchLayout: (Boolean) -> Unit = { toCompact ->
             if (toCompact != compactLayout) {
-                activeGroupId = null
+                activeEntryId = null
                 AppPrefs.settingsCompact = toCompact
+                // 用户 2026-11-14：「长按过一次，再长按回来之后，这个提示就应该自动消失」。
+                // 「学会了」的判据是**真的切换过**，不是点过 ×；所以标记写在这里，
+                // 而不是只挂在 onDismissHint 上 —— 否则每次切回概览都要再看一遍同一句提示。
+                AppPrefs.markSettingsLayoutHintSeen()
             }
         }
         // 二级页里的系统返回键先回 1 级，不能直接退出设置页（Baymard：子页返回「2 steps back」是头号翻车）
-        BackHandler(enabled = activeGroup != null) { activeGroupId = null }
+        BackHandler(enabled = activeEntry != null) { activeEntryId = null }
 
         // 顶部返回按钮 + 标题
         Row(
@@ -418,7 +471,7 @@ fun SettingsScreen(navController: NavController) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             BackButton(onClick = {
-                if (activeGroup != null) activeGroupId = null else navController.popBackStack()
+                if (activeEntry != null) activeEntryId = null else navController.popBackStack()
             })
             Spacer(Modifier.width(12.dp))
             // 标题区同时是长按热区（48dp 高、占满剩余宽度）。
@@ -444,7 +497,7 @@ fun SettingsScreen(navController: NavController) {
                 contentAlignment = Alignment.CenterStart
             ) {
                 Text(
-                    text = activeGroup?.let { settingsGroupTitle(it) }
+                    text = activeEntry?.let { settingsEntryTitle(it) }
                         ?: stringResource(com.ilyskyo.blancall.R.string.settings),
                     style = MaterialTheme.typography.headlineMedium,
                     color = MaterialTheme.colorScheme.onBackground,
@@ -456,23 +509,41 @@ fun SettingsScreen(navController: NavController) {
 
         Spacer(Modifier.height(24.dp))
 
-        // 两态交叉淡出：新旧两份同时在场两百毫秒，换来的是**没有空白帧**。
-        // 单棵树原地换形态一定会有空档 —— 换形态那一帧的耗时被动画时钟一口吃掉，
-        // 慢机器上看到的就是「白了一下」。这里宁可多背一份组合，也不要那一闪。
-        StateSwap(
-            targetState = SettingsScreenKey(compact = compactLayout, groupId = activeGroupId),
+        // ── 形态切换的转场 ──
+        // 用户 2026-11-14：「长按切换两种布局时……要那种非常丝滑的收起和展开的效果」。
+        // 旧实现是 StateSwap 的纯交叉淡出（180/120）：两棵树在同一位置叠着溶开，
+        // 一屏 6 行目录与一屏 13 张卡片的文字会糊在一起，读起来是「闪了一下」而不是「展开」。
+        //
+        // 现在的编排（仍然**保留双树同时在场**，绝不退回单树换形态 —— 那会抓到空白帧，
+        // 见 StateSwap 的 KDoc）：
+        //   进场 = 淡入 220 + 从 18dp 外落下（NoBouncy 弹簧）+ 0.985 倍铺开（原点在顶边）
+        //   退场 = 淡出 120 + 反向 9dp 撤走（比进场快一档，旧内容先让位）
+        // 方向随目标翻转：切到完整布局时内容自上而下「铺开」，切回收起态时自下而上「收回」。
+        // 0.985 的纵向缩放小到看不出字形被拉长，只是给整块一个「正在长出来」的重量。
+        val swapEdgePx = with(LocalDensity.current) { SETTINGS_SWAP_EDGE.toPx().toInt() }
+        AnimatedContent(
+            targetState = SettingsScreenKey(compact = compactLayout, entryId = activeEntryId),
+            transitionSpec = { settingsSwapTransition(swapEdgePx) },
             label = "settingsLayout",
             modifier = Modifier.weight(1f)
         ) { key ->
-            val showSection: (SettingsGroup) -> Boolean = { group -> !key.compact || key.groupId == group.name }
-            val sectionTitlesVisible = key.groupId == null
+            val keyEntry = key.entryId?.let { id ->
+                SettingsEntry.entries.firstOrNull { it.name == id }
+            }
+            // 二级页只渲染这个入口含的分区；完整布局照旧全部平铺
+            val showSection: (SettingsGroup) -> Boolean = { group ->
+                !key.compact || keyEntry?.groups?.contains(group) == true
+            }
+            // 正文里要不要再写分区标题：**只有组名与入口名一字不差时才省**（见 sectionTitleVisible）。
+            // 旧规则是「二级页一律隐藏分区标题」，合并入口后会导致「内容与数据」页里
+            // 三段（内容管理 / 数据 / 扩展）没有小标题，读起来是一整块 —— 必须按组判。
 
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .verticalScroll(
                         when {
-                            key.groupId != null -> detailScroll
+                            key.entryId != null -> detailScroll
                             key.compact -> overviewScroll
                             else -> expandedScroll
                         }
@@ -480,18 +551,18 @@ fun SettingsScreen(navController: NavController) {
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
                 // 1 级概览（只在紧凑布局的顶层出现；完整布局与二级页都直接摊开各自的分区）
-                if (key.compact && key.groupId == null) {
+                if (key.compact && key.entryId == null) {
                     SettingsCompactOverview(
                         query = overviewQuery,
                         onQueryChange = { overviewQuery = it },
                         hintVisible = !layoutHintSeen,
                         onDismissHint = { AppPrefs.markSettingsLayoutHintSeen() },
-                        onOpenGroup = { group -> activeGroupId = group.name }
+                        onOpenEntry = { entry -> activeEntryId = entry.name }
                     )
                 }
                 if (showSection(SettingsGroup.APPEARANCE)) {
                     // ── 外观 ──
-                    SettingsSectionTitle(R.string.appearance, visible = sectionTitlesVisible)
+                    SettingsSectionTitle(R.string.appearance, visible = sectionTitleVisible(SettingsGroup.APPEARANCE, keyEntry))
 
                     GlassCard(
                         backdrop = false,
@@ -890,7 +961,7 @@ fun SettingsScreen(navController: NavController) {
 
                 if (showSection(SettingsGroup.THEME_COLOR)) {
                     // ── 主题色 ──
-                    SettingsSectionTitle(R.string.theme_color, visible = sectionTitlesVisible)
+                    SettingsSectionTitle(R.string.theme_color, visible = sectionTitleVisible(SettingsGroup.THEME_COLOR, keyEntry))
 
                     GlassCard(
                         backdrop = false,
@@ -1031,7 +1102,7 @@ fun SettingsScreen(navController: NavController) {
 
                 if (showSection(SettingsGroup.FEATURES)) {
                     // ── 特性 ──
-                    SettingsSectionTitle(R.string.features, visible = sectionTitlesVisible)
+                    SettingsSectionTitle(R.string.features, visible = sectionTitleVisible(SettingsGroup.FEATURES, keyEntry))
 
                     GlassCard(
                         backdrop = false,
@@ -1056,6 +1127,108 @@ fun SettingsScreen(navController: NavController) {
                             GlassSwitch(
                                 checked = autoIndentEnabled,
                                 onCheckedChange = { AppPrefs.autoIndentEnabled = it }
+                            )
+                        }
+
+                        HorizontalDivider(
+                            Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                        )
+
+                        // ── 手写：符号栏 ──
+                        // 开关与内容分两行，是因为它们是两个问题：「有没有这一排」和「这一排是哪几个」。
+                        // 分区里刻意不加二级小标题：一个卡片里再塞一行灰字，多的是噪音，不是信息。
+                        val symbolBar by AppPrefs.handwritingSymbolBarFlow.collectAsState()
+                        Row(
+                            Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(stringResource(com.ilyskyo.blancall.R.string.handwriting_symbol_bar),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface)
+                                Text(stringResource(com.ilyskyo.blancall.R.string.handwriting_symbol_bar_desc),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(end = 16.dp))
+                            }
+                            GlassSwitch(
+                                checked = symbolBar,
+                                onCheckedChange = { AppPrefs.handwritingSymbolBar = it }
+                            )
+                        }
+
+                        HorizontalDivider(
+                            Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                        )
+
+                        // 符号栏内容：整行可点，进底部面板编辑（中文 / 英文两套分别编辑）。
+                        // 行尾直接给两套的字符个数 —— 概览里最有信息量的就是「我配了几个」。
+                        val symbolsCjk by AppPrefs.handwritingSymbolsCjkFlow.collectAsState()
+                        val symbolsLatin by AppPrefs.handwritingSymbolsLatinFlow.collectAsState()
+                        var showSymbolSheet by remember { mutableStateOf(false) }
+                        Surface(
+                            onClick = { showSymbolSheet = true },
+                            color = MaterialTheme.colorScheme.surface,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                Modifier.padding(horizontal = 16.dp, vertical = 14.dp).fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(Modifier.weight(1f)) {
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.handwriting_symbols),
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurface)
+                                    Text(stringResource(com.ilyskyo.blancall.R.string.handwriting_symbols_desc),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(end = 16.dp))
+                                }
+                                Text(
+                                    stringResource(
+                                        com.ilyskyo.blancall.R.string.handwriting_symbols_count,
+                                        symbolsCjk.length,
+                                        symbolsLatin.length
+                                    ),
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                        if (showSymbolSheet) {
+                            HandwritingSymbolSheet(onDismiss = { showSymbolSheet = false })
+                        }
+
+                        HorizontalDivider(
+                            Modifier.padding(horizontal = 16.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
+                        )
+
+                        // ── 手写：低相似度是否直接上屏 ──
+                        // 默认关 = 现状（不够确定就停在候选条等点选）。打开后中文单字与连写
+                        // 都直接取 top-1；「疑似多字切不开」与「生僻字表外」两道守卫不受影响。
+                        val weakCommit by AppPrefs.handwritingAutoCommitWeakFlow.collectAsState()
+                        Row(
+                            Modifier.padding(horizontal = 16.dp, vertical = 8.dp).fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(Modifier.weight(1f)) {
+                                Text(stringResource(com.ilyskyo.blancall.R.string.handwriting_auto_commit_weak),
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurface)
+                                Text(stringResource(com.ilyskyo.blancall.R.string.handwriting_auto_commit_weak_desc),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(end = 16.dp))
+                            }
+                            GlassSwitch(
+                                checked = weakCommit,
+                                onCheckedChange = { AppPrefs.handwritingAutoCommitWeak = it }
                             )
                         }
 
@@ -1212,7 +1385,7 @@ fun SettingsScreen(navController: NavController) {
 
                 if (showSection(SettingsGroup.REVIEW)) {
                     // ── 复习 ──
-                    SettingsSectionTitle(R.string.memory_plan, visible = sectionTitlesVisible)
+                    SettingsSectionTitle(R.string.memory_plan, visible = sectionTitleVisible(SettingsGroup.REVIEW, keyEntry))
 
                     GlassCard(
                         backdrop = false,
@@ -1260,7 +1433,7 @@ fun SettingsScreen(navController: NavController) {
 
                 if (showSection(SettingsGroup.REMINDER)) {
                     // ── 学习提醒 ──
-                    SettingsSectionTitle(R.string.study_reminder, visible = sectionTitlesVisible)
+                    SettingsSectionTitle(R.string.study_reminder, visible = sectionTitleVisible(SettingsGroup.REMINDER, keyEntry))
 
                     ReminderSettingsCard()
 
@@ -1269,7 +1442,7 @@ fun SettingsScreen(navController: NavController) {
 
                 if (showSection(SettingsGroup.HELP)) {
                     // ── 帮助 ──
-                    SettingsSectionTitle(R.string.help_section, visible = sectionTitlesVisible)
+                    SettingsSectionTitle(R.string.help_section, visible = sectionTitleVisible(SettingsGroup.HELP, keyEntry))
 
                     GlassCard(
                         backdrop = false,
@@ -1379,7 +1552,7 @@ fun SettingsScreen(navController: NavController) {
 
                 if (showSection(SettingsGroup.CONTENT)) {
                     // ── 内容管理 ──
-                    SettingsSectionTitle(R.string.content_management, visible = sectionTitlesVisible)
+                    SettingsSectionTitle(R.string.content_management, visible = sectionTitleVisible(SettingsGroup.CONTENT, keyEntry))
 
                     GlassCard(
                         backdrop = false,
@@ -1425,7 +1598,7 @@ fun SettingsScreen(navController: NavController) {
 
                 if (showSection(SettingsGroup.DATA)) {
                     // ── 数据（学习数据整机备份，换机/重装可一键迁移） ──
-                    SettingsSectionTitle(R.string.data_section, visible = sectionTitlesVisible)
+                    SettingsSectionTitle(R.string.data_section, visible = sectionTitleVisible(SettingsGroup.DATA, keyEntry))
 
                     GlassCard(
                         backdrop = false,
@@ -1543,7 +1716,7 @@ fun SettingsScreen(navController: NavController) {
 
                 if (showSection(SettingsGroup.EXTENSIONS)) {
                     // ── 拓展功能 ──
-                    SettingsSectionTitle(R.string.extensions, visible = sectionTitlesVisible)
+                    SettingsSectionTitle(R.string.extensions, visible = sectionTitleVisible(SettingsGroup.EXTENSIONS, keyEntry))
 
                     GlassCard(
                         backdrop = false,
@@ -1657,7 +1830,7 @@ fun SettingsScreen(navController: NavController) {
 
                 if (showSection(SettingsGroup.ABOUT)) {
                     // ── 关于 ──
-                    SettingsSectionTitle(R.string.about_section, visible = sectionTitlesVisible)
+                    SettingsSectionTitle(R.string.about_section, visible = sectionTitleVisible(SettingsGroup.ABOUT, keyEntry))
 
                     GlassCard(
                         backdrop = false,
@@ -1694,11 +1867,12 @@ fun SettingsScreen(navController: NavController) {
                             modifier = Modifier.fillMaxWidth(),
                             // 二级页里标题栏已经写着「支持 Blancall」，这一行只留右侧动作按钮；
                             // 单子项时 SpaceBetween 会把按钮推到左边，所以按是否显示标题切排列
-                            horizontalArrangement = if (sectionTitlesVisible) Arrangement.SpaceBetween
-                            else Arrangement.End,
+                            horizontalArrangement =
+                                if (sectionTitleVisible(SettingsGroup.DONATION, keyEntry)) Arrangement.SpaceBetween
+                                else Arrangement.End,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            if (sectionTitlesVisible) {
+                            if (sectionTitleVisible(SettingsGroup.DONATION, keyEntry)) {
                                 Text(stringResource(com.ilyskyo.blancall.R.string.donation_heading), style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.primary)
@@ -1732,8 +1906,8 @@ fun SettingsScreen(navController: NavController) {
                                         onClick = {
                                             showDonationMenu = false
                                             SettingsSessionState.donationHidden = true
-                                            // 二级页里藏掉的正是这一页的全部内容：留在原地会看到一片空白
-                                            activeGroupId = null
+                                            // 入口页里还有「帮助」「关于」两段，藏掉赞赏不会留下空白页，
+                                            // 所以不退出二级页（旧版只有一个赞赏分区时才需要退）
                                         },
                                         label = {
                                             Column {
@@ -2192,6 +2366,219 @@ private fun CustomAccentSheet(
 }
 
 /**
+ * 符号栏预设池：自定义面板里可勾选的候选字符。
+ *
+ * 三族混排（中文标点 / 英文标点 / 理科常用），因为用户实际会同时需要它们：
+ * 语文默写要「，。？」、英语听写要 `' -`、理科填空要「↑↓⇌Δ°」。这里只是**候选**，
+ * 真正上栏的是勾中的那些 —— 上限见 [AppPrefs.SYMBOLS_MAX]。
+ *
+ * 刻意不放空格：符号栏是「一键一个字符」，空格会让人误以为能在面板里分词。
+ */
+private val SYMBOL_PRESETS: List<Char> = listOf(
+    // 中文标点
+    '，', '。', '、', '？', '！', '：', '；', '…', '《', '》', '（', '）', '·', '—',
+    // 英文标点（半角：英文空本就该用半角）
+    ',', '.', '?', '!', ';', ':', '\'', '-', '/', '(',
+    // 理科常用（化学方程式 / 数学关系）
+    '↑', '↓', '⇌', 'Δ', '°', '×', '÷', '√', '±', '≈', '≤', '≥',
+)
+
+/**
+ * 把「勾中的预设」与「自输的补充字符」合成一条符号串。
+ *
+ * 顺序规则：先按 [presets] 的固定顺序列出勾中项，再接自输字符。
+ * 为什么不用点击顺序：勾选顺序没有语义，而固定顺序保证「加了又删、删了又加」之后
+ * 符号栏不会悄悄换位 —— 位置稳定才谈得上肌肉记忆。
+ *
+ * 去重与长度上限统一由 `AppPrefs.normalizeSymbols` 在写回时执行，这里只负责
+ * 自输字符不与预设重复。
+ */
+internal fun composeSymbols(presets: List<Char>, selected: Set<Char>, custom: String): String {
+    val out = StringBuilder()
+    for (ch in presets) if (ch in selected) out.append(ch)
+    for (ch in custom) {
+        if (ch.isWhitespace() || ch.isHighSurrogate() || ch.isLowSurrogate()) continue
+        if (out.indexOf(ch.toString()) >= 0) continue
+        out.append(ch)
+    }
+    return out.toString()
+}
+
+/**
+ * 符号栏内容编辑面板（设置 → 特性 → 符号栏内容）。
+ *
+ * 中文 / 英文各一套 —— 中文空的符号（，。？！）和英文空的符号（, . ? !）本就不是一回事，
+ * 用一套会必然错一半。顶部两个 chip 切换当前编辑哪一套。
+ *
+ * 改动**立即写入** AppPrefs，没有「保存」：与自定义主题色同一套心智 —— 改完点完成收起，
+ * 不想要就恢复默认。手写板在练习页、不在这张面板后面，所以即时生效不会让人看不到结果。
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@Composable
+private fun HandwritingSymbolSheet(onDismiss: () -> Unit) {
+    val cjk by AppPrefs.handwritingSymbolsCjkFlow.collectAsState()
+    val latin by AppPrefs.handwritingSymbolsLatinFlow.collectAsState()
+    var editLatin by remember { mutableStateOf(false) }
+
+    val raw = if (editLatin) latin else cjk
+    val chosen = raw.toSet()
+    // 自输补充 = 当前集合里不在预设池的那些字符（输入框显示的就是这一段）
+    val custom = raw.filter { it !in SYMBOL_PRESETS }
+    val write: (String) -> Unit = { v ->
+        if (editLatin) AppPrefs.handwritingSymbolsLatin = v
+        else AppPrefs.handwritingSymbolsCjk = v
+    }
+
+    GlassModalBottomSheet(onDismissRequest = onDismiss) {
+        // ⚠️ 不要再套 Modifier.verticalScroll：GlassModalBottomSheet 的 contentScrollable
+        // 默认 true，已经给内容加了滚动。再叠一层，内层会拿到无限高约束 →
+        // 运行期直接崩「Vertically scrollable component was measured with an infinity
+        // maximum height constraints」（真机复现：一点「符号栏内容」应用就退出）。
+        Column(
+            Modifier
+                .padding(horizontal = 20.dp)
+                .padding(bottom = 24.dp)
+        ) {
+            Text(
+                stringResource(com.ilyskyo.blancall.R.string.handwriting_symbols_sheet_title),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(Modifier.height(12.dp))
+
+            // ── 编辑哪一套 ──
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf(
+                    stringResource(com.ilyskyo.blancall.R.string.handwriting_symbols_cjk) to false,
+                    stringResource(com.ilyskyo.blancall.R.string.handwriting_symbols_latin) to true,
+                ).forEach { (label, isLatin) ->
+                    val active = editLatin == isLatin
+                    AssistChip(
+                        onClick = { editLatin = isLatin },
+                        label = { Text(label, style = MaterialTheme.typography.labelLarge) },
+                        shape = SmoothRoundedCornerShape(8.dp),
+                        // 选中态加 1dp 主色描边：浅色主题下 primaryContainer（淡紫）与
+                        // surfaceVariant（浅灰）亮度太接近，只靠填色分不出「现在在编哪一套」。
+                        // 与底栏选中胶囊同一套语言（填色 + 描边）。
+                        border = if (active) BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null,
+                        colors = AssistChipDefaults.assistChipColors(
+                            containerColor = if (active) MaterialTheme.colorScheme.primaryContainer
+                            else MaterialTheme.colorScheme.surfaceVariant,
+                            labelColor = if (active) MaterialTheme.colorScheme.onPrimaryContainer
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    )
+                }
+            }
+            Spacer(Modifier.height(14.dp))
+
+            // ── 预设勾选 ──
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SYMBOL_PRESETS.forEach { ch ->
+                    val on = ch in chosen
+                    AssistChip(
+                        onClick = {
+                            val next = if (on) raw.filter { it != ch } else raw + ch
+                            write(next.toString())
+                        },
+                        label = { Text(ch.toString(), style = MaterialTheme.typography.labelLarge) },
+                        shape = SmoothRoundedCornerShape(8.dp),
+                        // 选中即上栏：加 1dp 主色描边，扫一眼就能数出哪几个在栏上
+                        border = if (on) BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null,
+                        colors = AssistChipDefaults.assistChipColors(
+                            containerColor = if (on) MaterialTheme.colorScheme.primaryContainer
+                            else MaterialTheme.colorScheme.surfaceVariant,
+                            labelColor = if (on) MaterialTheme.colorScheme.onPrimaryContainer
+                            else MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    )
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+
+            // ── 自输补充 ──
+            // 标签左、用量右：曾经写成一整行「补充字符 7 / 12」，读起来像是「补充了 7 个」。
+            // 7 是整个集合的长度（含勾选的预设），右对齐后语义变成「这一栏一共几个」。
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    stringResource(com.ilyskyo.blancall.R.string.handwriting_symbols_add),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    "${raw.length} / ${AppPrefs.SYMBOLS_MAX}",
+                    style = MaterialTheme.typography.labelSmall,
+                    // 到顶变主色：再加就进不去了，得先取消一个（否则用户会以为输入框坏了）
+                    color = if (raw.length >= AppPrefs.SYMBOLS_MAX) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            BasicTextField(
+                value = custom.toString(),
+                onValueChange = { input -> write(composeSymbols(SYMBOL_PRESETS, chosen, input)) },
+                singleLine = true,
+                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = MaterialTheme.colorScheme.onSurface
+                ),
+                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                modifier = Modifier.fillMaxWidth()
+            ) { inner ->
+                // 自绘容器：M3 OutlinedTextField 的 14dp 圆角与整页 10dp 不一致（旧反馈），
+                // 且它自带 56dp 最小高度，会让面板底部多出一段空白。
+                Box(
+                    Modifier
+                        .fillMaxWidth()
+                        .clip(SmoothRoundedCornerShape(10.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                        .padding(horizontal = 12.dp, vertical = 12.dp)
+                ) {
+                    if (custom.isEmpty()) {
+                        Text(
+                            stringResource(com.ilyskyo.blancall.R.string.handwriting_symbols_add_hint),
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        )
+                    }
+                    inner()
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                TextButton(
+                    onClick = {
+                        write(
+                            if (editLatin) AppPrefs.DEFAULT_SYMBOLS_LATIN
+                            else AppPrefs.DEFAULT_SYMBOLS_CJK
+                        )
+                    }
+                ) {
+                    Text(stringResource(com.ilyskyo.blancall.R.string.handwriting_symbols_reset))
+                }
+                Spacer(Modifier.weight(1f))
+                GlassButton(onClick = onDismiss) {
+                    Text(
+                        stringResource(com.ilyskyo.blancall.R.string.done),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
  * 触感强度的四个可选项：`value` 存进偏好（与 ui.common.HapticLevel 的字符串一一对应），
  * `label` 上屏。顺序就是屏幕上从左到右 —— 「关」放最后，避免手滑点掉全部反馈。
  */
@@ -2202,6 +2589,22 @@ private val hapticLevelChoices = listOf(
     "strong" to com.ilyskyo.blancall.R.string.haptic_strong,
     "off" to com.ilyskyo.blancall.R.string.haptic_off,
 )
+
+/**
+ * 正文分区标题该不该出现。
+ *
+ * 判据只有一条：**组名与入口名是不是同一个词**。相同就没必要在页内再写一遍
+ * （标题栏已经写着「外观」），不同就必须写 —— 合并入口里
+ * 「内容与数据」下面的「内容管理 / 数据 / 扩展」三段全靠这几个小标题分家。
+ * 展开态（entry == null）一律显示，与原布局逐字一致。
+ */
+@Composable
+private fun sectionTitleVisible(group: SettingsGroup, entry: SettingsEntry?): Boolean =
+    sectionTitleVisible(settingsGroupTitle(group), entry)
+
+@Composable
+private fun sectionTitleVisible(groupTitle: String, entry: SettingsEntry?): Boolean =
+    entry == null || groupTitle != settingsEntryTitle(entry)
 
 /**
  * 设置分区标题。

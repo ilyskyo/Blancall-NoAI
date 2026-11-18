@@ -85,6 +85,43 @@ object AppPrefs {
     private val _keepInkEnabledFlow = MutableStateFlow(true)
     val keepInkEnabledFlow: StateFlow<Boolean> = _keepInkEnabledFlow.asStateFlow()
 
+    /**
+     * 手写面板下方的符号栏（标点快捷排）是否显示，默认显示。
+     *
+     * 与 [handwritingSymbolsCjkFlow] 是两层：本开关回答「有没有这一排」，
+     * 那两项回答「这一排是哪几个字」。关掉的真实场景是小屏 / 分屏时想把那一行
+     * 高度让给书写区，或者用户的标点本来就全靠手写。
+     */
+    private val _handwritingSymbolBarFlow = MutableStateFlow(true)
+    val handwritingSymbolBarFlow: StateFlow<Boolean> = _handwritingSymbolBarFlow.asStateFlow()
+
+    /**
+     * 符号栏的中文 / 英文两套字符，按文种各取一套（空串 = 该文种不显示这一排）。
+     *
+     * 为什么存字符串而不是字符集合：符号里有全角标点、也有 ↑↓⇌ 这类非 ASCII 字符，
+     * 字符串是最省事、也最容易被备份/导出工具原样搬运的形态。解析见
+     * `ui.handwriting.symbolsOf`（按 UTF-16 码元拆，非 BMP 字符会丢弃）。
+     *
+     * 默认值与旧实现写死的 PUNCT_CJK / PUNCT_LATIN 逐字一致 —— 升级不改变任何手感。
+     */
+    private val _handwritingSymbolsCjkFlow = MutableStateFlow(DEFAULT_SYMBOLS_CJK)
+    val handwritingSymbolsCjkFlow: StateFlow<String> = _handwritingSymbolsCjkFlow.asStateFlow()
+    private val _handwritingSymbolsLatinFlow = MutableStateFlow(DEFAULT_SYMBOLS_LATIN)
+    val handwritingSymbolsLatinFlow: StateFlow<String> = _handwritingSymbolsLatinFlow.asStateFlow()
+
+    /**
+     * 低相似度识别是否**直接上屏**，默认关。
+     *
+     * - 关 = 现状：top-1 置信度不足 0.80、或与 top-2 拉不开 0.15 时，停在候选条等用户点选；
+     * - 开 = 中文单字与连写都直接取 top-1（用户原话「低相似度不选字，直接上最高相似度的」）。
+     *
+     * 边界（刻意不给开关）：**拉丁整词路径不受影响**（那里用的是整词阈值与答案先验，
+     * 见 `latinWordChars`）；**两道守卫也不放开** —— 「疑似多字切不开」与「期望字在
+     * 字表外」拦的是「写错了自己也不知道」，那和「懒得挑字」不是同一件事。
+     */
+    private val _handwritingAutoCommitWeakFlow = MutableStateFlow(false)
+    val handwritingAutoCommitWeakFlow: StateFlow<Boolean> = _handwritingAutoCommitWeakFlow.asStateFlow()
+
     private val _handwritingInputEnabledFlow = MutableStateFlow(false)
     /**
      * 作答输入方式：false=键盘输入（默认），true=手写输入。
@@ -152,7 +189,7 @@ object AppPrefs {
     private val _sentenceClozeNewEnabledFlow = MutableStateFlow(false)
     val sentenceClozeNewEnabledFlow: StateFlow<Boolean> = _sentenceClozeNewEnabledFlow.asStateFlow()
 
-    private val _sentenceTapExitEnabledFlow = MutableStateFlow(true)
+    private val _sentenceTapExitEnabledFlow = MutableStateFlow(false)
     /** 点按评级换卡时是否播放「旧卡向上飞出」的动画 */
     val sentenceTapExitEnabledFlow: StateFlow<Boolean> = _sentenceTapExitEnabledFlow.asStateFlow()
 
@@ -240,6 +277,12 @@ object AppPrefs {
         _settingsLayoutHintSeenFlow.value = prefs.getBoolean("settings_layout_hint_seen", false)
         _handwritingInputEnabledFlow.value = prefs.getBoolean("handwriting_input_enabled", false)
         _keepInkEnabledFlow.value = prefs.getBoolean("keep_ink_enabled", true)
+        _handwritingSymbolBarFlow.value = prefs.getBoolean("handwriting_symbol_bar", true)
+        _handwritingSymbolsCjkFlow.value =
+            prefs.getString("handwriting_symbols_cjk", DEFAULT_SYMBOLS_CJK) ?: DEFAULT_SYMBOLS_CJK
+        _handwritingSymbolsLatinFlow.value =
+            prefs.getString("handwriting_symbols_latin", DEFAULT_SYMBOLS_LATIN) ?: DEFAULT_SYMBOLS_LATIN
+        _handwritingAutoCommitWeakFlow.value = prefs.getBoolean("handwriting_auto_commit_weak", false)
         _articleTagFilterFlow.value = prefs.getStringSet("article_tag_filter", emptySet())
             ?.mapNotNull { it.toLongOrNull() }?.toSet() ?: emptySet()
         _articleTagIncludeUntaggedFlow.value = prefs.getBoolean("article_tag_include_untagged", false)
@@ -249,7 +292,7 @@ object AppPrefs {
             ?.mapNotNull { it.toLongOrNull() }?.toSet() ?: emptySet()
         _sentenceClozeEnabledFlow.value = prefs.getBoolean("sentence_cloze_enabled", true)
         _sentenceClozeNewEnabledFlow.value = prefs.getBoolean("sentence_cloze_new_enabled", false)
-        _sentenceTapExitEnabledFlow.value = prefs.getBoolean("sentence_tap_exit_enabled", true)
+        _sentenceTapExitEnabledFlow.value = prefs.getBoolean("sentence_tap_exit_enabled", false)
         _sentenceTapExitSpeedFlow.value =
             prefs.getFloat("sentence_tap_exit_speed", Motion.TAP_EXIT_DEFAULT_SPEED).coerceIn(0f, 1f)
         _hintLengthEnabledFlow.value = prefs.getBoolean("hint_length_enabled", true)
@@ -330,7 +373,7 @@ object AppPrefs {
      * 只影响点击 → 不影响上下滑动翻卡（那是手势本体，没有开关）。
      */
     var sentenceTapExitEnabled: Boolean
-        get() = if (::prefs.isInitialized) prefs.getBoolean("sentence_tap_exit_enabled", true) else true
+        get() = if (::prefs.isInitialized) prefs.getBoolean("sentence_tap_exit_enabled", false) else false
         set(value) {
             if (::prefs.isInitialized) {
                 prefs.edit { putBoolean("sentence_tap_exit_enabled", value) }
@@ -609,6 +652,58 @@ object AppPrefs {
             }
         }
 
+    /** 手写符号栏是否显示（见 [handwritingSymbolBarFlow]），默认显示 */
+    var handwritingSymbolBar: Boolean
+        get() = if (::prefs.isInitialized) prefs.getBoolean("handwriting_symbol_bar", true) else true
+        set(value) {
+            if (::prefs.isInitialized) {
+                prefs.edit { putBoolean("handwriting_symbol_bar", value) }
+                _handwritingSymbolBarFlow.value = value
+            }
+        }
+
+    /** 符号栏字符（中文）。写入前走 [normalizeSymbols]：去空白、去重、限长。 */
+    var handwritingSymbolsCjk: String
+        get() = if (::prefs.isInitialized) {
+            prefs.getString("handwriting_symbols_cjk", DEFAULT_SYMBOLS_CJK) ?: DEFAULT_SYMBOLS_CJK
+        } else {
+            DEFAULT_SYMBOLS_CJK
+        }
+        set(value) {
+            if (!::prefs.isInitialized) return
+            val v = normalizeSymbols(value)
+            prefs.edit { putString("handwriting_symbols_cjk", v) }
+            _handwritingSymbolsCjkFlow.value = v
+        }
+
+    /** 符号栏字符（拉丁/英文），规则同上。 */
+    var handwritingSymbolsLatin: String
+        get() = if (::prefs.isInitialized) {
+            prefs.getString("handwriting_symbols_latin", DEFAULT_SYMBOLS_LATIN) ?: DEFAULT_SYMBOLS_LATIN
+        } else {
+            DEFAULT_SYMBOLS_LATIN
+        }
+        set(value) {
+            if (!::prefs.isInitialized) return
+            val v = normalizeSymbols(value)
+            prefs.edit { putString("handwriting_symbols_latin", v) }
+            _handwritingSymbolsLatinFlow.value = v
+        }
+
+    /** 低相似度识别直接上屏（见 [handwritingAutoCommitWeakFlow]），默认关 */
+    var handwritingAutoCommitWeak: Boolean
+        get() = if (::prefs.isInitialized) {
+            prefs.getBoolean("handwriting_auto_commit_weak", false)
+        } else {
+            false
+        }
+        set(value) {
+            if (::prefs.isInitialized) {
+                prefs.edit { putBoolean("handwriting_auto_commit_weak", value) }
+                _handwritingAutoCommitWeakFlow.value = value
+            }
+        }
+
     /**
      * 设置文章列表标签筛选（[selectedTagIds] 空且 [includeUntagged] = false 时表示「全部」）。
      * 以字符串存 Long 集合（SP StringSet），读取容错解析（非法项丢弃）。
@@ -827,4 +922,45 @@ object AppPrefs {
                 _firstLaunchDoneFlow.value = value
             }
         }
+
+    /**
+     * 符号栏默认字符（中文）：逐字为 `，。、？！：；`（7 个全角标点），
+     * 与旧实现写死的 `PUNCT_CJK` 逐字一致 —— 默认值必须等于旧行为，升级不改手感。
+     *
+     * 为什么写成码位转义而不是直接写字符：全仓有一条「硬编码中文字符串只许减少」的
+     * 棘轮守卫（`HardcodedChineseRatchetTest`）。符号是**数据**不是界面文案 ——
+     * 它不随 UI 语言变（跟答案文种走），放进 strings.xml 只会被当成 6 份待翻译文案
+     * 去维护。转义让它不进棘轮计数，语义与可读性由本行注释兜住。
+     */
+    const val DEFAULT_SYMBOLS_CJK = "\uFF0C\u3002\u3001\uFF1F\uFF01\uFF1A\uFF1B"
+
+    /** 符号栏默认字符（拉丁/英文）：英文标点本就该是半角。 */
+    const val DEFAULT_SYMBOLS_LATIN = ",.?!;:'-"
+
+    /**
+     * 符号栏字符上限。
+     *
+     * 取 12 的依据：手机宽度下一行（FlowRow 折行前）约放得下 7–9 个符号键，
+     * 12 个意味着最多折成两行；再多就会把候选条和右侧清空/收起键挤出可视区。
+     */
+    const val SYMBOLS_MAX = 12
+
+    /**
+     * 规范化符号串：丢空白（含全角空格）、丢非 BMP 字符、去重、保序、截到 [SYMBOLS_MAX]。
+     *
+     * - 去重：两个键写同一个字，用户点哪个都一样，纯属误点来源；
+     * - 丢空白：符号栏是「一键一个字符」，空格混在里头看着像坏了（分词交给键盘）；
+     * - 丢代理项：存储里绝不留半个代理对 —— 否则渲染出来是豆腐块、字数统计也会翻倍。
+     *   代价是不支持 BMP 外字符（emoji），而化学/数学符号全在 BMP 内。
+     */
+    fun normalizeSymbols(raw: String): String {
+        val seen = LinkedHashSet<Char>()
+        for (ch in raw) {
+            if (ch.isWhitespace()) continue
+            if (ch.isHighSurrogate() || ch.isLowSurrogate()) continue
+            if (seen.size >= SYMBOLS_MAX) break
+            seen.add(ch)
+        }
+        return seen.joinToString("")
+    }
 }
