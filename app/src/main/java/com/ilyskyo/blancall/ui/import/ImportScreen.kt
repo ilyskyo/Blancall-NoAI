@@ -222,8 +222,8 @@ fun ImportScreen(navController: NavController) {
     ) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
                 .widthIn(max = 600.dp)
+                .fillMaxSize()
         ) {
         // ── 标题（固定，不参与滚动）──
         Row(
@@ -781,7 +781,7 @@ private fun AdaptiveTextFieldLabel(text: String) {
         overflow = TextOverflow.Clip,
         style = base.copy(fontSize = fontSize),
         onTextLayout = { result ->
-            if (result.hasVisualOverflow && fontSize.value > 10f) {
+            if (result.hasVisualOverflow && fontSize.value > 11f) {
                 fontSize = (fontSize.value - 0.5f).sp
             }
         }

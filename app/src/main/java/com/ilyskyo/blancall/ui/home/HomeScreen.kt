@@ -671,10 +671,10 @@ fun HomeScreen(
         }
         Surface(
             modifier = Modifier
-                .fillMaxSize()
                 // 内容宽上限：窄屏保持 600dp；宽屏放宽到 [GridMaxWidth]。（大屏自适应列数
                 // 需要更宽画布，上限过窄会把卡片拉成 600dp 级扁条——真机反馈。）
                 .widthIn(max = if (LocalIsLargeScreen) GridMaxWidth else 600.dp)
+                .fillMaxSize()
                 // 下拉跟手：内容整体下移，顶部露出品牌揭示区（揭示层在其下层绘制）
                 .graphicsLayer { translationY = homePullOffset.value },
             color = MaterialTheme.colorScheme.background

@@ -47,8 +47,8 @@ fun HelpScreen(
     ) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
                 .widthIn(max = 600.dp)
+                .fillMaxSize()
                 .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 20.dp)
         ) {
             if (welcomeMode) {
@@ -363,7 +363,24 @@ fun HelpScreen(
                     }
                 )
 
-
+                // ── 8. 手写作答 ──
+                // 排在「操作小贴士」之后：它讲的是操作层的事（怎么写、符号栏在哪）。
+                // 这一节两版逐字相同 —— 手写与符号栏是两版共有的功能。
+                HelpSection(
+                    title = stringResource(com.ilyskyo.blancall.R.string.help_174),
+                    expandedContent = {
+                        Text(
+                            stringResource(com.ilyskyo.blancall.R.string.help_175),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        SubTitle(stringResource(com.ilyskyo.blancall.R.string.help_176))
+                        Bullet(stringResource(com.ilyskyo.blancall.R.string.help_177))
+                        Bullet(stringResource(com.ilyskyo.blancall.R.string.help_178))
+                        Bullet(stringResource(com.ilyskyo.blancall.R.string.help_179))
+                        Bullet(stringResource(com.ilyskyo.blancall.R.string.help_180))
+                    }
+                )
 
                 Spacer(Modifier.height(8.dp))
             }

@@ -107,8 +107,8 @@ fun MistakeNotebookScreen(
         AmbientBackground()
         Column(
             modifier = Modifier
-                .fillMaxSize()
                 .widthIn(max = 720.dp)
+                .fillMaxSize()
                 .padding(horizontal = 20.dp)
         ) {
             Row(

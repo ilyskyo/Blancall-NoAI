@@ -73,8 +73,8 @@ fun WelcomeScreen(
     ) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
                 .widthIn(max = 600.dp)
+                .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 28.dp, vertical = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally

@@ -32,6 +32,7 @@ import androidx.compose.material.icons.outlined.School
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material.icons.outlined.TrackChanges
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material.icons.outlined.ViewAgenda
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -71,7 +72,9 @@ enum class AppIconKind {
     /** 使用引导（设置页「帮助」分组） */
     School,
     /** 语言（设置页「界面语言」标题后紧跟的「文A」合体字形，兼作视觉锚点） */
-    Language
+    Language,
+    /** 遮挡（阅读遮片配置列表：表示「把这一段藏起来」） */
+    VisibilityOff
 }
 
 /**
@@ -118,6 +121,7 @@ fun AppIcon(
         AppIconKind.Filter -> Icons.Outlined.FilterAlt
         AppIconKind.DragHandle -> Icons.Outlined.DragHandle
         AppIconKind.Refresh -> Icons.Outlined.Refresh
+        AppIconKind.VisibilityOff -> Icons.Outlined.VisibilityOff
         AppIconKind.Stylus -> null
         AppIconKind.Logo -> null
         AppIconKind.Language -> null

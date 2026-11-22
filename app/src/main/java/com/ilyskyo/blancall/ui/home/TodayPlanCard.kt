@@ -117,7 +117,7 @@ internal fun TodayPlanCard(
                 Text(
                     stringResource(R.string.today_plan_exam_behind),
                     style = MaterialTheme.typography.labelSmall,
-                    color = Macaron.warn().accent
+                    color = Macaron.warn().ink
                 )
             }
             // 今日目标进度：只有非零目标才显示，达成后换成强调色（不加新图标，保持一行）

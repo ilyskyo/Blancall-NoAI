@@ -62,6 +62,11 @@
     <string name="settings_layout_full">Full</string>
     <string name="settings_layout_hint">Long-press the title to switch layout</string>
     <string name="settings_layout_hint_sub">The layout is remembered next time</string>
+    <string name="settings_layout_switched_full">Switched to full layout · long-press the title to switch back</string>
+    <string name="settings_layout_switched_compact">Switched to compact layout · long-press the title to switch back</string>
+    <string name="settings_layout_undo">Undo</string>
+    <string name="settings_layout_state_compact">Compact layout · entry count %1$d</string>
+    <string name="settings_layout_state_full">Full layout · section count %1$d</string>
     <string name="settings_hint_got_it">Got it</string>
     <string name="settings_search_hint">Search settings</string>
     <string name="settings_search_empty">No matching settings</string>
@@ -74,6 +79,24 @@
     <string name="settings_entry_about">About &amp; support</string>
     <string name="settings_group_more">%1$d more</string>
     <string name="settings_item_theme_mode">Theme</string>
+    <string name="settings_reading_font_size">Font size</string>
+    <string name="settings_reading_line_height">Line spacing</string>
+    <string name="settings_reading_mask_desc">Cover words or clauses so you have to recall them</string>
+    <string name="settings_reading_mask_granularity">Mask granularity</string>
+    <string name="settings_pdf_view">PDF preview</string>
+    <string name="settings_reading_apply_all">Apply these settings to all articles</string>
+    <string name="settings_reading_apply_all_desc">Articles you tuned separately will be overwritten</string>
+    <string name="settings_reading_apply_all_confirm_title">Apply to all articles?</string>
+    <string name="settings_reading_apply_all_confirm_msg">Font size, line spacing, font, background and masking will change for every article. Each article keeps its own custom mask setup.</string>
+    <string name="settings_reading_applied">Applied to all articles</string>
+    <string name="settings_reading_scope_hint">These are the defaults for every article. An article you tuned in reading mode keeps its own values.</string>
+    <string name="settings_practice_title">Practice</string>
+    <string name="settings_handwriting_default">Handwrite by default</string>
+    <string name="settings_handwriting_default_desc">Go straight to the pen in practice</string>
+    <string name="settings_practice_back_warn">Ask before leaving practice</string>
+    <string name="settings_practice_back_warn_desc">Confirm when answers are not submitted yet</string>
+    <string name="settings_exam_date">Exam date</string>
+    <string name="settings_exam_unset">Not set</string>
     <string name="add_card">Add card</string>
     <string name="edit_card_config">Edit card settings</string>
     <string name="delete_card">Delete card</string>
@@ -1459,7 +1482,7 @@
     <string name="handwriting_symbol_bar">Enable symbol bar</string>
     <string name="handwriting_symbol_bar_desc">One-tap symbols under the writing area; turn it off for a taller canvas</string>
     <string name="handwriting_symbols">Symbol bar contents</string>
-    <string name="handwriting_symbols_desc">Pick the symbols you use, then add your own below</string>
+    <string name="handwriting_symbols_desc">Pick or add the symbols you use; swipe the bar when they don\'t fit one row</string>
     <string name="handwriting_symbols_count">Chinese %1$d · English %2$d</string>
     <string name="handwriting_auto_commit_weak">Commit low-confidence results</string>
     <string name="handwriting_auto_commit_weak_desc">No more stopping on uncertain characters; multi-character and rare-character guards still apply</string>
@@ -1467,8 +1490,12 @@
     <string name="handwriting_symbols_cjk">Chinese</string>
     <string name="handwriting_symbols_latin">English</string>
     <string name="handwriting_symbols_add">Extra characters</string>
-    <string name="handwriting_symbols_add_hint">Type characters not in the presets</string>
+    <string name="handwriting_symbols_add_hint">One symbol, e.g. ° or ≤</string>
     <string name="handwriting_symbols_reset">Reset to default</string>
+    <string name="handwriting_symbols_total">%1$d in total</string>
+    <string name="handwriting_symbols_add_action">Add</string>
+    <string name="handwriting_symbols_added">Added · tap to remove</string>
+    <string name="handwriting_symbols_only_cjk_latin">The symbol bar covers Chinese and English punctuation only: one symbol at a time — Chinese characters, Latin letters and whole phrases can\'t be added.</string>
     <string name="reminder_freq_daily">Daily</string>
     <string name="reminder_freq_five">5 days a week</string>
     <string name="reminder_freq_three">3 days a week</string>
@@ -1694,6 +1721,13 @@
     <string name="help_171">Data · study flow</string>
     <string name="help_172">On the Data page, scroll to the very top and keep pulling down; when the ring is full and the phone buzzes, let go to open the study flow, the planned articles laid out in time order.</string>
     <string name="help_173">In the study flow you can pause, resume or reschedule each article; scroll to the bottom and pull up, or tap back at the top left, to return to the Data page.</string>
+    <string name="help_174">Handwriting</string>
+    <string name="help_175">Switch the answer area to Handwriting and what you write drops straight into the current blank. Wrong stroke? Undo it, or cross it out to erase.</string>
+    <string name="help_176">Symbol bar</string>
+    <string name="help_177">The row under the writing area is the symbol bar: tap a symbol to insert it, without going back to the keyboard.</string>
+    <string name="help_178">When there are more symbols than fit, swipe left and right inside that row to reach the rest.</string>
+    <string name="help_179">Configure it in Settings under Symbol bar contents: separate sets for Chinese and English; tick the presets, or add one of your own.</string>
+    <string name="help_180">The symbol bar supports Chinese and English punctuation and symbols only. You add one symbol at a time — Chinese characters, Latin letters and whole phrases can\'t go in.</string>
     <string name="help_std_welcome_title">Welcome to Blancall</string>
     <string name="help_std_welcome_sub">Take a few minutes to learn the basics, then start reciting.</string>
     <string name="help_std_start">Get started with Blancall</string>
@@ -1932,4 +1966,23 @@
         <item quantity="one">%1$d char</item>
         <item quantity="other">%1$d chars</item>
     </plurals>
+    <string name="backup_importing_title">Restoring</string>
+    <string name="backup_importing_body">Writing the backup and reloading your study data. Please keep the app open.</string>
+    <string name="a11y_reveal_paragraph">Show this paragraph</string>
+    <!-- Search aliases: only feed the settings search, never shown (SettingsSearch.kt). -->
+    <string name="settings_search_alias_appearance">look,appearance,skin,theme,dark,light,night,font,size,language,glass,haptic,home,subtitle</string>
+    <string name="settings_search_alias_theme_color">color,colour,accent,tint,palette,custom,theme,hue,dynamic</string>
+    <string name="settings_search_alias_features">feature,function,indent,symbol,handwriting,ink,animation,page</string>
+    <string name="settings_search_alias_reading">reading,font,size,line,spacing,layout,background,mask,pdf,speed,weight,typeface</string>
+    <string name="settings_search_alias_practice">practice,hint,blank,cloze,handwriting,warning,back,default</string>
+    <string name="settings_search_alias_plan">memory,plan,review,interval,exam,goal,duration,progress</string>
+    <string name="settings_search_alias_reminder">reminder,notification,notify,push,time,days,frequency,quiet,alarm,silent</string>
+    <string name="settings_search_alias_help">help,guide,tour,walkthrough,reset,tutorial</string>
+    <string name="settings_search_alias_content">content,manage,tag,category,article</string>
+    <string name="settings_search_alias_data">data,backup,export,import,restore,archive,storage,size</string>
+    <string name="settings_search_alias_extensions">extension,library,pack,builtin,philosophy,gaokao,interchange,exchange</string>
+    <string name="settings_search_alias_about">about,version,build,brand,info</string>
+    <string name="settings_search_alias_donation">support,donate,donation,tip</string>
+    <!-- 检索噪音词：用户会在实词前加的修饰（「软件颜色」里的「软件」），剥掉后仍按实词查 -->
+    <string name="settings_search_noise">app,the,my,software</string>
 </resources>

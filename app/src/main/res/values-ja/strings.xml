@@ -61,6 +61,11 @@
     <string name="settings_layout_full">全体表示</string>
     <string name="settings_layout_hint">タイトルを長押しすると表示を切り替えられます</string>
     <string name="settings_layout_hint_sub">選んだ表示は次回も使われます</string>
+    <string name="settings_layout_switched_full">全体表示に切り替えました · タイトルを長押しで戻せます</string>
+    <string name="settings_layout_switched_compact">コンパクト表示に切り替えました · タイトルを長押しで戻せます</string>
+    <string name="settings_layout_undo">元に戻す</string>
+    <string name="settings_layout_state_compact">コンパクト表示 · %1$d 項目</string>
+    <string name="settings_layout_state_full">全体表示 · %1$d 項目</string>
     <string name="settings_hint_got_it">わかりました</string>
     <string name="settings_search_hint">設定を検索</string>
     <string name="settings_search_empty">一致する設定がありません</string>
@@ -73,6 +78,24 @@
     <string name="settings_entry_about">このアプリについて</string>
     <string name="settings_group_more">他 %1$d 件</string>
     <string name="settings_item_theme_mode">ライト/ダーク</string>
+    <string name="settings_reading_font_size">文字サイズ</string>
+    <string name="settings_reading_line_height">行間</string>
+    <string name="settings_reading_mask_desc">本文の語句や文節を隠して、思い出しながら読みます</string>
+    <string name="settings_reading_mask_granularity">マスクの粒度</string>
+    <string name="settings_pdf_view">PDF プレビュー</string>
+    <string name="settings_reading_apply_all">すべての記事をここの設定に合わせる</string>
+    <string name="settings_reading_apply_all_desc">個別に調整した記事も上書きされます</string>
+    <string name="settings_reading_apply_all_confirm_title">すべての記事に適用しますか？</string>
+    <string name="settings_reading_apply_all_confirm_msg">全記事の文字サイズ・行間・フォント・背景・マスクをここの値に変更します。記事ごとのカスタムマスク設定は残ります。</string>
+    <string name="settings_reading_applied">すべての記事に適用しました</string>
+    <string name="settings_reading_scope_hint">ここは全記事の既定値です。読書モードで個別に調整した記事はそちらが優先されます。</string>
+    <string name="settings_practice_title">練習</string>
+    <string name="settings_handwriting_default">既定で手書き入力</string>
+    <string name="settings_handwriting_default_desc">練習開始時からペンを使えます</string>
+    <string name="settings_practice_back_warn">練習中に離れるときに確認</string>
+    <string name="settings_practice_back_warn_desc">未提出の解答があるときだけ確認します</string>
+    <string name="settings_exam_date">試験日</string>
+    <string name="settings_exam_unset">未設定</string>
     <string name="add_card">カードを追加</string>
     <string name="edit_card_config">カード設定を編集</string>
     <string name="delete_card">カードを削除</string>
@@ -1390,7 +1413,7 @@
     <string name="handwriting_symbol_bar">記号バーを表示</string>
     <string name="handwriting_symbol_bar_desc">手書きエリア下のワンタップ記号行。オフにすると書き込み領域が広がります</string>
     <string name="handwriting_symbols">記号バーの内容</string>
-    <string name="handwriting_symbols_desc">よく使う記号を選択。下の欄で独自の文字も追加できます</string>
+    <string name="handwriting_symbols_desc">よく使う記号を選ぶか追加。1 行に収まらないときは左右にスワイプ</string>
     <string name="handwriting_symbols_count">中国語 %1$d · 英語 %2$d</string>
     <string name="handwriting_auto_commit_weak">低い確度でもそのまま確定</string>
     <string name="handwriting_auto_commit_weak_desc">不確かな字で選択を止めません。複数字・難字の判定は残ります</string>
@@ -1398,8 +1421,12 @@
     <string name="handwriting_symbols_cjk">中国語</string>
     <string name="handwriting_symbols_latin">英語</string>
     <string name="handwriting_symbols_add">追加の文字</string>
-    <string name="handwriting_symbols_add_hint">プリセットにない文字を入力</string>
+    <string name="handwriting_symbols_add_hint">記号を 1 つ入力（例：° や ≤）</string>
     <string name="handwriting_symbols_reset">既定に戻す</string>
+    <string name="handwriting_symbols_total">全 %1$d 個</string>
+    <string name="handwriting_symbols_add_action">追加</string>
+    <string name="handwriting_symbols_added">追加済み · タップで削除</string>
+    <string name="handwriting_symbols_only_cjk_latin">記号バーは中国語と英語の句読点・記号専用です。追加できるのは一度に 1 文字だけで、漢字・英単語・文章は入りません。</string>
     <string name="reminder_freq_daily">毎日</string>
     <string name="reminder_freq_five">週5日</string>
     <string name="reminder_freq_three">週3日</string>
@@ -1625,6 +1652,13 @@
     <string name="help_171">データ · 学習タスクフロー</string>
     <string name="help_172">「データ」ページで一番上までスクロールし、さらに下へ引き続けます。リングが満杯になり振動したら指を離すと、学習タスクフローが開きます（計画中の記事を時間順に並べたもの）。</string>
     <string name="help_173">タスクフローでは各記事を一時停止・再開・次回の復習日の変更ができます。一番下までスクロールして上へ引くか、左上の戻るでデータページに戻ります。</string>
+    <string name="help_174">手書き入力</string>
+    <string name="help_175">解答欄を「手書き」にすると、書いた文字がそのまま空欄に入ります。書き間違えたら取り消すか、線を引いて消せます。</string>
+    <string name="help_176">記号バー</string>
+    <string name="help_177">手書きエリアの下の行が記号バーです。記号をタップするとそのまま挿入され、キーボードに戻る必要はありません。</string>
+    <string name="help_178">記号が多くて 1 行に収まらないときは、その行を左右にスワイプすると続きが見られます。</string>
+    <string name="help_179">内容は「設定」の「記号バーの内容」で設定します。中国語用と英語用が別々にあり、定型の記号を選ぶか、自分で 1 つ追加できます。</string>
+    <string name="help_180">記号バーは中国語と英語の句読点・記号のみ対応します。追加できるのは一度に 1 記号で、漢字・英単語・文章は入りません。</string>
     <string name="help_std_welcome_title">Blancall へようこそ</string>
     <string name="help_std_welcome_sub">基本的な使い方を数分で確認すれば、暗記を始められます。</string>
     <string name="help_std_start">Blancall を始める</string>
@@ -1860,4 +1894,23 @@
     <plurals name="hint_length_badge">
         <item quantity="other">%1$d 字</item>
     </plurals>
+    <string name="backup_importing_title">復元中</string>
+    <string name="backup_importing_body">バックアップを書き込み、学習データを再読み込みしています。アプリを閉じないでください。</string>
+    <string name="a11y_reveal_paragraph">この段落を表示</string>
+    <!-- 検索用の別名。画面には出さない（SettingsSearch.kt）。 -->
+    <string name="settings_search_alias_appearance">外観,見た目,テーマ,ダーク,ライト,夜間,フォント,文字,サイズ,言語,ガラス,触感,ホーム</string>
+    <string name="settings_search_alias_theme_color">カラー,色,配色,アクセント,テーマカラー,パレット,カスタム,色合い</string>
+    <string name="settings_search_alias_features">機能,特徴,字下げ,インデント,記号,手書き,インク,アニメ,ページ</string>
+    <string name="settings_search_alias_reading">読書,フォント,文字,サイズ,行間,レイアウト,背景,マスク,PDF,速度,太さ</string>
+    <string name="settings_search_alias_practice">練習,ヒント,空所,手書き,警告,戻る,既定</string>
+    <string name="settings_search_alias_plan">記憶,プラン,計画,復習,間隔,試験,目標,時間,進捗</string>
+    <string name="settings_search_alias_reminder">リマインダー,通知,プッシュ,時刻,曜日,頻度,サイレント,アラーム</string>
+    <string name="settings_search_alias_help">ヘルプ,ガイド,チュートリアル,リセット,使い方</string>
+    <string name="settings_search_alias_content">コンテンツ,管理,タグ,分類,記事</string>
+    <string name="settings_search_alias_data">データ,バックアップ,エクスポート,インポート,復元,アーカイブ,容量</string>
+    <string name="settings_search_alias_extensions">拡張,ライブラリ,パック,内蔵,哲学,試験,交換</string>
+    <string name="settings_search_alias_about">バージョン,ビルド,情報,アプリ</string>
+    <string name="settings_search_alias_donation">支援,寄付,サポート,ドネーション</string>
+    <!-- 检索噪音词：用户会在实词前加的修饰（「软件颜色」里的「软件」），剥掉后仍按实词查 -->
+    <string name="settings_search_noise">アプリ,ソフト</string>
 </resources>

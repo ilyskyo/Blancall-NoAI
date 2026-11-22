@@ -177,6 +177,26 @@ class ReaderPrefsStore internal constructor(private val file: File) {
     }
 
     /**
+     * 把一份「全局默认值」写给所有已有存档的文章（设置页「让所有文章改用这里的设置」）。
+     *
+     * 与 [save] 的区别只有一处：**每篇文章自己的 `occlusionCustomConfigId` 保留**。
+     * 那不是一个外观值，而是「这篇用的是哪一套自定义遮挡」—— 统一改写会让所有文章
+     * 指向同一份配置，等于静默换掉用户给每篇做的选择。
+     *
+     * 没有任何存档时直接返回，不产生一次无意义的落盘。
+     */
+    fun applyToAll(prefs: ReaderPrefs) {
+        synchronized(lock) {
+            val map = loadLocked()
+            if (map.isEmpty()) return
+            map.forEach { (id, old) ->
+                map[id] = prefs.copy(occlusionCustomConfigId = old.occlusionCustomConfigId)
+            }
+            writeLocked(map)
+        }
+    }
+
+    /**
      * 删除该文章的存档（删除文章时的级联）。
      * 本类原先没有这个 API，所以 `ArticleViewModel` 的删除路径清不到它 ——
      * 每删一篇永久留一条孤儿，reader_prefs.json 无界增长。

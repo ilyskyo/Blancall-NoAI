@@ -277,10 +277,10 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
         AmbientBackground()
         Column(
             modifier = Modifier
-                .fillMaxSize()
                 // 大屏放宽上限：原先固定 600dp 上限在平板上会白白浪费一半横向空间，
                 // 卡片网格本就可以多列铺开。窄屏仍由 max 上限自然约束（<600dp 时等于铺满）。
                 .widthIn(max = if (LocalIsLargeScreen) GridMaxWidth else 600.dp)
+                .fillMaxSize()
                 .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 20.dp)
         ) {
         CoachMark(
@@ -330,7 +330,9 @@ fun ListScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                 ListHeaderAction(
                     key = "select_all",
                     label = stringResource(
-                        if (selectedIds.size == articles.size) com.ilyskyo.blancall.R.string.deselect_all
+                        // 判据必须和下面的动作同一个集合：筛选态下用 articles.size 会让按钮
+                        // 永远显示「全选」，而第二下点的却是清空。
+                        if (selectedIds.size == filteredArticles.size) com.ilyskyo.blancall.R.string.deselect_all
                         else com.ilyskyo.blancall.R.string.select_all
                     ),
                     priority = 0,
@@ -984,8 +986,8 @@ private fun AdaptiveButtonLabel(text: String) {
         style = style.copy(fontSize = fontSize),
         onTextLayout = { result ->
             // 溢出：按比例收一步（下限 8sp），下一帧重测直至放得下
-            if (result.hasVisualOverflow && fontSize.value > 8f) {
-                fontSize = (fontSize.value * 0.9f).coerceAtLeast(8f).sp
+            if (result.hasVisualOverflow && fontSize.value > 11f) {
+                fontSize = (fontSize.value * 0.9f).coerceAtLeast(11f).sp
             }
         }
     )
@@ -1124,7 +1126,7 @@ private fun ListHeaderActions(
             GlassButton(
                 onClick = action.onClick,
                 enabled = action.enabled,
-                modifier = Modifier.height(40.dp),
+                modifier = Modifier.heightIn(min = 40.dp),
             ) {
                 if (action.icon != null) {
                     AppIcon(
@@ -1146,7 +1148,7 @@ private fun ListHeaderActions(
             Box {
                 GlassButton(
                     onClick = { menuOpen = true },
-                    modifier = Modifier.height(40.dp),
+                    modifier = Modifier.heightIn(min = 40.dp),
                 ) {
                     AppIcon(
                         kind = AppIconKind.MoreVert,

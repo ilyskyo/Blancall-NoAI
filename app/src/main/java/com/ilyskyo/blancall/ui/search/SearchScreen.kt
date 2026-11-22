@@ -19,6 +19,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -151,6 +153,10 @@ fun SearchScreen(navController: NavController) {
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
+            // 进页即自动聚焦弹键盘：没有这两条，结果列表底部会被键盘永久盖住，
+            // 滚到尽头也看不到最后 2–4 条（与 ImportScreen 同一套 inset）。
+            .imePadding()
+            .navigationBarsPadding()
             .background(MaterialTheme.colorScheme.background)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
@@ -387,8 +393,9 @@ private fun SearchField(
                 Spacer(Modifier.width(6.dp))
                 Box(
                     modifier = Modifier
-                        .size(26.dp)
-                        .clip(SmoothRoundedCornerShape(13.dp))
+                        // 命中区取 44dp（搜索框高 46dp 的物理上限），不再是 26dp：
+                        // 原来落空的点正好落在输入框里，光标会跳走。
+                        .size(44.dp)
                         .pressClick { onQueryChange("") },
                     contentAlignment = Alignment.Center
                 ) {

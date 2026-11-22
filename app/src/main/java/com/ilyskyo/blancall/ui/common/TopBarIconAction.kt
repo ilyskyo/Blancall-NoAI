@@ -13,6 +13,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
 
@@ -46,7 +49,10 @@ fun TopBarIconAction(
                 hapticTier = HapticTier.Toggle,
             )
             .clip(SmoothRoundedCornerShape(10.dp))
-            .clickable(interactionSource = src, indication = null, enabled = enabled, onClick = onClick),
+            .clickable(interactionSource = src, indication = null, enabled = enabled, onClick = onClick)
+            // clickable 会合并子节点的 contentDescription，但不给角色 ——
+            // 读屏能念出名字，却不会说「按钮」。这一层补上角色，约定才完整。
+            .semantics { role = Role.Button },
         contentAlignment = Alignment.Center
     ) {
         AppIcon(

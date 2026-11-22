@@ -217,8 +217,8 @@ fun StatisticsScreen(navController: NavController, articleId: Long) {
         // 固定顶部栏（不随记录滚动）：返回 + 标题
         Column(
             modifier = Modifier
-                .fillMaxSize()
                 .widthIn(max = 600.dp)
+                .fillMaxSize()
         ) {
             Row(
                 modifier = Modifier
@@ -247,7 +247,7 @@ fun StatisticsScreen(navController: NavController, articleId: Long) {
                 if (articleTitle != null) {
                     GlassButton(
                         onClick = { navController.navigate("reader/$articleId") },
-                        modifier = Modifier.height(40.dp),
+                        modifier = Modifier.heightIn(min = 40.dp),
                     ) {
                         Text(
                             stringResource(R.string.view_article),
@@ -259,7 +259,7 @@ fun StatisticsScreen(navController: NavController, articleId: Long) {
                 }
                 GlassButton(
                     onClick = { navController.navigate("mistakes?articleId=$articleId") },
-                    modifier = Modifier.height(40.dp)
+                    modifier = Modifier.heightIn(min = 40.dp)
                 ) {
                     Text(
                         stringResource(R.string.mistake_notebook_entry),
@@ -798,7 +798,7 @@ private fun RecordCard(
                         modeLabel,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
                         style = MaterialTheme.typography.labelSmall,
-                        color = Macaron.info().accent,
+                        color = Macaron.info().ink,
                         fontWeight = FontWeight.Medium
                     )
                 }

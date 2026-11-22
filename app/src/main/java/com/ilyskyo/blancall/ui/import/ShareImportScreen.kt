@@ -87,8 +87,8 @@ fun ShareImportScreen(
         AmbientBackground()
         Column(
             modifier = Modifier
-                .fillMaxSize()
                 .widthIn(max = 720.dp)
+                .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
         ) {

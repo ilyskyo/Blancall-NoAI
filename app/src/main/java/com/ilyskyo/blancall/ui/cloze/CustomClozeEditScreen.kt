@@ -429,8 +429,8 @@ fun CustomClozeEditScreen(
     ) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
                 .widthIn(max = 600.dp)
+                .fillMaxSize()
                 .padding(horizontal = 20.dp)
         ) {
             // 首次进入教编辑手势：点按选中挖空、长按句子切换粒度（看过即不再出现）

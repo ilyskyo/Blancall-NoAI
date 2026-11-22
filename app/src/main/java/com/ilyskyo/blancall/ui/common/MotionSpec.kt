@@ -14,6 +14,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.animation.core.snap
@@ -225,6 +226,17 @@ object Motion {
      */
     fun itemSlide(): FiniteAnimationSpec<IntOffset> =
         offsetSpring(Spring.DampingRatioNoBouncy, Spring.StiffnessMedium)
+
+    /**
+     * 设置页两种形态之间那 18dp 的位移（`slideInVertically` / `slideOutVertically`）。
+     *
+     * **必须与 [reveal] 同一条弹簧**（NoBouncy + MediumLow，约 230ms 收敛）：
+     * 位移 120ms 到位、显影 230ms 才满，慢放就是「先落位、后显影」——
+     * 像信号差时的逐行刷新，而不是一次形变。[itemSlide] 是 Medium（约 120ms），
+     * 差近一倍，不能拿来顶这一条。
+     */
+    fun swapSlide(): FiniteAnimationSpec<IntOffset> =
+        offsetSpring(Spring.DampingRatioNoBouncy, Spring.StiffnessMediumLow)
 
     // ── 完成页入场（句子卡片「本轮的句子都记完了」）──
     //
@@ -563,6 +575,16 @@ object MotionFade {
     const val itemEnter = 220
 
     /**
+     * 设置页双态切换时新树的显影（200ms）。
+     *
+     * 与位移的 230ms 一起收尾：两条差 30ms 以内，眼睛读不出「两段动画」。
+     * 仍高于 [enter]（180）—— 整页换形态不该比一个控件的显隐更快。
+     * 不复用 [itemEnter]（220）：那一条是列表项的入场，差这 20ms 会让位移先到位、
+     * alpha 再追一截，正是要修的「先落位后显影」。
+     */
+    const val swapEnter = 200
+
+    /**
      * 冷启动启动屏的退场时长。播这段时间时首帧已经画上屏了，启动屏只是淡走让位，
      * 所以它必须短于「启动已完成」的感知阈值 —— 长了像在拖延。
      */
@@ -656,6 +678,20 @@ object MotionFade {
 
     fun color(durationMs: Int): FiniteAnimationSpec<Color> =
         if (Motion.reduced) snap() else tween(durationMs)
+
+    /**
+     * 长按预热线的推进。**必须线性**，而且时长由系统 `longPressTimeout` 给，
+     * 所以这里收的是参数而不是常量。
+     *
+     * 为什么不能复用 [number]：那一条是 FastOutSlowIn，线会在 200ms 左右就冲到七成，
+     * 而提交其实还没发生。预热线是「还要按多久」的读数，不是装饰 —— 它和阈值必须同一时钟。
+     */
+    fun armSweep(durationMs: Int): FiniteAnimationSpec<Float> =
+        if (Motion.reduced) snap() else tween(durationMs, easing = LinearEasing)
+
+    /** 预热中断（抬手 / 滑出 slop）时的退回：60ms，快而不作势。 */
+    fun armRelax(): FiniteAnimationSpec<Float> =
+        if (Motion.reduced) snap() else tween(60, easing = LinearEasing)
 }
 
 /** 列表项按 index 递进的延迟毫秒数，封顶在 [MotionFade.staggerCap]。 */

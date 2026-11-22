@@ -254,8 +254,8 @@ fun StudyTaskDetailScreen(navController: NavController, articleId: Long) {
         AmbientBackground()
         Column(
             modifier = Modifier
-                .fillMaxSize()
                 .widthIn(max = 600.dp)
+                .fillMaxSize()
         ) {
             Row(
                 modifier = Modifier
@@ -957,7 +957,7 @@ private fun DetailRecordsCard(records: List<PracticeRecord>, onViewAll: () -> Un
                 ) {
                     SurfacePill(
                         text = recordModeLabel(record.mode),
-                        color = Macaron.info().accent
+                        color = Macaron.info().ink
                     )
                     Spacer(Modifier.width(8.dp))
                     Text(

@@ -57,6 +57,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -79,6 +80,7 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -129,6 +131,7 @@ import com.ilyskyo.blancall.ui.common.GlassCard
 import com.ilyskyo.blancall.ui.common.GlassSwitch
 import com.ilyskyo.blancall.ui.common.Motion
 import com.ilyskyo.blancall.ui.common.MotionFade
+import com.ilyskyo.blancall.ui.common.SymbolKey
 import com.ilyskyo.blancall.ui.common.LocalIsLargeScreen
 import com.ilyskyo.blancall.ui.common.MarkdownText
 import com.ilyskyo.blancall.ui.common.PressTier
@@ -157,6 +160,28 @@ import java.time.DayOfWeek
 import java.time.LocalDateTime
 import java.util.Date
 import java.util.Locale
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.positionChange
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.window.DialogProperties
+import com.ilyskyo.blancall.ui.common.rememberConfirmHaptic
+import kotlinx.coroutines.delay
 
 /**
  * 语言名用固定字形渲染。
@@ -180,7 +205,29 @@ private fun localeNameStyle(choice: AppLocale, base: TextStyle): TextStyle =
  * 注意存的是**入口**（[SettingsEntry]）而不是分区（[SettingsGroup]）：
  * 一级目录行是入口，一个入口可能展开两三个分区（见 SettingsEntry.groups）。
  */
+/**
+ * 备份导入闸门（进程级）。
+ *
+ * 导入是整库替换 + 全量重载，要跑几秒到十几秒。原先确认后弹窗立刻消失、界面毫无变化，
+ * 用户会以为没点上，再点一次 —— 两条 NonCancellable 协程并发写同一个 filesDir，
+ * 这是真会把学习数据写坏的路径。
+ *
+ * 状态放文件级而不是 remember：离开设置页再回来，闸门必须还锁着；
+ * 同时它必须是 Compose State —— 旧页面销毁后，新页面的进度框要能跟着协程结束一起消失。
+ */
+private object BackupImportGate {
+    var running by mutableStateOf(false)
+}
+
 private data class SettingsScreenKey(val compact: Boolean, val entryId: String?)
+
+/**
+ * 切换回执要退回的那一态。
+ *
+ * 只记「哪一形态、哪一层」：滚动位置不用记 —— 两份 ScrollState 提到页面这一级，
+ * 从没被销毁过，切回去就是原位。
+ */
+private data class SettingsSwapReceipt(val compact: Boolean, val entryId: String?)
 
 /** 形态切换时新内容的垂直行程：18dp 够读出方向，又不至于读成「翻页」。 */
 private val SETTINGS_SWAP_EDGE = 18.dp
@@ -188,35 +235,160 @@ private val SETTINGS_SWAP_EDGE = 18.dp
 /**
  * 新内容起手的纵向缩放。
  *
- * 0.985 是「几乎看不出被压缩、但整块确实在长出来」的下限：再小一格（0.97）会在
- * 大字号下把正文行高拉出可见的变形；完全不缩放又只剩平移，读起来像被推了一下。
+ * 2026-11-18 由 0.985 收到 0.99：容器是 `weight(1f)` 撑满的固定高度，缩放会让整块向内收 ——
+ * 600dp 宽下 0.985 是四边各让 4.5dp、700dp 高时底部收 5dp，慢放能看见最后一屏上移再回位。
+ * 0.99 的收幅减半，「正在长出来」的重量几乎不变，边缘抖动减半。
  */
-private const val SETTINGS_SWAP_SCALE = 0.985f
+private const val SETTINGS_SWAP_SCALE = 0.99f
+
+/** 超过这个系统字号就禁用缩放：字形被纵向压 1%，在 28sp 标题上就是能看见的「被挤了一下」。 */
+private const val SETTINGS_SWAP_SCALE_MAX_FONT = 1.15f
+
+/** 转场锁：这段时间内再长按不改目标态（三棵树叠着 = 糊）。 */
+private const val SETTINGS_SWAP_LOCK_MS = 260L
+
+/** 回执停留 3.2s。它只是「刚才那一下是我干的、能退」，不是要用户读的通知。 */
+private const val SETTINGS_RECEIPT_MS = 3200L
+
+/** 逐块展开的步长与封顶档数：12 组全按 30ms 递进要 360ms，比转场本身还长。 */
+private const val SETTINGS_REVEAL_STEP_MS = 30L
+private const val SETTINGS_REVEAL_MAX_STEP = 4
+
+/** 逐块展开最晚结束的时刻：锁 260 + 最后一档 120 + 单块约 230，留一点余量后清标志。 */
+private const val SETTINGS_REVEAL_TOTAL_MS = 600L
+
+/** 分区块之间的间距（与 Column 的 spacedBy 同值；块内要保持同一节奏）。 */
+private val SETTINGS_BLOCK_GAP = 12.dp
+
+/** 长按热区在标题文字左右各留的余量。 */
+private val SETTINGS_HOT_PAD = 8.dp
+
+/** 标题换字时那 2dp 上移。 */
+private val SETTINGS_TITLE_RISE = 2.dp
+
+/** 预热进度走到这里就浮出目标态名（约 175ms，比 500ms 的阈值早得多 —— 它是预告）。 */
+private const val SETTINGS_AIM_THRESHOLD = 0.35f
+
+/** 预热细线的粗细。 */
+private val SETTINGS_ARM_LINE = 2.dp
+
+/** 锚定时往上留的余量：分区标题不要正好贴着顶边。 */
+private val SETTINGS_ANCHOR_PAD = 12.dp
 
 /**
  * 设置页两种形态之间的转场。
  *
- * 进场比退场慢一档（220 对 120）：旧内容先撤，新内容再铺开，中间没有两屏文字互糊的阶段。
- * 位移一律走 [Motion.itemSlide]（NoBouncy），缩放走 [Motion.reveal] ——
- * 整块内容的缩放过冲会把页面边缘顶出容器，那是「弹歪了」而不是「有重量」。
+ * 四条纪律，缺一条就会读成「页换了」而不是「东西展开了」：
+ * 1. **进场比退场慢一档**（200/230 对 120）：旧内容先撤，新内容再铺开，中间没有两屏文字互糊。
+ * 2. **位移与显影同拍**：[Motion.swapSlide] 与 [Motion.reveal] 是同一条弹簧（约 230ms），
+ *    淡入 200 收在同一个尾巴上。旧版位移 120、淡入 220，慢放是「先落位、后显影」。
+ * 3. **方向随目标翻转**：旧内容朝「新内容来的反方向」撤走 —— 展开时向上、收起时向下。
+ *    旧版恒为向上，收起时两棵树同向，读不出「收起来」。
+ * 4. **顶栏不动**：返回键与标题是整段转场里唯一的静止参照物。
  */
 private fun AnimatedContentTransitionScope<SettingsScreenKey>.settingsSwapTransition(
     edgePx: Int,
+    fontScale: Float,
 ): ContentTransform {
     val toExpanded = !targetState.compact
     // 展开：新内容从上方落下来；收回：新内容从下方升上来
     val enterOffset = if (toExpanded) -edgePx else edgePx
-    val enter = fadeIn(MotionFade.alpha(MotionFade.itemEnter)) +
-        slideInVertically(Motion.itemSlide()) { enterOffset } +
+    val enter = fadeIn(MotionFade.alpha(MotionFade.swapEnter)) +
+        slideInVertically(Motion.swapSlide()) { enterOffset } +
         scaleIn(
-            initialScale = SETTINGS_SWAP_SCALE,
+            initialScale = if (fontScale <= SETTINGS_SWAP_SCALE_MAX_FONT) SETTINGS_SWAP_SCALE else 1f,
             animationSpec = Motion.reveal(),
             // 展开时原点在顶边（内容自顶向下长出来），收回时在底边（自底向上收回去）
             transformOrigin = if (toExpanded) TransformOrigin(0.5f, 0f) else TransformOrigin(0.5f, 1f),
         )
     val exit = fadeOut(MotionFade.alpha(MotionFade.exit)) +
-        slideOutVertically(Motion.itemSlide()) { -edgePx / 2 }
+        slideOutVertically(Motion.itemSlide()) {
+            // 旧内容朝「新内容来的反方向」撤：展开时向上让位，收起时向下沉走
+            if (toExpanded) -edgePx / 2 else edgePx / 2
+        }
     return enter togetherWith exit
+}
+
+/**
+ * 顶栏标题换字（设置 ↔ 某个入口名）。
+ *
+ * 旧版是硬切：内容 220ms 慢慢显影，标题却在一帧里换了字，两处节奏打架。
+ * 这里 120ms 淡入 + 2dp 上移，与内容的首拍对齐，但不参与整块转场 —— 标题是参照物。
+ */
+private fun AnimatedContentTransitionScope<String>.settingsTitleTransition(
+    risePx: Int,
+): ContentTransform {
+    val enter = fadeIn(MotionFade.alpha(MotionFade.exit)) +
+        slideInVertically(Motion.itemSlide()) { risePx }
+    val exit = fadeOut(MotionFade.alpha(MotionFade.exit)) +
+        slideOutVertically(Motion.itemSlide()) { -risePx }
+    // 两段标题宽度不同，裁剪会在换字瞬间切掉长标题的字头
+    return (enter togetherWith exit).using(SizeTransform(clip = false))
+}
+
+/**
+ * 一个设置分区块（分区标题 + 卡片 + 尾距）作为整体进出。
+ *
+ * 为什么要包一层而不是继续让它们当 Column 的直接子项：
+ * 只有成为一个节点，才能让「这一块」自己从 0 高度长出来 —— 那正是
+ * 用户 2026-11-18 要的「每个设置项都丝滑地收起、展开」。
+ *
+ * `revealDelayMs == null` 时完全不参与展开（锚点之上的块、以及不是布局切换的场合）：
+ * 它们若也从 0 高度长出来，锚点那一块会被推着往下漂。
+ *
+ * 顺带承担锚点登记：块的 y = 分区标题的 y，`positionInParent()` 就是滚动内容坐标
+ * （滚动位移作用在父 Column 的 placement 上，不影响子项相对父的坐标）。
+ */
+@Composable
+private fun SettingsGroupBlock(
+    group: SettingsGroup,
+    showSection: (SettingsGroup) -> Boolean,
+    revealDelay: (SettingsGroup) -> SettingsReveal?,
+    sectionTops: MutableMap<SettingsGroup, Int>?,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    if (!showSection(group)) return
+    val positioner = if (sectionTops == null) Modifier else Modifier.onGloballyPositioned { coords ->
+        sectionTops[group] = coords.positionInParent().y.roundToInt()
+    }
+    val reveal = revealDelay(group)
+    if (reveal == null) {
+        Column(
+            modifier = Modifier.fillMaxWidth().then(positioner),
+            verticalArrangement = Arrangement.spacedBy(SETTINGS_BLOCK_GAP),
+            content = content,
+        )
+        return
+    }
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(reveal) {
+        if (reveal.delayMs > 0) delay(reveal.delayMs)
+        shown = true
+    }
+    AnimatedVisibility(
+        visible = shown,
+        modifier = positioner,
+        // 高度走 Motion.contentSize()（NoBouncy 弹簧，减动效下坍缩成 snap）：
+        // 子项按最终尺寸测量一次，只有外层报出来的高度在长 —— 每帧不会重排十几行文字。
+        // 不能长高的场合（新树的滚动位置非 0）只做错峰淡入，见 growThisTree。
+        enter = (if (reveal.grow) {
+            expandVertically(Motion.contentSize(), expandFrom = Alignment.Top)
+        } else {
+            EnterTransition.None
+        }) + fadeIn(MotionFade.alpha(MotionFade.swapEnter)),
+        exit = (if (reveal.grow) {
+            shrinkVertically(Motion.contentSize(), shrinkTowards = Alignment.Top)
+        } else {
+            ExitTransition.None
+        }) + fadeOut(MotionFade.alpha(MotionFade.exit)),
+        label = "settingsGroup",
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(SETTINGS_BLOCK_GAP),
+            content = content,
+        )
+    }
 }
 
 @Composable
@@ -413,6 +585,126 @@ fun SettingsScreen(navController: NavController) {
         }
     }
 
+    // ── 布局双态（渐进式披露）──
+    // 紧凑 = 1 级概览 + 通用 2 级详情页；完整 = 现有分区原样平铺（逐字保留，老用户的安全区）。
+    // 双态的意义：展开态承担「原位保护」（NN/g Spatial Memory 要求常用区在原位留副本），
+    // 收起态承担「两级结构 + 搜索」（Android 官方对 15+ 项设置的要求），两者不冲突。
+    val compactLayout by AppPrefs.settingsCompactFlow.collectAsState()
+    val layoutHintSeen by AppPrefs.settingsLayoutHintSeenFlow.collectAsState()
+    // 当前打开的是哪一个入口；null = 1 级（概览 / 完整布局）。完整布局下恒为 null。
+    // 存 id 而不是枚举本身：rememberSaveable 只认可序列化类型，转屏 / 分屏重建后
+    // 才还能停在原来那一页（平板上分屏拖动分隔线会反复重建 Activity）。
+    var activeEntryId by rememberSaveable { mutableStateOf<String?>(null) }
+    val activeEntry = activeEntryId?.let { id ->
+        SettingsEntry.entries.firstOrNull { it.name == id }
+    }
+    // 搜索词提到页面这一级：进出二级页时概览整体离开组合，留在概览内部会丢 ——
+    // 返回后搜索框空着、列表却还是筛选后的样子，用户得重输一遍（Baymard 点过的失效模式）。
+    // 两种布局共用同一个词：切换布局时用户的查询意图不该被清掉，
+    // 只是同一句话在紧凑布局筛入口、在完整布局筛分区（见 matchingGroups）。
+    var settingsQuery by rememberSaveable { mutableStateOf("") }
+    // 两种形态各记各的滚动位置：切过去还能回到自己上次停的地方（空间记忆），
+    // 也不会因为另一种形态更短而被夹到顶部去。
+    // 走 rememberSaveable：转屏 / 分屏拖分隔线会反复重建 Activity，普通 remember 每次都归零。
+    val overviewScroll = rememberSaveable(saver = ScrollState.Saver) { ScrollState(0) }
+    // 完整态里每个分区标题相对滚动内容顶部的 y（px）。只放内存、**不做 State**：
+    // 每次布局都会写一遍，做成 State 等于让整页跟着布局重组。
+    val sectionTops = remember { HashMap<SettingsGroup, Int>() }
+    // 切到完整态时把锚点当**初值**交给新的 ScrollState —— 初值在首帧之前就生效，
+    // 所以不会出现「先落到顶部、下一帧再跳下去」。generation 换了才重建。
+    var expandedAnchor by remember { mutableIntStateOf(0) }
+    var expandedGeneration by remember { mutableIntStateOf(0) }
+    val expandedScroll = rememberSaveable(expandedGeneration, saver = ScrollState.Saver) {
+        ScrollState(expandedAnchor)
+    }
+    // 每个入口都从顶部进入：remember(activeEntry) 换入口即新建状态，天然回到 0 且不闪一帧
+    val detailScroll = remember(activeEntry) { ScrollState(0) }
+
+    // 转场锁：260ms 内再长按不改目标态。否则 AnimatedContent 会把中间态当成起点，
+    // 三棵树同时在场 —— 不是崩，是糊。
+    var swapLocked by remember { mutableStateOf(false) }
+    LaunchedEffect(swapLocked) {
+        if (swapLocked) {
+            delay(SETTINGS_SWAP_LOCK_MS)
+            swapLocked = false
+        }
+    }
+    // 回执：只有「刚切过」才存在。撤销窗口与它同寿，到点自己走。
+    var receipt by remember { mutableStateOf<SettingsSwapReceipt?>(null) }
+    LaunchedEffect(receipt, swapLocked) {
+        if (receipt == null || swapLocked) return@LaunchedEffect
+        delay(SETTINGS_RECEIPT_MS)
+        receipt = null
+    }
+    // 「这一次切换」要不要让每个设置块依次展开。只在布局切换的那一次为真：
+    // 首次进设置页、转屏重建都不该把展开放一遍。
+    var revealPending by remember { mutableStateOf(false) }
+    // 切换那一刻概览是不是停在顶部（1 = 停在顶部）。存快照，而不是让组合直接读
+    // ScrollState.value：那是个 State，在组合里读等于让整页跟着每一帧滚动重组。
+    var overviewWasAtTop by remember { mutableIntStateOf(1) }
+    // 这次切到完整态时锚在哪一组：锚点之上的块不参与高度展开，否则它们会把锚点推下去
+    var anchorOrdinalAtSwitch by remember { mutableIntStateOf(0) }
+    // 切到完整态时注入的初始滚动位置。非 0 时**不能让块从 0 高度长出来**：
+    // ScrollState 会在内容变矮时把 value 夹到 maxValue，锚点会被夹到 0 并永远丢失。
+    var anchorScrollAtSwitch by remember { mutableIntStateOf(0) }
+    // 两处 dp → px 的换算：锚点余量与标题换字的上移都要在 switchLayout / 标题区之前算好
+    val anchorPadPx = with(LocalDensity.current) { SETTINGS_ANCHOR_PAD.roundToPx() }
+    val titleRisePx = with(LocalDensity.current) { SETTINGS_TITLE_RISE.roundToPx() }
+
+    // 切换只改状态：转场交给下面那个 AnimatedContent（见 settingsSwapTransition）。
+    // anchor 是调用方指定的落点入口（二级页长按 = 当前入口）；null 时按概览视口顶部那一行算。
+    val switchLayout: (Boolean, SettingsEntry?) -> Unit = { toCompact, anchorEntry ->
+        if (toCompact != compactLayout && !swapLocked) {
+            // 概览此刻停在哪儿：紧凑行要不要从 0 高度长出来，取决于新树会不会恢复到一个
+            // 非零滚动位置 —— 会的话，上方那几行一长高，视口里的内容就会被推着漂。
+            val atTop = overviewScroll.value == 0
+            overviewWasAtTop = if (atTop) 1 else 0
+            if (!toCompact) {
+                // 锚定：二级页长按 → 当前入口的第一组；概览里长按 → 视口顶端那一行（默认「外观」）。
+                // 概览整屏只有六个入口行，所以这里恒取第一行 —— 滚过的少数情况宁可回到顶部，
+                // 也不能让锚点随着展开动画一路往下漂。
+                val anchorGroup = anchorEntry?.groups?.firstOrNull()
+                    ?: SettingsEntry.entries.firstOrNull()?.groups?.firstOrNull()
+                anchorOrdinalAtSwitch = anchorGroup?.ordinal ?: 0
+                val targetY = anchorGroup?.let { sectionTops[it] }
+                if (targetY != null) {
+                    expandedAnchor = (targetY - anchorPadPx).coerceAtLeast(0)
+                    expandedGeneration++
+                }
+                anchorScrollAtSwitch = expandedAnchor
+            }
+            // 回执里的「撤销」要退回的那一态：记的是**切换前**的形态与层级
+            receipt = SettingsSwapReceipt(compact = compactLayout, entryId = activeEntryId)
+            activeEntryId = null
+            AppPrefs.settingsCompact = toCompact
+            // 用户 2026-11-14：「长按过一次，再长按回来之后，这个提示就应该自动消失」。
+            // 「学会了」的判据是**真的切换过**，不是点过 ×；所以标记写在这里，
+            // 而不是只挂在 onDismissHint 上 —— 否则每次切回概览都要再看一遍同一句提示。
+            AppPrefs.markSettingsLayoutHintSeen()
+            revealPending = true
+            swapLocked = true
+        }
+    }
+    // 撤销：同一条转场反向播放，不产生第二次回执。滚动位置不用还原 ——
+    // 两份 ScrollState 提到页面这一级，从没被销毁过，回来就是原位。
+    val undoSettingsSwap: () -> Unit = {
+        val last = receipt
+        if (last != null) {
+            receipt = null
+            // 退回时也要重算这两条「新树会不会恢复到非零滚动位置」——
+            // 不重算的话，撤销回一个滚过的位置却仍让块从 0 高度长出来，
+            // ScrollState 会把偏移夹到 0，用户就「撤销到了顶部」。
+            overviewWasAtTop = if (overviewScroll.value == 0) 1 else 0
+            anchorScrollAtSwitch = expandedScroll.value
+            activeEntryId = last.entryId
+            AppPrefs.settingsCompact = last.compact
+            revealPending = true
+            swapLocked = true
+        }
+    }
+    // 二级页里的系统返回键先回 1 级，不能直接退出设置页（Baymard：子页返回「2 steps back」是头号翻车）
+    BackHandler(enabled = activeEntry != null) { activeEntryId = null }
+
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -425,46 +717,10 @@ fun SettingsScreen(navController: NavController) {
     ) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
                 .widthIn(max = 600.dp)
+                .fillMaxSize()
                 .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 20.dp)
         ) {
-        // ── 布局双态（渐进式披露）──
-        // 紧凑 = 1 级概览 + 通用 2 级详情页；完整 = 现有分区原样平铺（逐字保留，老用户的安全区）。
-        // 双态的意义：展开态承担「原位保护」（NN/g Spatial Memory 要求常用区在原位留副本），
-        // 收起态承担「两级结构 + 搜索」（Android 官方对 15+ 项设置的要求），两者不冲突。
-        val compactLayout by AppPrefs.settingsCompactFlow.collectAsState()
-        val layoutHintSeen by AppPrefs.settingsLayoutHintSeenFlow.collectAsState()
-        // 当前打开的是哪一个入口；null = 1 级（概览 / 完整布局）。完整布局下恒为 null。
-        // 存 id 而不是枚举本身：rememberSaveable 只认可序列化类型，转屏 / 分屏重建后
-        // 才还能停在原来那一页（平板上分屏拖动分隔线会反复重建 Activity）。
-        var activeEntryId by rememberSaveable { mutableStateOf<String?>(null) }
-        val activeEntry = activeEntryId?.let { id ->
-            SettingsEntry.entries.firstOrNull { it.name == id }
-        }
-        // 搜索词提到页面这一级：进出二级页时概览整体离开组合，留在概览内部会丢 ——
-        // 返回后搜索框空着、列表却还是筛选后的样子，用户得重输一遍（Baymard 点过的失效模式）。
-        var overviewQuery by rememberSaveable { mutableStateOf("") }
-        // 两种形态各记各的滚动位置：切过去还能回到自己上次停的地方（空间记忆），
-        // 也不会因为另一种形态更短而被夹到顶部去。
-        val overviewScroll = rememberScrollState()
-        val expandedScroll = rememberScrollState()
-        // 每个入口都从顶部进入：remember(activeEntry) 换入口即新建状态，天然回到 0 且不闪一帧
-        val detailScroll = remember(activeEntry) { ScrollState(0) }
-        // 切换只改状态：转场交给下面那个 AnimatedContent（见 settingsSwapTransition）
-        val switchLayout: (Boolean) -> Unit = { toCompact ->
-            if (toCompact != compactLayout) {
-                activeEntryId = null
-                AppPrefs.settingsCompact = toCompact
-                // 用户 2026-11-14：「长按过一次，再长按回来之后，这个提示就应该自动消失」。
-                // 「学会了」的判据是**真的切换过**，不是点过 ×；所以标记写在这里，
-                // 而不是只挂在 onDismissHint 上 —— 否则每次切回概览都要再看一遍同一句提示。
-                AppPrefs.markSettingsLayoutHintSeen()
-            }
-        }
-        // 二级页里的系统返回键先回 1 级，不能直接退出设置页（Baymard：子页返回「2 steps back」是头号翻车）
-        BackHandler(enabled = activeEntry != null) { activeEntryId = null }
-
         // 顶部返回按钮 + 标题
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -474,56 +730,184 @@ fun SettingsScreen(navController: NavController) {
                 if (activeEntry != null) activeEntryId = null else navController.popBackStack()
             })
             Spacer(Modifier.width(12.dp))
-            // 标题区同时是长按热区（48dp 高、占满剩余宽度）。
+            // ── 标题区 = 长按热区 ──
             // 只留长按这一个入口是用户 2026-11-13 的决定（撤掉胶囊与双击）；
             // 读屏用户走 semantics 上的 onLongClick 动作，不必真的按住不放。
+            //
+            // 热区只覆盖「标题文字 + 左右各 8dp」（2026-11-18 修订）：旧版 `weight(1f)` 铺满
+            // 整行剩余宽度（约 240dp），而误触几乎都来自拇指停在标题右侧那片空白里 ——
+            // 面积降一个量级，视觉上一个像素都没变。
+            val titleText = activeEntry?.let { settingsEntryTitle(it) }
+                ?: stringResource(com.ilyskyo.blancall.R.string.settings)
+            // 目标态名：既是长按的预告（200ms 后浮出），也是读屏的动作标签
             val toggleLabel = stringResource(
                 if (compactLayout) com.ilyskyo.blancall.R.string.settings_layout_full
                 else com.ilyskyo.blancall.R.string.settings_layout_compact
             )
+            val layoutStateDescription = stringResource(
+                if (compactLayout) com.ilyskyo.blancall.R.string.settings_layout_state_compact
+                else com.ilyskyo.blancall.R.string.settings_layout_state_full,
+                if (compactLayout) SettingsEntry.entries.size else SettingsGroup.entries.size,
+            )
+            // 预热进度：由**动画时钟**推，不由 pointer 事件推 ——
+            // 手指按住不动时一个事件都不会来，靠 positionChange 推的进度会僵在原地。
+            var pressing by remember { mutableStateOf(false) }
+            val arm = remember { Animatable(0f) }
+            val longPressMs = LocalViewConfiguration.current.longPressTimeoutMillis
+            val confirmHaptic = rememberConfirmHaptic()
+            val lockedHaptic = rememberHaptic(HapticTier.Toggle)
+            val lockedNow by rememberUpdatedState(swapLocked)
+            LaunchedEffect(pressing) {
+                if (pressing) arm.animateTo(1f, MotionFade.armSweep(longPressMs.toInt()))
+                else arm.animateTo(0f, MotionFade.armRelax())
+            }
+            // 200ms 起浮出目标态名。derivedStateOf 只在跨过阈值那一下重组一次，
+            // 不会让整块标题跟着每一帧进度重组。
+            val aimVisible by remember {
+                derivedStateOf { pressing && arm.value >= SETTINGS_AIM_THRESHOLD }
+            }
+            // 细线：底槽 6%、走满的那一段 14%。两个都极淡，是为了不跟标题抢第一眼
+            val armColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.14f)
+            val trackColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.06f)
             Box(
                 modifier = Modifier
-                    .weight(1f)
                     .heightIn(min = 48.dp)
-                    .pointerInput(Unit) {
-                        detectTapGestures(onLongPress = { switchLayout(!compactLayout) })
+                    // 热区向外多留 8dp，视觉位置不能跟着挪：先往左挪同样的量再吃 padding，
+                    // 标题左缘仍与下方内容对齐（那 8dp 落在 BackButton 与标题之间的 12dp 空档里）
+                    .offset(x = -SETTINGS_HOT_PAD)
+                    // 先手势后 padding：触摸区要把那 8dp 也算进去
+                    .pointerInput(compactLayout, activeEntry) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(
+                                requireUnconsumed = false, pass = PointerEventPass.Initial,
+                            )
+                            val slop = viewConfiguration.touchSlop
+                            var drift = Offset.Zero
+                            pressing = true
+                            // 观察而不消费：Main pass 是子→父，内层先消费就分不清
+                            // 「超时」与「被取消」（HomeCardCanvas 踩过同一个坑）
+                            val interrupted = withTimeoutOrNull(
+                                viewConfiguration.longPressTimeoutMillis
+                            ) {
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                    if (!change.pressed) break
+                                    drift += change.positionChange()
+                                    // 累计位移超 slop 即取消：正常长按的手抖不该被吃掉
+                                    if (drift.getDistance() > slop) break
+                                }
+                            }
+                            pressing = false
+                            if (interrupted == null) {
+                                // 时间到，且全程按住、没滑出 slop
+                                if (lockedNow) {
+                                    // 转场锁里的第二次长按：只给一次轻触觉，不改目标态。
+                                    // 改了会让 AnimatedContent 以中间态为起点，三棵树叠着糊。
+                                    lockedHaptic()
+                                } else {
+                                    // 唯一的提交确认，必须硬
+                                    confirmHaptic()
+                                    switchLayout(!compactLayout, activeEntry)
+                                }
+                                // 达标后吃掉剩余事件直到抬手：否则抬手会被下面的可点元素接走
+                                //（旧版「长按进编辑后点完成又跳详情」同源）
+                                down.consume()
+                                while (true) {
+                                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                                    event.changes.forEach { it.consume() }
+                                    if (event.changes.all { !it.pressed }) break
+                                }
+                            }
+                            // 未达标（抬手 / 滑出 slop）什么都不用做：pressing=false 已经把线退回
+                        }
                     }
-                    .semantics {
+                    .semantics(mergeDescendants = true) {
                         onLongClick(label = toggleLabel) {
-                            switchLayout(!compactLayout)
+                            switchLayout(!compactLayout, activeEntry)
                             return@onLongClick true
                         }
-                    },
+                        // 读屏用户切完立刻知道自己在哪一态，不必靠数行数
+                        stateDescription = layoutStateDescription
+                    }
+                    .padding(horizontal = SETTINGS_HOT_PAD),
                 contentAlignment = Alignment.CenterStart
             ) {
-                Text(
-                    text = activeEntry?.let { settingsEntryTitle(it) }
-                        ?: stringResource(com.ilyskyo.blancall.R.string.settings),
-                    style = MaterialTheme.typography.headlineMedium,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    AnimatedContent(
+                        targetState = titleText,
+                        transitionSpec = { settingsTitleTransition(titleRisePx) },
+                        label = "settingsTitle",
+                        contentAlignment = Alignment.CenterStart,
+                    ) { title ->
+                        Text(
+                            text = title,
+                            style = MaterialTheme.typography.headlineMedium,
+                            color = MaterialTheme.colorScheme.onBackground,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            // 预热细线画字形正下方：走长度而不是走亮度，不透明度压在 14%，
+                            // 它只是「还要按多久」的读数，不该抢标题。字重字号一律不动 ——
+                            // 改字重会触发文字重排，标题会跳一下。
+                            modifier = Modifier.drawWithContent {
+                                drawContent()
+                                if (pressing || arm.value > 0f) {
+                                    val lineH = SETTINGS_ARM_LINE.toPx()
+                                    val top = size.height - lineH
+                                    if (pressing) {
+                                        drawRect(
+                                            color = trackColor,
+                                            topLeft = Offset(0f, top),
+                                            size = Size(size.width, lineH),
+                                        )
+                                    }
+                                    drawRect(
+                                        color = armColor,
+                                        topLeft = Offset(0f, top),
+                                        size = Size(size.width * arm.value, lineH),
+                                    )
+                                }
+                            },
+                        )
+                    }
+                    // 预告：目标态名。它是提示，不是按钮 —— 不描边、不填色、不进焦点
+                    AnimatedVisibility(
+                        visible = aimVisible,
+                        enter = fadeIn(MotionFade.alpha(MotionFade.exit)) +
+                            slideInHorizontally(Motion.itemSlide()) { it / 4 },
+                        exit = fadeOut(MotionFade.alpha(MotionFade.exit)) +
+                            slideOutHorizontally(Motion.itemSlide()) { it / 4 },
+                    ) {
+                        Text(
+                            text = toggleLabel,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.72f),
+                            modifier = Modifier.padding(start = 10.dp),
+                            maxLines = 1,
+                        )
+                    }
+                }
             }
         }
 
         Spacer(Modifier.height(24.dp))
 
         // ── 形态切换的转场 ──
-        // 用户 2026-11-14：「长按切换两种布局时……要那种非常丝滑的收起和展开的效果」。
+        // 用户 2026-11-14：「长按切换两种布局时……要那种非常丝滑的收起和展开的效果」；
+        // 2026-11-18 追加：「每个设置项都丝滑地收起、展开」。
         // 旧实现是 StateSwap 的纯交叉淡出（180/120）：两棵树在同一位置叠着溶开，
         // 一屏 6 行目录与一屏 13 张卡片的文字会糊在一起，读起来是「闪了一下」而不是「展开」。
         //
         // 现在的编排（仍然**保留双树同时在场**，绝不退回单树换形态 —— 那会抓到空白帧，
         // 见 StateSwap 的 KDoc）：
-        //   进场 = 淡入 220 + 从 18dp 外落下（NoBouncy 弹簧）+ 0.985 倍铺开（原点在顶边）
-        //   退场 = 淡出 120 + 反向 9dp 撤走（比进场快一档，旧内容先让位）
-        // 方向随目标翻转：切到完整布局时内容自上而下「铺开」，切回收起态时自下而上「收回」。
-        // 0.985 的纵向缩放小到看不出字形被拉长，只是给整块一个「正在长出来」的重量。
+        //   整块  = 淡入 200 + 从 18dp 外落下（与 scaleIn 同一条 230ms 弹簧）+ 0.99 倍铺开
+        //   块内  = 每个分区块 / 入口行按 index 错峰 30ms 依次「展开」（高度 + 淡入）
+        //   退场  = 淡出 120 + 反向撤走 9dp（方向随目标翻转，比进场快一档）
         val swapEdgePx = with(LocalDensity.current) { SETTINGS_SWAP_EDGE.toPx().toInt() }
+        val fontScale = LocalDensity.current.fontScale
         AnimatedContent(
             targetState = SettingsScreenKey(compact = compactLayout, entryId = activeEntryId),
-            transitionSpec = { settingsSwapTransition(swapEdgePx) },
+            transitionSpec = { settingsSwapTransition(swapEdgePx, fontScale) },
             label = "settingsLayout",
             modifier = Modifier.weight(1f)
         ) { key ->
@@ -531,8 +915,52 @@ fun SettingsScreen(navController: NavController) {
                 SettingsEntry.entries.firstOrNull { it.name == id }
             }
             // 二级页只渲染这个入口含的分区；完整布局照旧全部平铺
+            // 完整布局顶层带搜索（2026-11-21）：输入了词就只留命中的分区，
+            // 命中判据与紧凑布局那份搜索索引同源（matchingGroups）。
+            val filteringFull = !key.compact && key.entryId == null && settingsQuery.isNotBlank()
+            val matchedGroups: Set<SettingsGroup>? =
+                if (filteringFull) matchingGroups(settingsQuery) else null
             val showSection: (SettingsGroup) -> Boolean = { group ->
-                !key.compact || keyEntry?.groups?.contains(group) == true
+                (!key.compact || keyEntry?.groups?.contains(group) == true) &&
+                    (matchedGroups == null || group in matchedGroups)
+            }
+            // 这一棵树要不要走「逐块展开」：**在它第一次组合时定格**。
+            // 用 remember(key) 而不是直接读 revealPending —— 后者在 600ms 后会被清掉，
+            // 直接读会让已经开始的展开在半途被换成静态树（动画硬切一刀）。
+            val animateThisTree = remember(key) { revealPending }
+            LaunchedEffect(key) {
+                if (animateThisTree) {
+                    delay(SETTINGS_REVEAL_TOTAL_MS)
+                    revealPending = false
+                }
+            }
+            // 登场顺序 = 分区在枚举里的次序。锚点之上的块不参与「高度展开」：
+            // 它们若从 0 高度长出来，锚点那一块会被推着往下漂 —— 那是比不动更糟的一种动。
+            // 用切换时记下的锚点序：切换后 activeEntryId 已清空，这里已经拿不到入口了
+            val anchorOrder = remember(key) { anchorOrdinalAtSwitch }
+            // 这一棵树能不能让块「长高」：只有新树的滚动位置为 0 时才行。
+            // 否则 ScrollState 会把恢复的偏移夹到当前内容高度（内容从 0 长起来的头几帧尤其矮），
+            // 锚点一旦被夹到 0 就再也回不来 —— 那种场合只做错峰淡入，不动高度。
+            val growThisTree = remember(key) {
+                if (key.compact) overviewWasAtTop == 1 else anchorScrollAtSwitch == 0
+            }
+            val groupRevealDelay: (SettingsGroup) -> SettingsReveal? = { group ->
+                if (!animateThisTree) null
+                else SettingsReveal(
+                    delayMs = minOf(group.ordinal - anchorOrder, SETTINGS_REVEAL_MAX_STEP)
+                        .coerceAtLeast(0) * SETTINGS_REVEAL_STEP_MS,
+                    grow = growThisTree,
+                )
+            }
+            // 只有完整态登记分区 y：二级页里同一个分区会在另一个滚动容器里被量一次，
+            // 那份坐标会覆盖掉完整态的锚点，切过去就落到错误位置。
+            val topsSink: MutableMap<SettingsGroup, Int>? = if (key.compact) null else sectionTops
+            val entryRevealDelay: (SettingsEntry) -> SettingsReveal? = { entry ->
+                if (!animateThisTree) null
+                else SettingsReveal(
+                    delayMs = minOf(entry.ordinal, SETTINGS_REVEAL_MAX_STEP) * SETTINGS_REVEAL_STEP_MS,
+                    grow = growThisTree,
+                )
             }
             // 正文里要不要再写分区标题：**只有组名与入口名一字不差时才省**（见 sectionTitleVisible）。
             // 旧规则是「二级页一律隐藏分区标题」，合并入口后会导致「内容与数据」页里
@@ -548,19 +976,45 @@ fun SettingsScreen(navController: NavController) {
                             else -> expandedScroll
                         }
                     ),
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(SETTINGS_BLOCK_GAP)
             ) {
                 // 1 级概览（只在紧凑布局的顶层出现；完整布局与二级页都直接摊开各自的分区）
                 if (key.compact && key.entryId == null) {
                     SettingsCompactOverview(
-                        query = overviewQuery,
-                        onQueryChange = { overviewQuery = it },
+                        query = settingsQuery,
+                        onQueryChange = { settingsQuery = it },
                         hintVisible = !layoutHintSeen,
                         onDismissHint = { AppPrefs.markSettingsLayoutHintSeen() },
-                        onOpenEntry = { entry -> activeEntryId = entry.name }
+                        onOpenEntry = { entry ->
+                            // 转场中的旧树不接点击：否则会打开一个「已经不存在的入口」
+                            if (!swapLocked) activeEntryId = entry.name
+                        },
+                        revealDelay = entryRevealDelay,
                     )
                 }
-                if (showSection(SettingsGroup.APPEARANCE)) {
+
+                // 完整布局的顶部搜索栏（2026-11-21 用户：两种布局都要有）。
+                // 与紧凑布局同一枚自绘控件、同一个搜索词，只是落点不同：
+                // 这里不跳页，直接把没命中的分区藏掉 —— 一屏 13 个分区，长了眼睛也不好找。
+                if (!key.compact && key.entryId == null) {
+                    SettingsSearchField(
+                        query = settingsQuery,
+                        onQueryChange = { settingsQuery = it },
+                    )
+                    if (filteringFull && matchedGroups.isNullOrEmpty()) {
+                        Text(
+                            stringResource(R.string.settings_search_empty),
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 28.dp),
+                            textAlign = TextAlign.Center,
+                        )
+                    }
+                }
+
+                SettingsGroupBlock(SettingsGroup.APPEARANCE, showSection, groupRevealDelay, topsSink) {
                     // ── 外观 ──
                     SettingsSectionTitle(R.string.appearance, visible = sectionTitleVisible(SettingsGroup.APPEARANCE, keyEntry))
 
@@ -959,7 +1413,7 @@ fun SettingsScreen(navController: NavController) {
                     Spacer(Modifier.height(8.dp))
                 }
 
-                if (showSection(SettingsGroup.THEME_COLOR)) {
+                SettingsGroupBlock(SettingsGroup.THEME_COLOR, showSection, groupRevealDelay, topsSink) {
                     // ── 主题色 ──
                     SettingsSectionTitle(R.string.theme_color, visible = sectionTitleVisible(SettingsGroup.THEME_COLOR, keyEntry))
 
@@ -1100,7 +1554,7 @@ fun SettingsScreen(navController: NavController) {
                     Spacer(Modifier.height(8.dp))
                 }
 
-                if (showSection(SettingsGroup.FEATURES)) {
+                SettingsGroupBlock(SettingsGroup.FEATURES, showSection, groupRevealDelay, topsSink) {
                     // ── 特性 ──
                     SettingsSectionTitle(R.string.features, visible = sectionTitleVisible(SettingsGroup.FEATURES, keyEntry))
 
@@ -1383,7 +1837,31 @@ fun SettingsScreen(navController: NavController) {
                     Spacer(Modifier.height(8.dp))
                 }
 
-                if (showSection(SettingsGroup.REVIEW)) {
+                SettingsGroupBlock(SettingsGroup.READING, showSection, groupRevealDelay, topsSink) {
+                    // ── 阅读设置 ──
+                    // 这些项以前只能进「阅读模式」才改得到（2026-11-21 用户要求搬进来）。
+                    // 这里写的是**全局默认值**：单篇改过就以那篇的存档为准，
+                    // 卡片末尾那行「让所有文章改用这里的设置」负责把默认值推给已有存档。
+                    SettingsSectionTitle(
+                        R.string.reading_settings_title,
+                        visible = sectionTitleVisible(SettingsGroup.READING, keyEntry),
+                    )
+                    ReadingDefaultsCard()
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                SettingsGroupBlock(SettingsGroup.PRACTICE, showSection, groupRevealDelay, topsSink) {
+                    // ── 练习 ──
+                    // 提示三项原先藏在练习页的 ⋮ 菜单里，手写/返回提醒只在作答现场出现。
+                    SettingsSectionTitle(
+                        R.string.settings_practice_title,
+                        visible = sectionTitleVisible(SettingsGroup.PRACTICE, keyEntry),
+                    )
+                    PracticeSettingsCard()
+                    Spacer(Modifier.height(8.dp))
+                }
+
+                SettingsGroupBlock(SettingsGroup.REVIEW, showSection, groupRevealDelay, topsSink) {
                     // ── 复习 ──
                     SettingsSectionTitle(R.string.memory_plan, visible = sectionTitleVisible(SettingsGroup.REVIEW, keyEntry))
 
@@ -1425,13 +1903,16 @@ fun SettingsScreen(navController: NavController) {
                                 color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f)
                             )
                             StudyDurationSettings()
+                            // 考试日期与「卡片上显示目标进度」原先只在首页今日计划面板里能改，
+                            // 和上面两行同属「计划怎么摆」，放在同一张卡里
+                            PlanDateSettings()
                         }
                     }
 
                     Spacer(Modifier.height(8.dp))
                 }
 
-                if (showSection(SettingsGroup.REMINDER)) {
+                SettingsGroupBlock(SettingsGroup.REMINDER, showSection, groupRevealDelay, topsSink) {
                     // ── 学习提醒 ──
                     SettingsSectionTitle(R.string.study_reminder, visible = sectionTitleVisible(SettingsGroup.REMINDER, keyEntry))
 
@@ -1440,7 +1921,7 @@ fun SettingsScreen(navController: NavController) {
                     Spacer(Modifier.height(8.dp))
                 }
 
-                if (showSection(SettingsGroup.HELP)) {
+                SettingsGroupBlock(SettingsGroup.HELP, showSection, groupRevealDelay, topsSink) {
                     // ── 帮助 ──
                     SettingsSectionTitle(R.string.help_section, visible = sectionTitleVisible(SettingsGroup.HELP, keyEntry))
 
@@ -1550,7 +2031,7 @@ fun SettingsScreen(navController: NavController) {
                     Spacer(Modifier.height(8.dp))
                 }
 
-                if (showSection(SettingsGroup.CONTENT)) {
+                SettingsGroupBlock(SettingsGroup.CONTENT, showSection, groupRevealDelay, topsSink) {
                     // ── 内容管理 ──
                     SettingsSectionTitle(R.string.content_management, visible = sectionTitleVisible(SettingsGroup.CONTENT, keyEntry))
 
@@ -1596,7 +2077,7 @@ fun SettingsScreen(navController: NavController) {
                     Spacer(Modifier.height(8.dp))
                 }
 
-                if (showSection(SettingsGroup.DATA)) {
+                SettingsGroupBlock(SettingsGroup.DATA, showSection, groupRevealDelay, topsSink) {
                     // ── 数据（学习数据整机备份，换机/重装可一键迁移） ──
                     SettingsSectionTitle(R.string.data_section, visible = sectionTitleVisible(SettingsGroup.DATA, keyEntry))
 
@@ -1714,7 +2195,7 @@ fun SettingsScreen(navController: NavController) {
                     Spacer(Modifier.height(8.dp))
                 }
 
-                if (showSection(SettingsGroup.EXTENSIONS)) {
+                SettingsGroupBlock(SettingsGroup.EXTENSIONS, showSection, groupRevealDelay, topsSink) {
                     // ── 拓展功能 ──
                     SettingsSectionTitle(R.string.extensions, visible = sectionTitleVisible(SettingsGroup.EXTENSIONS, keyEntry))
 
@@ -1784,7 +2265,7 @@ fun SettingsScreen(navController: NavController) {
                             }
                             GlassButton(
                                 onClick = { navController.navigateOnce("content_packs") },
-                                modifier = Modifier.height(34.dp)
+                                modifier = Modifier.heightIn(min = 34.dp)
                             ) {
                                 Text(
                                     stringResource(com.ilyskyo.blancall.R.string.import_action),
@@ -1814,7 +2295,7 @@ fun SettingsScreen(navController: NavController) {
                             }
                             GlassButton(
                                 onClick = { navController.navigateOnce("data_interchange") },
-                                modifier = Modifier.height(34.dp)
+                                modifier = Modifier.heightIn(min = 34.dp)
                             ) {
                                 Text(
                                     stringResource(com.ilyskyo.blancall.R.string.open),
@@ -1828,7 +2309,7 @@ fun SettingsScreen(navController: NavController) {
                     Spacer(Modifier.height(8.dp))
                 }
 
-                if (showSection(SettingsGroup.ABOUT)) {
+                SettingsGroupBlock(SettingsGroup.ABOUT, showSection, groupRevealDelay, topsSink) {
                     // ── 关于 ──
                     SettingsSectionTitle(R.string.about_section, visible = sectionTitleVisible(SettingsGroup.ABOUT, keyEntry))
 
@@ -1858,7 +2339,7 @@ fun SettingsScreen(navController: NavController) {
                     Spacer(Modifier.height(8.dp))
                 }
 
-                if (showSection(SettingsGroup.DONATION)) {
+                SettingsGroupBlock(SettingsGroup.DONATION, showSection, groupRevealDelay, topsSink) {
                     // ── 赞赏区 ──
                     // 整块可被「隐藏该区域」收起。隐藏态是**会话级**的（SettingsSessionState，
                     // 只在内存里，不落盘）：本次使用不再出现，软件重新启动后自动恢复。
@@ -2101,6 +2582,64 @@ fun SettingsScreen(navController: NavController) {
             }
         }
     }
+    // ── 切换回执（浮层，不参与布局高度）──
+    // 它回答两件用户此刻真正在意的事：「刚才那一下是我干的」「能不能退」。
+    // 不遮内容、不抢焦点：贴底浮着，3.2s 自己走。
+    //
+    // 文案要留住一帧：visible 变 false 的那一帧 receipt 已经置空，
+    // 直接读会闪成空串（与 AnimatedOverlayPresence 同一个理由）。
+    var receiptShown by remember { mutableStateOf<SettingsSwapReceipt?>(null) }
+    if (receipt != null) receiptShown = receipt
+    val receiptVisible = receipt != null && !swapLocked
+    val receiptText = stringResource(
+        if (receiptShown?.compact == true) com.ilyskyo.blancall.R.string.settings_layout_switched_full
+        else com.ilyskyo.blancall.R.string.settings_layout_switched_compact
+    )
+    AnimatedVisibility(
+        visible = receiptVisible,
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .padding(horizontal = 4.dp, vertical = 12.dp),
+        enter = fadeIn(MotionFade.alpha(MotionFade.enter)) +
+            slideInVertically(Motion.itemSlide()) { it / 2 },
+        exit = fadeOut(MotionFade.alpha(MotionFade.exit)) +
+            slideOutVertically(Motion.itemSlide()) { it / 2 },
+        label = "settingsReceipt",
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(SmoothRoundedCornerShape(14.dp))
+                .background(MaterialTheme.colorScheme.inverseSurface)
+                .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = receiptText,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.inverseOnSurface,
+                maxLines = 2,
+                modifier = Modifier
+                    .weight(1f)
+                    // 读屏用户切完也听得到「刚才做了什么」，不必靠摸回执条
+                    .semantics { liveRegion = LiveRegionMode.Polite },
+            )
+            Box(
+                modifier = Modifier
+                    .clip(SmoothRoundedCornerShape(10.dp))
+                    .pressClick(tier = PressTier.Plain, onClick = undoSettingsSwap)
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+            ) {
+                Text(
+                    text = stringResource(com.ilyskyo.blancall.R.string.settings_layout_undo),
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.inversePrimary,
+                )
+            }
+        }
+    }
+
     }
 
     // ── 首页副标题编辑弹窗 ──
@@ -2186,12 +2725,14 @@ fun SettingsScreen(navController: NavController) {
             },
             confirmButton = {
                 Button(
-                    onClick = {
+                    onClick = importClick@{
+                        if (BackupImportGate.running) return@importClick
                         pendingImportUri = null
+                        BackupImportGate.running = true
                         // 导入是破坏性整库替换 + 全量重载：不能被「离开设置页/旋转屏幕」取消，
                         // 否则文件已换、内存未重载，下一次任意保存会把恢复的数据覆盖回旧库。
                         // NonCancellable 让这次 job 不受 rememberCoroutineScope 生命周期影响。
-                        backupScope.launch(NonCancellable) {
+                        val importJob = backupScope.launch(NonCancellable) {
                             val result = withContext(Dispatchers.IO) {
                                 runCatching {
                                     val temp = File(backupContext.cacheDir, "backup_import.zip")
@@ -2256,6 +2797,9 @@ fun SettingsScreen(navController: NavController) {
                                 ).show()
                             }
                         }
+                        // 成功、失败、重载抛异常 —— 任何一条路径结束都要开闸，
+                        // 否则用户被永久锁在「正在恢复」里。invokeOnCompletion 覆盖全部路径。
+                        importJob.invokeOnCompletion { BackupImportGate.running = false }
                     },
                     shape = SmoothRoundedCornerShape(14.dp)
                 ) { Text(stringResource(com.ilyskyo.blancall.R.string.import_action)) }
@@ -2263,6 +2807,31 @@ fun SettingsScreen(navController: NavController) {
             dismissButton = {
                 TextButton(onClick = { pendingImportUri = null }) { Text(stringResource(com.ilyskyo.blancall.R.string.cancel)) }
             }
+        )
+    }
+
+    // ── 导入进行中：不可关闭的进度框 ──
+    // 闸门只是兜底；真正要消灭的是「点了没反应」的错觉 —— 整库替换 + 全量重载
+    // 期间必须让用户看见正在发生什么，否则他会重开导入流程再点一次。
+    AnimatedOverlayPresence(target = if (BackupImportGate.running) Unit else null) {
+        BlancallAlertDialog(
+            onDismissRequest = { /* 不可取消：NonCancellable 协程已经在写盘 */ },
+            title = { Text(stringResource(com.ilyskyo.blancall.R.string.backup_importing_title)) },
+            text = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(18.dp),
+                        strokeWidth = 2.dp,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                    Spacer(Modifier.width(12.dp))
+                    Text(stringResource(com.ilyskyo.blancall.R.string.backup_importing_body))
+                }
+            },
+            properties = DialogProperties(
+                dismissOnBackPress = false,
+                dismissOnClickOutside = false
+            )
         )
     }
 
@@ -2370,7 +2939,7 @@ private fun CustomAccentSheet(
  *
  * 三族混排（中文标点 / 英文标点 / 理科常用），因为用户实际会同时需要它们：
  * 语文默写要「，。？」、英语听写要 `' -`、理科填空要「↑↓⇌Δ°」。这里只是**候选**，
- * 真正上栏的是勾中的那些 —— 上限见 [AppPrefs.SYMBOLS_MAX]。
+ * 真正上栏的是勾中的那些 —— 条数不设上限：面板下方那行是横滑的（见 HandwritingPanel）。
  *
  * 刻意不放空格：符号栏是「一键一个字符」，空格会让人误以为能在面板里分词。
  */
@@ -2384,13 +2953,22 @@ private val SYMBOL_PRESETS: List<Char> = listOf(
 )
 
 /**
+ * 从一段输入里取出**第一个**可用作符号的字符（判据见 `AppPrefs.isSymbolChar`）。
+ *
+ * 取第一个而不是要求「整段必须合法」：手机输入法一次会上屏一串（联想词、粘贴整句），
+ * 严格要求长度为 1 的话用户点候选词就什么也进不去，看着像输入框坏了。
+ * 遇到汉字、字母就跳过，遇到第一个符号即停；一个符号都没有则返回 null（框保持空）。
+ */
+internal fun sanitizeSymbolInput(raw: String): Char? = raw.firstOrNull { AppPrefs.isSymbolChar(it) }
+
+/**
  * 把「勾中的预设」与「自输的补充字符」合成一条符号串。
  *
  * 顺序规则：先按 [presets] 的固定顺序列出勾中项，再接自输字符。
  * 为什么不用点击顺序：勾选顺序没有语义，而固定顺序保证「加了又删、删了又加」之后
  * 符号栏不会悄悄换位 —— 位置稳定才谈得上肌肉记忆。
  *
- * 去重与长度上限统一由 `AppPrefs.normalizeSymbols` 在写回时执行，这里只负责
+ * 去重与空白过滤统一由 `AppPrefs.normalizeSymbols` 在写回时执行，这里只负责
  * 自输字符不与预设重复。
  */
 internal fun composeSymbols(presets: List<Char>, selected: Set<Char>, custom: String): String {
@@ -2422,11 +3000,24 @@ private fun HandwritingSymbolSheet(onDismiss: () -> Unit) {
 
     val raw = if (editLatin) latin else cjk
     val chosen = raw.toSet()
-    // 自输补充 = 当前集合里不在预设池的那些字符（输入框显示的就是这一段）
+    // 自输补充 = 当前集合里不在预设池的那些字符
     val custom = raw.filter { it !in SYMBOL_PRESETS }
     val write: (String) -> Unit = { v ->
         if (editLatin) AppPrefs.handwritingSymbolsLatin = v
         else AppPrefs.handwritingSymbolsCjk = v
+    }
+    // 输入框里那**一个**待添加的字符（还没上栏）。切到另一套就清空：
+    // 给中文打的「，」不该跟着跳到英文那套里。
+    var pending by remember(editLatin) { mutableStateOf("") }
+    val pendingChar = sanitizeSymbolInput(pending)
+    // 已在栏上就不给点：点了也是原地不动，不如让按钮明说"没得加"
+    val canAdd = pendingChar != null && pendingChar !in chosen
+    val addPending: () -> Unit = {
+        val ch = sanitizeSymbolInput(pending)
+        if (ch != null && ch !in chosen) {
+            write(composeSymbols(SYMBOL_PRESETS, chosen, custom + ch))
+        }
+        pending = ""
     }
 
     GlassModalBottomSheet(onDismissRequest = onDismiss) {
@@ -2474,6 +3065,8 @@ private fun HandwritingSymbolSheet(onDismiss: () -> Unit) {
             Spacer(Modifier.height(14.dp))
 
             // ── 预设勾选 ──
+            // 一枚键一个固定方寸（42dp 超椭圆），不再用 AssistChip ——
+            // chip 的宽由字符撑开、高由 M3 定死，一排里 `…` 和 `≤` 会一大一小。
             FlowRow(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -2481,29 +3074,24 @@ private fun HandwritingSymbolSheet(onDismiss: () -> Unit) {
             ) {
                 SYMBOL_PRESETS.forEach { ch ->
                     val on = ch in chosen
-                    AssistChip(
+                    SymbolKey(
+                        char = ch,
                         onClick = {
                             val next = if (on) raw.filter { it != ch } else raw + ch
                             write(next.toString())
                         },
-                        label = { Text(ch.toString(), style = MaterialTheme.typography.labelLarge) },
-                        shape = SmoothRoundedCornerShape(8.dp),
-                        // 选中即上栏：加 1dp 主色描边，扫一眼就能数出哪几个在栏上
-                        border = if (on) BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null,
-                        colors = AssistChipDefaults.assistChipColors(
-                            containerColor = if (on) MaterialTheme.colorScheme.primaryContainer
-                            else MaterialTheme.colorScheme.surfaceVariant,
-                            labelColor = if (on) MaterialTheme.colorScheme.onPrimaryContainer
-                            else MaterialTheme.colorScheme.onSurfaceVariant
-                        )
+                        selected = on,
+                        selectable = true,
+                        size = 42.dp,
+                        corner = 13.dp,
                     )
                 }
             }
             Spacer(Modifier.height(16.dp))
 
             // ── 自输补充 ──
-            // 标签左、用量右：曾经写成一整行「补充字符 7 / 12」，读起来像是「补充了 7 个」。
-            // 7 是整个集合的长度（含勾选的预设），右对齐后语义变成「这一栏一共几个」。
+            // 标签左、用量右：右上角永远是「这一栏一共几个」，不是「补充了几个」。
+            // 没有上限可报了（旧版是「12 / 12」），因此这里只说总数。
             Row(
                 Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -2515,43 +3103,116 @@ private fun HandwritingSymbolSheet(onDismiss: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    "${raw.length} / ${AppPrefs.SYMBOLS_MAX}",
+                    stringResource(
+                        com.ilyskyo.blancall.R.string.handwriting_symbols_total,
+                        raw.length
+                    ),
                     style = MaterialTheme.typography.labelSmall,
-                    // 到顶变主色：再加就进不去了，得先取消一个（否则用户会以为输入框坏了）
-                    color = if (raw.length >= AppPrefs.SYMBOLS_MAX) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             Spacer(Modifier.height(6.dp))
-            BasicTextField(
-                value = custom.toString(),
-                onValueChange = { input -> write(composeSymbols(SYMBOL_PRESETS, chosen, input)) },
-                singleLine = true,
-                textStyle = MaterialTheme.typography.bodyLarge.copy(
-                    color = MaterialTheme.colorScheme.onSurface
-                ),
-                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
-                modifier = Modifier.fillMaxWidth()
-            ) { inner ->
-                // 自绘容器：M3 OutlinedTextField 的 14dp 圆角与整页 10dp 不一致（旧反馈），
-                // 且它自带 56dp 最小高度，会让面板底部多出一段空白。
+
+            // 输入框 + 添加：一次只收一个符号。
+            // 旧版把输入框当成「整条补充串」在用 —— 粘一段汉字进去也能存，
+            // 存完符号栏里躺着一排汉字。现在输入框只装一个待添加的字符，
+            // 由「添加」按钮确认后才上栏（用户原话：输入完没有添加按钮，没法确认）。
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                BasicTextField(
+                    value = pending,
+                    // 过滤发生在输入的第一时间：汉字/字母/整段文字进不来，框里只会出现一个符号
+                    onValueChange = { input ->
+                        pending = sanitizeSymbolInput(input)?.toString().orEmpty()
+                    },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { addPending() }),
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = MaterialTheme.colorScheme.onSurface
+                    ),
+                    cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
+                    modifier = Modifier.weight(1f)
+                ) { inner ->
+                    // 自绘容器：M3 OutlinedTextField 的 14dp 圆角与整页不一致，
+                    // 且它自带 56dp 最小高度，会让面板底部多出一段空白。
+                    Box(
+                        Modifier
+                            .fillMaxWidth()
+                            .height(46.dp)
+                            .clip(SmoothRoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
+                            .padding(horizontal = 12.dp),
+                        contentAlignment = Alignment.CenterStart
+                    ) {
+                        if (pending.isEmpty()) {
+                            Text(
+                                stringResource(com.ilyskyo.blancall.R.string.handwriting_symbols_add_hint),
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                            )
+                        }
+                        inner()
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
                 Box(
                     Modifier
-                        .fillMaxWidth()
-                        .clip(SmoothRoundedCornerShape(10.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f))
-                        .padding(horizontal = 12.dp, vertical = 12.dp)
-                ) {
-                    if (custom.isEmpty()) {
-                        Text(
-                            stringResource(com.ilyskyo.blancall.R.string.handwriting_symbols_add_hint),
-                            style = MaterialTheme.typography.bodyLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                        .height(46.dp)
+                        // 宽度随文字走但不小于 72dp：中文「添加」两个字够用，
+                        // 俄文「Добавить」也不至于被裁成「Добав」
+                        .widthIn(min = 72.dp)
+                        .clip(SmoothRoundedCornerShape(12.dp))
+                        .background(
+                            if (canAdd) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.surfaceVariant
                         )
-                    }
-                    inner()
+                        .pressClick(tier = PressTier.Container, enabled = canAdd, onClick = addPending)
+                        .padding(horizontal = 14.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        stringResource(com.ilyskyo.blancall.R.string.handwriting_symbols_add_action),
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (canAdd) MaterialTheme.colorScheme.onPrimary
+                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+                    )
                 }
             }
+
+            // 已添加的自输字符：同款格子，点一下即移除 ——
+            // 「加了没法撤」是上一版的另一个缺口（只能恢复默认，把预设也一起清了）。
+            if (custom.isNotEmpty()) {
+                Spacer(Modifier.height(10.dp))
+                Text(
+                    stringResource(com.ilyskyo.blancall.R.string.handwriting_symbols_added),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(6.dp))
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    custom.forEach { ch ->
+                        SymbolKey(
+                            char = ch,
+                            onClick = { write(raw.filter { it != ch }.toString()) },
+                            selected = true,
+                            selectable = true,
+                            size = 42.dp,
+                            corner = 13.dp,
+                        )
+                    }
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+            // 限制写在这里而不是弹窗报错：用户读到它的时机正好是"准备打汉字"的那一刻
+            Text(
+                stringResource(com.ilyskyo.blancall.R.string.handwriting_symbols_only_cjk_latin),
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f)
+            )
             Spacer(Modifier.height(16.dp))
 
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -3506,7 +4167,7 @@ private fun AdaptiveChipLabel(text: String) {
         style = style.copy(fontSize = fontSize),
         onTextLayout = { result ->
             // 溢出时逐步缩小字号（下限 8sp），直到能单行放下
-            if (result.hasVisualOverflow && fontSize.value > 8f) {
+            if (result.hasVisualOverflow && fontSize.value > 11f) {
                 fontSize = (fontSize.value - 0.5f).sp
             }
         }

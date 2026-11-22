@@ -642,9 +642,9 @@ fun OverviewScreen(navController: NavController, onBack: (() -> Unit)? = null) {
         AmbientBackground()
         Column(
             modifier = Modifier
-                .fillMaxSize()
                 // 大屏放宽上限：平板横屏用满宽度展示统计卡，窄屏不受影响（600dp 内铺满）
                 .widthIn(max = if (LocalIsLargeScreen) GridMaxWidth else 600.dp)
+                .fillMaxSize()
                 .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 20.dp)
         ) {
             // ── 顶部栏：返回 + 标题 + 筛选 + 导出 ──
@@ -668,7 +668,7 @@ fun OverviewScreen(navController: NavController, onBack: (() -> Unit)? = null) {
                         GlassButton(
                             onClick = { showArticleFilter = true },
                             enabled = articles.isNotEmpty(),
-                            modifier = Modifier.height(40.dp)
+                            modifier = Modifier.heightIn(min = 40.dp)
                         ) {
                             Text(stringResource(com.ilyskyo.blancall.R.string.filter),
                                 style = MaterialTheme.typography.labelMedium,
@@ -2191,7 +2191,7 @@ private fun AdaptiveChipLabel(text: String) {
         style = style.copy(fontSize = fontSize),
         onTextLayout = { result ->
             // 溢出时逐步缩小字号（下限 8sp），直到能单行放下
-            if (result.hasVisualOverflow && fontSize.value > 8f) {
+            if (result.hasVisualOverflow && fontSize.value > 11f) {
                 fontSize = (fontSize.value - 0.5f).sp
             }
         }

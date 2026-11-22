@@ -197,7 +197,13 @@ internal fun ReadingMarksSheet(
         Box(
             Modifier
                 .fillMaxSize()
-                .background(Color.Black.copy(alpha = 0.32f))
+                // 深色阅读模式的页面底是纯黑（ReadingModeScreen.DarkBg = #000000）：
+                // 32% 黑叠上去仍然是纯黑，等于没有遮罩 —— 用户读不到「这层是模态、点外面会关」。
+                // 深色改为一层极淡的提亮（纯黑 → 近黑），面板 #1C1C1E 仍浮在它上面。
+                .background(
+                    if (isDark) Color.White.copy(alpha = 0.06f)
+                    else Color.Black.copy(alpha = 0.32f)
+                )
                 // 点遮罩关闭（卡片自己会拦住卡内点击）
                 .pointerInput(Unit) { detectTapGestures { onDismiss() } },
             contentAlignment = Alignment.BottomCenter

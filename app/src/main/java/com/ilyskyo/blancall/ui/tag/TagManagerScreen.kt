@@ -191,8 +191,8 @@ fun TagManagerScreen(navController: NavController, initialTagId: Long = -1L) {
         AmbientBackground()
         Column(
             modifier = Modifier
-                .fillMaxSize()
                 .widthIn(max = 600.dp)
+                .fillMaxSize()
                 .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 20.dp),
         ) {
             // ── 顶栏：返回 + 标题 + 新建 ──
@@ -212,7 +212,7 @@ fun TagManagerScreen(navController: NavController, initialTagId: Long = -1L) {
                 )
                 GlassButton(
                     onClick = { creating = true },
-                    modifier = Modifier.height(40.dp),
+                    modifier = Modifier.heightIn(min = 40.dp),
                 ) {
                     Text(
                         stringResource(com.ilyskyo.blancall.R.string.new_short),

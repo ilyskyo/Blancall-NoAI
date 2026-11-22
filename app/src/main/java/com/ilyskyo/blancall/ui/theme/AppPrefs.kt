@@ -278,10 +278,12 @@ object AppPrefs {
         _handwritingInputEnabledFlow.value = prefs.getBoolean("handwriting_input_enabled", false)
         _keepInkEnabledFlow.value = prefs.getBoolean("keep_ink_enabled", true)
         _handwritingSymbolBarFlow.value = prefs.getBoolean("handwriting_symbol_bar", true)
-        _handwritingSymbolsCjkFlow.value =
+        _handwritingSymbolsCjkFlow.value = normalizeSymbols(
             prefs.getString("handwriting_symbols_cjk", DEFAULT_SYMBOLS_CJK) ?: DEFAULT_SYMBOLS_CJK
-        _handwritingSymbolsLatinFlow.value =
+        )
+        _handwritingSymbolsLatinFlow.value = normalizeSymbols(
             prefs.getString("handwriting_symbols_latin", DEFAULT_SYMBOLS_LATIN) ?: DEFAULT_SYMBOLS_LATIN
+        )
         _handwritingAutoCommitWeakFlow.value = prefs.getBoolean("handwriting_auto_commit_weak", false)
         _articleTagFilterFlow.value = prefs.getStringSet("article_tag_filter", emptySet())
             ?.mapNotNull { it.toLongOrNull() }?.toSet() ?: emptySet()
@@ -938,27 +940,43 @@ object AppPrefs {
     const val DEFAULT_SYMBOLS_LATIN = ",.?!;:'-"
 
     /**
-     * 符号栏字符上限。
+     * 「这个字符能不能上符号栏」的唯一判据：**一个符号，不是一个字**。
      *
-     * 取 12 的依据：手机宽度下一行（FlowRow 折行前）约放得下 7–9 个符号键，
-     * 12 个意味着最多折成两行；再多就会把候选条和右侧清空/收起键挤出可视区。
+     * 判据是「不是字母、不是数字、不是空白、不是半个代理对」，**希腊字母除外**。
+     * 为什么这条粗糙的规则反而可靠：汉字在 `isLetterOrDigit` 里是 letter，拉丁字母、
+     * 日文假名、韩文、西里尔字母、全角字母 `Ａ` 同理，一并挡掉；而全部标点与数学符号
+     * （全角 `，。、`、`≤ ⇌ ° ×`、半角 `,./`）都是 punctuation/symbol，一律放行 ——
+     * 不用维护「哪些 Unicode 块算字」的白名单，也就不会漏掉某种文字。
+     *
+     * 希腊字母必须放行：`Δ Σ Ω π` 在理科填空里当符号用，预设池里本来就有 `Δ`。
+     * 若按「字母一律拒」处理，用户勾了 Δ 会被 [normalizeSymbols] 悄悄丢掉。
+     *
+     * 放这里而不是放设置页：读盘时要靠它把**历史脏数据**（旧版允许输入汉字整句）
+     * 一并清掉，否则升级后符号栏里还躺着一排汉字。
      */
-    const val SYMBOLS_MAX = 12
+    fun isSymbolChar(ch: Char): Boolean {
+        if (ch.isWhitespace() || ch.isHighSurrogate() || ch.isLowSurrogate()) return false
+        if (Character.UnicodeScript.of(ch.code) == Character.UnicodeScript.GREEK) return true
+        return !ch.isLetterOrDigit()
+    }
 
     /**
-     * 规范化符号串：丢空白（含全角空格）、丢非 BMP 字符、去重、保序、截到 [SYMBOLS_MAX]。
+     * 规范化符号串：丢空白、丢非符号字符（见 [isSymbolChar]）、丢非 BMP 字符、去重、保序。
      *
+     * **没有条数上限**（7.6.4 起）。旧实现截到 12 条：理由是手机宽度一行放得下 7–9 个键，
+     * 12 个最多折成两行，再多就把右侧「清空/收起」挤出可视区。那个前提是「折行」——
+     * 面板里那一行现在是 `LazyRow` 横滑，行高恒定、右侧按钮不动，于是「多到放不下」
+     * 不再是错误状态，而只是一种正常的浏览状态。上限随之取消，勾几个就是几个。
+     *
+     * - 丢非符号：符号栏是一键一个标点，汉字/单词/整句混进来既点不出字也挤占横滑空间；
      * - 去重：两个键写同一个字，用户点哪个都一样，纯属误点来源；
-     * - 丢空白：符号栏是「一键一个字符」，空格混在里头看着像坏了（分词交给键盘）；
      * - 丢代理项：存储里绝不留半个代理对 —— 否则渲染出来是豆腐块、字数统计也会翻倍。
      *   代价是不支持 BMP 外字符（emoji），而化学/数学符号全在 BMP 内。
      */
     fun normalizeSymbols(raw: String): String {
         val seen = LinkedHashSet<Char>()
         for (ch in raw) {
-            if (ch.isWhitespace()) continue
-            if (ch.isHighSurrogate() || ch.isLowSurrogate()) continue
-            if (seen.size >= SYMBOLS_MAX) break
+            if (!isSymbolChar(ch)) continue
             seen.add(ch)
         }
         return seen.joinToString("")

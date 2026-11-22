@@ -147,8 +147,8 @@ fun ContentPackScreen(navController: NavController) {
         AmbientBackground()
         Column(
             modifier = Modifier
-                .fillMaxSize()
                 .widthIn(max = 760.dp)
+                .fillMaxSize()
                 .padding(horizontal = 20.dp)
         ) {
             Row(
@@ -268,7 +268,7 @@ fun ContentPackScreen(navController: NavController) {
                                         onClick = {
                                             expanded = if (isExpanded) expanded - pack.id else expanded + pack.id
                                         },
-                                        modifier = Modifier.height(34.dp)
+                                        modifier = Modifier.heightIn(min = 34.dp)
                                     ) {
                                         Text(
                                             if (isExpanded) stringResource(R.string.content_pack_collapse)

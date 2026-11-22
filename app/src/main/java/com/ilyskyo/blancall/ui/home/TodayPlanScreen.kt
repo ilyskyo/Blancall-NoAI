@@ -209,8 +209,8 @@ fun TodayPlanScreen(navController: NavController) {
         AmbientBackground()
         Column(
             modifier = Modifier
-                .fillMaxSize()
                 .widthIn(max = 600.dp)
+                .fillMaxSize()
         ) {
             Row(
                 modifier = Modifier
@@ -447,7 +447,7 @@ private fun PlanHero(
                 Text(
                     stringResource(R.string.today_plan_exam_behind),
                     style = MaterialTheme.typography.labelSmall,
-                    color = Macaron.warn().accent
+                    color = Macaron.warn().ink
                 )
             }
             // 今日目标进度：与首页计划卡同一口径，达成后换成强调色

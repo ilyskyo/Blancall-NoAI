@@ -155,8 +155,8 @@ fun DueListScreen(navController: NavController) {
         AmbientBackground()
         Column(
             modifier = Modifier
-                .fillMaxSize()
                 .widthIn(max = 600.dp)
+                .fillMaxSize()
         ) {
             Row(
                 modifier = Modifier

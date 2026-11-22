@@ -140,6 +140,24 @@ internal object ColorMath {
     /** 往黑里压，[t]=0 保留原色，=1 全黑。 */
     fun darken(argb: Int, t: Float): Int = blend(BLACK, argb, t.coerceIn(0f, 1f))
 
+    /**
+     * 把颜色往黑里压，直到与 [against] 的对比度达到 [minRatio]（最多压 [limit] 比例）。
+     *
+     * 与 [lightenUntilContrast] 对称：浅色模式里的点缀色（马卡龙 accent）明度极高，
+     * 当 11sp 小字铺在同族淡色底上只有 1.6–2.1:1。装饰（色条、色点）保留原色，
+     * 文字改用这个函数压过的版本，两边都不牺牲。
+     */
+    fun darkenUntilContrast(argb: Int, against: Int, minRatio: Double, limit: Float = 0.85f): Int {
+        if (contrast(argb, against) >= minRatio) return argb
+        var t = 0.1f
+        while (t <= limit) {
+            val candidate = darken(argb, t)
+            if (contrast(candidate, against) >= minRatio) return candidate
+            t += 0.05f
+        }
+        return darken(argb, limit)
+    }
+
     const val WHITE: Int = 0xFFFFFFFF.toInt()
     const val BLACK: Int = 0xFF000000.toInt()
 

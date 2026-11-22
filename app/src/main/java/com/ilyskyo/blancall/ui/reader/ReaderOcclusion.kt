@@ -18,7 +18,9 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextStyle
@@ -361,12 +363,19 @@ fun OccludedParagraph(
     // 遮挡集合用 State 包裹：绘制阶段与点按处理实时读取。遮挡集合变化（编辑配置回存、
     // 遮挡模式切换）无需等待重新布局即可立即生效——避免"改了配置还画旧遮块"
     val hiddenState = rememberUpdatedState(hidden)
-    // 读屏不能把被遮住的原文念出来：整段只报「N 块遮挡」，具体揭示由视觉/点按完成。
-    val maskDescription = if (hidden.isNotEmpty()) {
+    // 读屏不能把被遮住的原文念出来：整段只报「还剩 N 块遮挡」。
+    // 揭示过的块必须退出计数——否则读屏用户点了「显示本段」之后听到的还是那句话，
+    // 会以为自己没点中。
+    val revealedNow = revealedStarts.value
+    val stillHidden = if (hidden.isEmpty()) 0 else hidden.count { it.start !in revealedNow }
+    val maskDescription = if (stillHidden > 0) {
         androidx.compose.ui.res.pluralStringResource(
-            com.ilyskyo.blancall.R.plurals.mask_detail, hidden.size, hidden.size
+            com.ilyskyo.blancall.R.plurals.mask_detail, stillHidden, stillHidden
         )
     } else null
+    val revealLabel = androidx.compose.ui.res.stringResource(
+        com.ilyskyo.blancall.R.string.a11y_reveal_paragraph
+    )
     val onToggleControlsState = rememberUpdatedState(onToggleControls)
     val layoutState = remember { mutableStateOf<TextLayoutResult?>(null) }
     val density = LocalDensity.current
@@ -388,7 +397,19 @@ fun OccludedParagraph(
             .fillMaxWidth()
             .then(
                 if (maskDescription != null) {
-                    Modifier.semantics { contentDescription = maskDescription }
+                    Modifier.semantics {
+                        contentDescription = maskDescription
+                        // 揭示原先只有指针手势（tapGesturesPenAware）：读屏用户每段只听到
+                        // 「N 块遮挡」，没有任何办法把遮块点开 —— 整个背诵模式对他们是一片空白。
+                        // 这里补一个无障碍动作，把本段所有遮块一次性置为已揭示。
+                        customActions = listOf(
+                            CustomAccessibilityAction(label = revealLabel) {
+                                revealedStarts.value =
+                                    revealedStarts.value + hidden.map { it.start }.toSet()
+                                true
+                            }
+                        )
+                    }
                 } else Modifier
             )
             .drawWithContent {

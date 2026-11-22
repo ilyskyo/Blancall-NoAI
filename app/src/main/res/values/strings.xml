@@ -61,6 +61,11 @@
     <string name="settings_layout_full">完整布局</string>
     <string name="settings_layout_hint">长按标题可切换布局</string>
     <string name="settings_layout_hint_sub">布局会记住，下次打开还是这个样子</string>
+    <string name="settings_layout_switched_full">已切换到完整布局 · 长按标题可切回</string>
+    <string name="settings_layout_switched_compact">已切换到紧凑布局 · 长按标题可切回</string>
+    <string name="settings_layout_undo">撤销</string>
+    <string name="settings_layout_state_compact">当前为紧凑布局 · %1$d 个入口</string>
+    <string name="settings_layout_state_full">当前为完整布局 · %1$d 组</string>
     <string name="settings_hint_got_it">知道了</string>
     <string name="settings_search_hint">搜索设置项</string>
     <string name="settings_search_empty">没有匹配的设置项</string>
@@ -73,6 +78,24 @@
     <string name="settings_entry_about">关于与支持</string>
     <string name="settings_group_more">另 %1$d 项</string>
     <string name="settings_item_theme_mode">深浅模式</string>
+    <string name="settings_reading_font_size">字号</string>
+    <string name="settings_reading_line_height">行距</string>
+    <string name="settings_reading_mask_desc">把正文里的字词或复句挡住，靠回忆读下去</string>
+    <string name="settings_reading_mask_granularity">遮挡粒度</string>
+    <string name="settings_pdf_view">PDF 预览</string>
+    <string name="settings_reading_apply_all">让所有文章改用这里的设置</string>
+    <string name="settings_reading_apply_all_desc">单独调整过的文章也会被覆盖</string>
+    <string name="settings_reading_apply_all_confirm_title">应用到所有文章？</string>
+    <string name="settings_reading_apply_all_confirm_msg">所有文章的字号、行距、字体、背景与遮挡都会改成这里的值；每篇自己的自定义遮挡配置会保留。</string>
+    <string name="settings_reading_applied">已应用到所有文章</string>
+    <string name="settings_reading_scope_hint">这里是所有文章的默认值。某篇在阅读模式里单独调过，就以那篇为准。</string>
+    <string name="settings_practice_title">练习</string>
+    <string name="settings_handwriting_default">默认手写作答</string>
+    <string name="settings_handwriting_default_desc">进入练习直接用笔，不必每次切换输入方式</string>
+    <string name="settings_practice_back_warn">练习中途离开时提醒</string>
+    <string name="settings_practice_back_warn_desc">有还没提交的作答时，先问一句再走</string>
+    <string name="settings_exam_date">考试日期</string>
+    <string name="settings_exam_unset">未设置</string>
     <string name="add_card">添加卡片</string>
     <string name="edit_card_config">编辑卡片配置</string>
     <string name="delete_card">删除卡片</string>
@@ -1396,7 +1419,7 @@
     <string name="handwriting_symbol_bar">启用符号栏</string>
     <string name="handwriting_symbol_bar_desc">手写板下方的一键符号行；关掉后书写区更高</string>
     <string name="handwriting_symbols">符号栏内容</string>
-    <string name="handwriting_symbols_desc">勾选常用符号，末尾可补自己常用的字符</string>
+    <string name="handwriting_symbols_desc">勾选或添加常用符号，多到一行放不下时可左右滑动</string>
     <string name="handwriting_symbols_count">中文 %1$d · 英文 %2$d</string>
     <string name="handwriting_auto_commit_weak">低相似度也直接上屏</string>
     <string name="handwriting_auto_commit_weak_desc">不再为不确定的字停下选字；疑似连写多字与生僻字仍会拦截</string>
@@ -1404,8 +1427,12 @@
     <string name="handwriting_symbols_cjk">中文</string>
     <string name="handwriting_symbols_latin">英文</string>
     <string name="handwriting_symbols_add">补充字符</string>
-    <string name="handwriting_symbols_add_hint">输入预设里没有的字符</string>
+    <string name="handwriting_symbols_add_hint">输入一个符号，如 ° 或 ≤</string>
     <string name="handwriting_symbols_reset">恢复默认</string>
+    <string name="handwriting_symbols_total">共 %1$d 个</string>
+    <string name="handwriting_symbols_add_action">添加</string>
+    <string name="handwriting_symbols_added">已添加 · 点按移除</string>
+    <string name="handwriting_symbols_only_cjk_latin">符号栏只用于中文和英文的标点与符号：一次只能加一个符号，汉字、英文字母与整段文字都加不进来。</string>
     <string name="reminder_freq_daily">每天</string>
     <string name="reminder_freq_five">每周5天</string>
     <string name="reminder_freq_three">每周3天</string>
@@ -1632,6 +1659,13 @@
     <string name="help_171">数据页 · 学习任务流</string>
     <string name="help_172">在「数据」页滚到最顶部，继续往下拉；圆环拉满、手机震动一下再松手 → 打开学习任务流（按时间排出正在计划中的文章）</string>
     <string name="help_173">任务流里每篇都能暂停、恢复或调整下次复习时间；滑到底再上拉，或点左上角返回，回到数据页</string>
+    <string name="help_174">手写作答</string>
+    <string name="help_175">作答区切到「手写」后，写出的字直接落进当前的空；写错了可以撤回，划一笔就是删掉。</string>
+    <string name="help_176">符号栏</string>
+    <string name="help_177">手写区下方那一行就是符号栏：点一个符号即插入，不用切回键盘。</string>
+    <string name="help_178">符号多到一行放不下时，在那行里左右滑动就能看到后面的。</string>
+    <string name="help_179">内容在「设置」里的「符号栏内容」配：中文、英文各一套；勾选常用符号，或自己补一个。</string>
+    <string name="help_180">符号栏只支持中文和英文的标点与符号：补充字符一次只能加一个符号，汉字、英文字母与整段文字都加不进来。</string>
     <string name="help_std_welcome_title">欢迎使用 Blancall</string>
     <string name="help_std_welcome_sub">先花几分钟了解基本用法，即可开始背诵</string>
     <string name="help_std_start">开始使用 Blancall</string>
@@ -1867,4 +1901,27 @@
     <plurals name="hint_length_badge">
         <item quantity="other">%1$d 字</item>
     </plurals>
+    <string name="backup_importing_title">正在恢复</string>
+    <string name="backup_importing_body">正在写入备份并重新载入学习数据，请勿关闭应用。</string>
+    <string name="a11y_reveal_paragraph">显示本段</string>
+    <!--
+     搜索别名：只喂设置页的检索，不在界面上显示（SettingsSearch.kt）。
+     用户嘴里的词与界面文案不是同一套：搜「外貌」「颜色」「夜间」「通知」都要能落到对应分区。
+     逗号分隔，别名可以比标题更口语。
+    -->
+    <string name="settings_search_alias_appearance">外貌,样子,长相,皮肤,换肤,界面,样式,主题,深浅,深色,浅色,夜间,暗黑,字体,字号,语言,玻璃,触感,震动,首页</string>
+    <string name="settings_search_alias_theme_color">颜色,配色,主色,强调色,色调,取色,自定义,主题颜色,色板,换肤</string>
+    <string name="settings_search_alias_features">特性,功能,首行缩进,缩进,符号栏,符号,手写,笔迹,墨迹,动画,翻页,自动确认</string>
+    <string name="settings_search_alias_reading">阅读,阅读字体,字号,字体,行距,行高,布局,背景,遮挡,挡片,挡片颜色,pdf,速度,字重,排版</string>
+    <string name="settings_search_alias_practice">练习,提示,提示长度,挖空,填空,手写,警告,返回,默认</string>
+    <string name="settings_search_alias_plan">记忆,方案,计划,复习,间隔,考试,考试日期,目标,时长,进度</string>
+    <string name="settings_search_alias_reminder">提醒,通知,推送,时间,星期,频率,免打扰,安静,闹钟</string>
+    <string name="settings_search_alias_help">帮助,教程,引导,使用指引,重新播放,重置</string>
+    <string name="settings_search_alias_content">内容,管理,标签,分类,文章</string>
+    <string name="settings_search_alias_data">数据,备份,导出,导入,恢复,还原,归档,存储,大小</string>
+    <string name="settings_search_alias_extensions">扩展,拓展,书库,素材库,内容包,内置,哲学,西哲,高考,互换</string>
+    <string name="settings_search_alias_about">关于,版本,品牌,信息</string>
+    <string name="settings_search_alias_donation">赞赏,打赏,支持,捐赠,赞助</string>
+    <!-- 检索噪音词：用户会在实词前加的修饰（「软件颜色」里的「软件」），剥掉后仍按实词查 -->
+    <string name="settings_search_noise">app,软件,应用,我的,这个,那个</string>
 </resources>

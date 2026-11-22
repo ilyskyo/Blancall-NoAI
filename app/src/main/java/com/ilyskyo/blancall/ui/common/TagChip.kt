@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -83,7 +84,9 @@ fun TagChipView(
     }
     Box(
         modifier = modifier
-            .height(18.dp)
+            // 18dp 是 labelSmall(11sp/16sp) 的下限，不是上限：应用内字号 1.3 档
+            // 行高就有 20.8dp，写死 height 会被 clip 上下切掉一刀。
+            .heightIn(min = 18.dp)
             .widthIn(max = 76.dp)
             .clip(SmoothRoundedCornerShape(6.dp))
             .background(opaqueColor(chip.bg))
@@ -112,7 +115,7 @@ fun TagChipView(
 private fun OverflowChip(count: Int, modifier: Modifier = Modifier) {
     Box(
         modifier = modifier
-            .height(18.dp)
+            .heightIn(min = 18.dp)
             .clip(SmoothRoundedCornerShape(6.dp))
             .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f))
             .padding(horizontal = 5.dp),

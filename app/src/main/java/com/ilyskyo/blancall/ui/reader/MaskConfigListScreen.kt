@@ -159,8 +159,8 @@ fun MaskConfigListScreen(
     ) {
         Column(
             modifier = Modifier
-                .fillMaxSize()
                 .widthIn(max = 600.dp)
+                .fillMaxSize()
                 .padding(horizontal = 20.dp)
         ) {
             // 首次进入教列表手势：点按即使用、长按改名 / 删除（看过即不再出现）

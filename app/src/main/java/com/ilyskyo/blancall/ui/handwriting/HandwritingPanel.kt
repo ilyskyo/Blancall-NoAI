@@ -13,17 +13,17 @@ import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.MaterialTheme
@@ -41,7 +41,6 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerType
@@ -58,10 +57,8 @@ import com.ilyskyo.blancall.data.handwriting.HandwritingRecognizer
 import com.ilyskyo.blancall.data.handwriting.HandwritingScript
 import com.ilyskyo.blancall.data.handwriting.HandwritingResult
 import com.ilyskyo.blancall.ui.common.MotionFade
-import com.ilyskyo.blancall.ui.common.PressTier
-import com.ilyskyo.blancall.ui.common.pressFeedback
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import com.ilyskyo.blancall.ui.common.StylusPresence
+import com.ilyskyo.blancall.ui.common.SymbolKey
 import com.ilyskyo.blancall.ui.common.rememberConfirmHaptic
 import com.ilyskyo.blancall.ui.theme.AppPrefs
 import com.ilyskyo.blancall.ui.theme.SmoothRoundedCornerShape
@@ -1021,46 +1018,30 @@ fun HandwritingPanel(
             // 见 [localizePunct]）；但全角 ，？！：； 不在类表内、无法「写」出，
             // 且高频符号一键插入本就更快 —— 这里与手写识别并存，并非唯一出路。
             //
-            // ⚠️ 用 FlowRow 而不是 Row：符号超过一行放不下时自动折行，
-            // 不会把右侧「清空/收起」挤变形（手机窄屏尤其明显）。
+            // ⚠️ 用 LazyRow 横向滑动，不再折行。曾经的 FlowRow 会在第 7 个符号之后换行，
+            // 把「清空/收起」那一行顶高、书写区被压掉一截；而符号条数本来就不该有上限
+            // （用户会自己往里加十几个）。横滑之后行高恒定，放不下就滑，右侧按钮也不动。
             if (showSymbols) {
-                FlowRow(
-                    modifier = Modifier.weight(1f, fill = false),
-                    verticalArrangement = Arrangement.Center
+                LazyRow(
+                    modifier = Modifier.weight(1f),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    // 末尾留一点空：最后一个键贴着「清空」时看着像连成一体
+                    contentPadding = PaddingValues(end = 4.dp),
                 ) {
-                    symbolList.forEach { p ->
-                        val keySrc = remember { MutableInteractionSource() }
-                        Surface(
-                            shape = SmoothRoundedCornerShape(6.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier
-                                .padding(end = 4.dp)
-                                // 符号键：涟漪换成统一的缩放＋亮度（Container 档）。
-                                // pressFeedback 放在 clip 之前、Surface 传入的 modifier 上 ——
-                                // Surface 自己的底色是在这条链**之后**才画的，
-                                // 所以压暗能盖住键面；焦点/悬停高亮也由它补回。
-                                .pressFeedback(keySrc, PressTier.Container, enabled = enabled)
-                                // ⚠️ clip 必须放在 clickable **之前**：clickable 的按压/悬停指示器
-                                // 绘制在它自己的节点边界内，只有链上先 clip 才能把它裁成圆角；
-                                // 否则圆角键上会浮出一个直角灰块（Surface 自己的 shape 只裁剪背景，
-                                // 管不到挂在 modifier 上的 clickable —— 真机复现过）。
-                                //
-                                // 这里刻意**不**改成 Surface(onClick = …) 重载：那个重载会带上
-                                // 48dp 最小交互尺寸，一行 6 个符号会被撑到近 300dp 宽、把操作行挤变形。
-                                .clip(SmoothRoundedCornerShape(6.dp))
-                                .clickable(
-                                    interactionSource = keySrc,
-                                    indication = null,
-                                    enabled = enabled
-                                ) { commitChars(listOf(p)) }
-                        ) {
-                            Text(
-                                p.toString(),
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp)
-                            )
-                        }
+                    items(symbolList.size) { index ->
+                        // 尺寸/形状/描边全交给 SymbolKey：这里只决定格子多大。
+                        // 34dp 是这一行的定高（贴书写板，不能让键把面板顶高）；
+                        // 不再用 Surface(onClick) —— 它自带 48dp 最小交互尺寸。
+                        SymbolKey(
+                            char = symbolList[index],
+                            onClick = { commitChars(listOf(symbolList[index])) },
+                            enabled = enabled,
+                            size = 34.dp,
+                            corner = 10.dp,
+                            style = MaterialTheme.typography.labelMedium,
+                            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
                     }
                 }
             }

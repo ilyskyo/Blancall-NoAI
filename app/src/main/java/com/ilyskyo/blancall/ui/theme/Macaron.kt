@@ -27,7 +27,18 @@ import androidx.compose.ui.graphics.Color
  * 灰色主题（石墨、或用户自定义的灰）色相无意义，[hueShiftFor] 直接给 0，
  * 于是退回原本的暖色族，不会被甩成一套随机彩。
  */
-data class MacaronHue(val fill: Color, val accent: Color)
+data class MacaronHue(
+    val fill: Color,
+    val accent: Color,
+    /**
+     * 文字/图标专用强调色：与 [fill] 至少 4.5:1。
+     *
+     * [accent] 是为圆点、色条、色块调的柔和点缀色，明度极高（浅色下当 11sp 文字只有
+     * 1.6–2.1:1）。凡是拿它写字的调用点，一律改用这个：浅色下往黑压到 4.5:1，
+     * 深色下 accent 本来就有 7–8:1，原样返回。装饰仍然用 [accent]，柔和感不丢。
+     */
+    val ink: Color,
+)
 
 object Macaron {
 
@@ -73,12 +84,16 @@ object Macaron {
      */
     internal fun hueAt(index: Int, shift: Float, dark: Boolean): MacaronHue {
         val i = index.coerceIn(0, lightFill.lastIndex)
-        val fill = if (dark) darkFill[i] else lightFill[i]
-        val accent = if (dark) darkAccent[i] else lightAccent[i]
-        return MacaronHue(
-            fill = Color(ColorMath.rotateHue(fill, shift)),
-            accent = Color(ColorMath.rotateHue(accent, shift)),
-        )
+        val fillArgb = ColorMath.rotateHue(if (dark) darkFill[i] else lightFill[i], shift)
+        val accentArgb = ColorMath.rotateHue(if (dark) darkAccent[i] else lightAccent[i], shift)
+        // 文字色单独派生，不另存一份常量：换肤（shift）与明暗切换时，
+        // 它必须跟 accent/fill 一起走，自己写死会立刻脱链。
+        val inkArgb = if (dark) {
+            ColorMath.lightenUntilContrast(accentArgb, fillArgb, 4.5)
+        } else {
+            ColorMath.darkenUntilContrast(accentArgb, fillArgb, 4.5)
+        }
+        return MacaronHue(fill = Color(fillArgb), accent = Color(accentArgb), ink = Color(inkArgb))
     }
 
     @Composable

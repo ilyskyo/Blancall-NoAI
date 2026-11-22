@@ -189,7 +189,7 @@ fun WesternThoughtScreen(navController: NavController) {
                     title = lib.title,
                     subtitle = lib.subtitle,
                     meta = lib.metaLine.ifBlank { stringResource(com.ilyskyo.blancall.R.string.western_selected_content) },
-                    accent = Color(lib.accentColor),
+                    accent = libraryAccent(lib.accentColor),
                     icon = AppIconKind.Library,
                     onClick = { navController.navigate("philo_content/${lib.id}") }
                 )
@@ -213,13 +213,13 @@ fun WesternThoughtScreen(navController: NavController) {
                             packDateFormat.format(Date(pack.importedAt))
                         ),
                         meta = stringResource(com.ilyskyo.blancall.R.string.content_pack_title),
-                        accent = Color(0xFF3E6B57),
+                        accent = libraryAccent(0xFF3E6B57),
                         icon = AppIconKind.Articles,
                         onClick = { navController.navigate("philo_packs") },
                         trailing = {
                             BatchImportPill(
                                 text = stringResource(com.ilyskyo.blancall.R.string.library_batch_import),
-                                accent = Color(0xFF3E6B57),
+                                accent = libraryAccent(0xFF3E6B57),
                             ) {
                                 scope.launch {
                                     val items = withContext(Dispatchers.IO) {
@@ -274,6 +274,20 @@ fun WesternThoughtScreen(navController: NavController) {
             }
         )
     }
+}
+
+/**
+ * 库色在深色底上提亮。
+ *
+ * WebView 那一路早就这么做了（见 gaokaoLinkColor 的注释），Compose 卡片这一路
+ * 原先直接吃原色：#1F3A5F 在 #1C1C1E 上只有 1.5:1、#7A3B2E 只有 2.0:1 ——
+ * 左侧色条、圆形图标里的字形、「批量导入」胶囊文字全糊成一片。
+ * 两路必须走同一个函数，否则同一条库在卡片页和内容页是两个颜色。
+ */
+@Composable
+private fun libraryAccent(argb: Long): Color {
+    val base = Color(argb)
+    return if (isBlancallDark()) lerp(base, Color.White, 0.45f) else base
 }
 
 /**
@@ -476,8 +490,8 @@ fun LibraryContentPage(
     // 高考库首页的 HTML 自带米黄底。把当前主题色（浅色/深色）通过 URL 参数传进页面，
     // 页面在解析阶段就写入样式，既不出现米黄底，深色模式下也不会先闪一帧浅色。
     // 链接保留该库原本的棕色调（深色模式下提亮，保证黑底可读）。
-    val libAccent = Color(lib.accentColor)
-    val gaokaoLinkColor = if (isBlancallDark()) lerp(libAccent, Color.White, 0.45f) else libAccent
+    // 提亮逻辑与卡片页共用 libraryAccent()，两处不再各算一遍。
+    val gaokaoLinkColor = libraryAccent(lib.accentColor)
     val scheme = MaterialTheme.colorScheme
     val gaokaoTheme = remember(
         lib.id,
@@ -553,7 +567,7 @@ fun LibraryContentPage(
 
     val mainHandler = remember { android.os.Handler(android.os.Looper.getMainLooper()) }
     val scope = rememberCoroutineScope()
-    val accent = libAccent
+    val accent = libraryAccent(lib.accentColor)
 
     val onBack: () -> Unit = {
         val wv = webView

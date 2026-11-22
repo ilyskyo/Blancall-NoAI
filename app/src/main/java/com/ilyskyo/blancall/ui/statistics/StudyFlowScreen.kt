@@ -494,8 +494,8 @@ fun StudyFlowScreen(navController: NavController) {
         AmbientBackground()
         Column(
             modifier = Modifier
-                .fillMaxSize()
                 .widthIn(max = 600.dp)
+                .fillMaxSize()
         ) {
             Row(
                 modifier = Modifier
@@ -923,7 +923,7 @@ private fun FlowSummaryCard(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(Modifier.weight(1f))
-                SurfacePill(text = planLabel(planId), color = Macaron.continueP().accent)
+                SurfacePill(text = planLabel(planId), color = Macaron.continueP().ink)
             }
             Spacer(Modifier.height(12.dp))
             Row(verticalAlignment = Alignment.Bottom) {
@@ -946,7 +946,7 @@ private fun FlowSummaryCard(
                 Text(
                     stringResource(R.string.flow_summary_due_new, dueNowNewCount),
                     style = MaterialTheme.typography.labelSmall,
-                    color = Macaron.info().accent
+                    color = Macaron.info().ink
                 )
             }
             if (laterTodayCount > 0) {
@@ -954,7 +954,7 @@ private fun FlowSummaryCard(
                 Text(
                     stringResource(R.string.flow_summary_later_today, laterTodayCount),
                     style = MaterialTheme.typography.labelSmall,
-                    color = Macaron.info().accent
+                    color = Macaron.info().ink
                 )
             }
             Spacer(Modifier.height(10.dp))
@@ -1143,7 +1143,7 @@ private fun FlowScheduleCard(
                     color = MaterialTheme.colorScheme.onSurface
                 )
                 Spacer(Modifier.weight(1f))
-                SurfacePill(text = planLabel(planId), color = Macaron.continueP().accent)
+                SurfacePill(text = planLabel(planId), color = Macaron.continueP().ink)
                 Spacer(Modifier.width(6.dp))
                 AppIcon(
                     AppIconKind.ChevronRight,
@@ -1507,7 +1507,7 @@ internal fun FlowTaskRow(
                             Text(
                                 stringResource(R.string.flow_sentence_due, task.sentenceDue),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = Macaron.info().accent
+                                color = Macaron.info().ink
                             )
                         }
                     }

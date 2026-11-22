@@ -529,7 +529,7 @@ fun SentenceCardScreen(
                     if (scopeActive) {
                         GlassButton(
                             onClick = { clearScope() },
-                            modifier = Modifier.height(34.dp).widthIn(max = 96.dp),
+                            modifier = Modifier.heightIn(min = 34.dp).widthIn(max = 96.dp),
                         ) {
                             AppIcon(
                                 kind = AppIconKind.Filter,
@@ -556,7 +556,7 @@ fun SentenceCardScreen(
                         // 抽句范围筛选入口（多选标签；背后句子池实时刷新）
                         GlassButton(
                             onClick = { showFilterSheet = true },
-                            modifier = Modifier.height(34.dp),
+                            modifier = Modifier.heightIn(min = 34.dp),
                         ) {
                             AppIcon(
                                 kind = AppIconKind.Filter,

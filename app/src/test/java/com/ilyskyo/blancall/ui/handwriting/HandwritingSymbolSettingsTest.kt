@@ -5,6 +5,7 @@ package com.ilyskyo.blancall.ui.handwriting
 
 import com.ilyskyo.blancall.data.handwriting.HandwritingScript
 import com.ilyskyo.blancall.ui.settings.composeSymbols
+import com.ilyskyo.blancall.ui.settings.sanitizeSymbolInput
 import com.ilyskyo.blancall.ui.theme.AppPrefs
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -35,9 +36,12 @@ class HandwritingSymbolSettingsTest {
     }
 
     @Test
-    fun normalize_capsLengthAtSymbolsMax() {
-        val raw = "，。、？！：；…《》（）·—,."
-        assertEquals(AppPrefs.SYMBOLS_MAX, AppPrefs.normalizeSymbols(raw).length)
+    fun normalize_keepsEverySymbolNoCap() {
+        // 7.6.4：条数上限取消（面板那行改成横滑）。旧上限 12 曾把第 13 个起悄悄截掉，
+        // 界面上「加进去了」却看不到 —— 现在整串原样保留。
+        val raw = "，。、？！：；…《》（）·—,.?↑↓⇌Δ°×÷√±≈≤≥"
+        assertEquals(raw, AppPrefs.normalizeSymbols(raw))
+        assertTrue(raw.length > 12)
     }
 
     @Test
@@ -105,10 +109,52 @@ class HandwritingSymbolSettingsTest {
     }
 
     @Test
-    fun defaultsFitUnderCap() {
-        assertTrue(symbolsOf(AppPrefs.DEFAULT_SYMBOLS_CJK).size <= AppPrefs.SYMBOLS_MAX)
-        assertTrue(symbolsOf(AppPrefs.DEFAULT_SYMBOLS_LATIN).size <= AppPrefs.SYMBOLS_MAX)
-        // 上限本身要够放下旧的两套，否则「默认值」会被 normalize 截断 —— 那正是最难查的回归
-        assertFalse(AppPrefs.SYMBOLS_MAX < 8)
+    fun defaultsSurviveNormalizeUntouched() {
+        // 默认值必须原样穿过清洗：一旦被截断，「升级不改手感」这条不变量就破了
+        assertEquals(
+            AppPrefs.DEFAULT_SYMBOLS_CJK,
+            AppPrefs.normalizeSymbols(AppPrefs.DEFAULT_SYMBOLS_CJK)
+        )
+        assertEquals(
+            AppPrefs.DEFAULT_SYMBOLS_LATIN,
+            AppPrefs.normalizeSymbols(AppPrefs.DEFAULT_SYMBOLS_LATIN)
+        )
+    }
+
+    // ── 补充字符只收「一个符号」 ──
+
+    @Test
+    fun symbolChar_rejectsEverythingThatIsAWord() {
+        // 汉字、拉丁字母、全角字母、日文假名、数字 —— 都不是符号
+        listOf('计', '划', 'V', '缸', 'Ａ', 'ｚ', 'あ', '1', ' ').forEach { ch ->
+            assertFalse("$ch 不该被当作符号", AppPrefs.isSymbolChar(ch))
+        }
+    }
+
+    @Test
+    fun symbolChar_acceptsPunctuationAndMath() {
+        listOf('，', '。', '≤', '⇌', '°', '×', '√', ',', '.', '—').forEach { ch ->
+            assertTrue("$ch 应该被当作符号", AppPrefs.isSymbolChar(ch))
+        }
+    }
+
+    @Test
+    fun symbolChar_acceptsGreekBecausePresetHasDelta() {
+        // Δ 是预设池里的一项（理科方程式常用）。它属于字母类，必须单独特批 ——
+        // 否则用户勾了 Δ 会被 normalizeSymbols 悄悄丢掉，界面上看着像点不动。
+        listOf('Δ', 'Σ', 'Ω', 'π').forEach { ch ->
+            assertTrue("$ch 应该被当作符号", AppPrefs.isSymbolChar(ch))
+        }
+    }
+
+    @Test
+    fun sanitize_takesFirstSymbolAndSkipsWords() {
+        // 输入法一次上屏一串时，取第一个符号 —— 不是「整段必须合法」
+        assertEquals('≤', sanitizeSymbolInput("计划V缸好≤"))
+        assertEquals('，', sanitizeSymbolInput("abc，def"))
+        // 一个符号都没有：返回 null，输入框保持空（旧版会把整段汉字存进符号栏）
+        assertEquals(null, sanitizeSymbolInput("计划V缸好"))
+        assertEquals(null, sanitizeSymbolInput("hello world"))
+        assertEquals(null, sanitizeSymbolInput("   "))
     }
 }

@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -115,8 +116,8 @@ fun TagDetailScreen(navController: NavController, tagId: Long) {
         AmbientBackground()
         Column(
             modifier = Modifier
-                .fillMaxSize()
                 .widthIn(max = 600.dp)
+                .fillMaxSize()
                 .padding(horizontal = 20.dp),
         ) {
             Row(
@@ -142,7 +143,7 @@ fun TagDetailScreen(navController: NavController, tagId: Long) {
                 if (tag != null) {
                     GlassButton(
                         onClick = { navController.navigate("tag_manager?tagId=$tagId") },
-                        modifier = Modifier.height(40.dp),
+                        modifier = Modifier.heightIn(min = 40.dp),
                     ) {
                         Text(
                             stringResource(R.string.manage_short),
@@ -370,7 +371,7 @@ private fun TagArticleRow(
             Spacer(Modifier.width(10.dp))
             GlassButton(
                 onClick = onPractice,
-                modifier = Modifier.height(34.dp).then(practiceModifier),
+                modifier = Modifier.heightIn(min = 34.dp).then(practiceModifier),
             ) {
                 Text(
                     stringResource(R.string.reader_start_practice),

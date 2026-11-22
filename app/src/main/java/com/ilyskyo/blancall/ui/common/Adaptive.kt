@@ -125,9 +125,11 @@ fun AdaptiveWidthContainer(
         contentAlignment = alignment
     ) {
         Box(
+            // 限宽必须在 fill 之前：fillMaxWidth 会先把 min/max 宽度钉成父宽，
+            // 后置 widthIn 被 enforceIncoming 顶回，宽屏下等于没写。
             modifier = Modifier
-                .fillMaxWidth()
-                .then(if (LocalIsLargeScreen) Modifier.widthIn(max = maxWidth) else Modifier),
+                .then(if (LocalIsLargeScreen) Modifier.widthIn(max = maxWidth) else Modifier)
+                .fillMaxWidth(),
             content = content
         )
     }

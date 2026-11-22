@@ -64,6 +64,11 @@
     <string name="settings_layout_full">Полностью</string>
     <string name="settings_layout_hint">Долгое нажатие на заголовок меняет вид</string>
     <string name="settings_layout_hint_sub">Выбранный вид сохранится</string>
+    <string name="settings_layout_switched_full">Полный вид включён · долгое нажатие на заголовок вернёт обратно</string>
+    <string name="settings_layout_switched_compact">Краткий вид включён · долгое нажатие на заголовок вернёт обратно</string>
+    <string name="settings_layout_undo">Отменить</string>
+    <string name="settings_layout_state_compact">Краткий вид · %1$d пунктов</string>
+    <string name="settings_layout_state_full">Полный вид · %1$d разделов</string>
     <string name="settings_hint_got_it">Понятно</string>
     <string name="settings_search_hint">Поиск по настройкам</string>
     <string name="settings_search_empty">Ничего не найдено</string>
@@ -76,6 +81,24 @@
     <string name="settings_entry_about">О приложении и поддержка</string>
     <string name="settings_group_more">ещё %1$d</string>
     <string name="settings_item_theme_mode">Тема</string>
+    <string name="settings_reading_font_size">Размер шрифта</string>
+    <string name="settings_reading_line_height">Межстрочный интервал</string>
+    <string name="settings_reading_mask_desc">Скрывать слова и фразы, чтобы вспоминать текст</string>
+    <string name="settings_reading_mask_granularity">Гранулярность маскировки</string>
+    <string name="settings_pdf_view">Просмотр PDF</string>
+    <string name="settings_reading_apply_all">Применить ко всем статьям</string>
+    <string name="settings_reading_apply_all_desc">Отдельно настроенные статьи будут перезаписаны</string>
+    <string name="settings_reading_apply_all_confirm_title">Применить ко всем статьям?</string>
+    <string name="settings_reading_apply_all_confirm_msg">Размер шрифта, интервал, шрифт, фон и маскировка изменятся во всех статьях. Индивидуальные настройки маскировки сохранятся.</string>
+    <string name="settings_reading_applied">Применено ко всем статьям</string>
+    <string name="settings_reading_scope_hint">Это значения по умолчанию для всех статей. Статья, настроенная в режиме чтения, сохраняет свои значения.</string>
+    <string name="settings_practice_title">Практика</string>
+    <string name="settings_handwriting_default">Ввод от руки по умолчанию</string>
+    <string name="settings_handwriting_default_desc">В практике сразу открывается перо</string>
+    <string name="settings_practice_back_warn">Спрашивать при выходе из практики</string>
+    <string name="settings_practice_back_warn_desc">Если есть неподтверждённые ответы</string>
+    <string name="settings_exam_date">Дата экзамена</string>
+    <string name="settings_exam_unset">Не задана</string>
     <string name="add_card">Добавить карточку</string>
     <string name="edit_card_config">Настроить карточку</string>
     <string name="delete_card">Удалить карточку</string>
@@ -1602,7 +1625,7 @@
     <string name="handwriting_symbol_bar">Показывать панель символов</string>
     <string name="handwriting_symbol_bar_desc">Строка символов под областью письма; выключите, чтобы увеличить поле</string>
     <string name="handwriting_symbols">Содержимое панели символов</string>
-    <string name="handwriting_symbols_desc">Отметьте нужные символы, свои можно добавить ниже</string>
+    <string name="handwriting_symbols_desc">Отметьте или добавьте нужные символы; если они не помещаются в строку, сдвиньте её вбок</string>
     <string name="handwriting_symbols_count">Китайские %1$d · Английские %2$d</string>
     <string name="handwriting_auto_commit_weak">Вводить при низкой уверенности</string>
     <string name="handwriting_auto_commit_weak_desc">Не останавливается на неясных знаках; защита от нескольких знаков и редких иероглифов остаётся</string>
@@ -1610,8 +1633,12 @@
     <string name="handwriting_symbols_cjk">Китайские</string>
     <string name="handwriting_symbols_latin">Английские</string>
     <string name="handwriting_symbols_add">Дополнительные символы</string>
-    <string name="handwriting_symbols_add_hint">Введите символы, которых нет в списке</string>
+    <string name="handwriting_symbols_add_hint">Один символ, например ° или ≤</string>
     <string name="handwriting_symbols_reset">Сбросить</string>
+    <string name="handwriting_symbols_total">Всего: %1$d</string>
+    <string name="handwriting_symbols_add_action">Добавить</string>
+    <string name="handwriting_symbols_added">Добавлено · нажмите, чтобы убрать</string>
+    <string name="handwriting_symbols_only_cjk_latin">Панель символов предназначена только для китайской и английской пунктуации: за раз добавляется один символ, иероглифы, латинские буквы и целые фразы не добавятся.</string>
     <string name="reminder_freq_daily">Ежедневно</string>
     <string name="reminder_freq_five">5 дней в неделю</string>
     <string name="reminder_freq_three">3 дня в неделю</string>
@@ -1837,6 +1864,13 @@
     <string name="help_171">Данные · поток обучения</string>
     <string name="help_172">На странице «Данные» прокрутите в самый верх и продолжайте тянуть вниз; когда кольцо заполнится и телефон завибрирует, отпустите — откроется поток обучения (запланированные статьи в порядке времени).</string>
     <string name="help_173">В потоке обучения любую статью можно поставить на паузу, возобновить или перенести следующий повтор; прокрутите вниз и потяните вверх либо нажмите «назад» слева сверху, чтобы вернуться на страницу «Данные».</string>
+    <string name="help_174">Письмо от руки</string>
+    <string name="help_175">Переключите поле ответа в режим «От руки» — написанное сразу попадёт в текущий пропуск. Ошиблись? Отмените или зачеркните, чтобы стереть.</string>
+    <string name="help_176">Панель символов</string>
+    <string name="help_177">Строка под областью письма — это панель символов: нажмите символ, и он вставится, возвращаться к клавиатуре не нужно.</string>
+    <string name="help_178">Если символов больше, чем помещается в строку, сдвиньте её влево или вправо, чтобы увидеть остальные.</string>
+    <string name="help_179">Настраивается в «Настройки» → «Содержимое панели символов»: отдельные наборы для китайского и английского; отметьте готовые символы или добавьте свой.</string>
+    <string name="help_180">Панель символов поддерживает только китайскую и английскую пунктуацию и символы: за раз добавляется один символ, иероглифы, латинские буквы и целые фразы не добавятся.</string>
     <string name="help_std_welcome_title">Добро пожаловать в Blancall</string>
     <string name="help_std_welcome_sub">Потратьте несколько минут на основы и начинайте заучивать.</string>
     <string name="help_std_start">Начать работу с Blancall</string>
@@ -2081,4 +2115,23 @@
         <item quantity="many">%1$d символов</item>
         <item quantity="other">%1$d символа</item>
     </plurals>
+    <string name="backup_importing_title">Восстановление</string>
+    <string name="backup_importing_body">Записываем резервную копию и перезагружаем учебные данные. Не закрывайте приложение.</string>
+    <string name="a11y_reveal_paragraph">Показать этот абзац</string>
+    <!-- Псевдонимы для поиска. В интерфейсе не показываются (SettingsSearch.kt). -->
+    <string name="settings_search_alias_appearance">оформление,вид,тема,тёмная,светлая,ночь,шрифт,размер,язык,стекло,вибрация,главная</string>
+    <string name="settings_search_alias_theme_color">цвет,цвета,акцент,палитра,оттенок,свой,авто,тон</string>
+    <string name="settings_search_alias_features">функции,возможности,отступ,символ,рукописный,чернила,анимация,страница</string>
+    <string name="settings_search_alias_reading">чтение,шрифт,размер,интервал,макет,фон,маска,скорость,начертание</string>
+    <string name="settings_search_alias_practice">практика,подсказка,пропуск,рукописный,предупреждение,назад,обычный</string>
+    <string name="settings_search_alias_plan">память,план,повторение,интервал,экзамен,цель,время,прогресс</string>
+    <string name="settings_search_alias_reminder">напоминание,уведомление,пуш,время,дни,частота,тишина,будильник</string>
+    <string name="settings_search_alias_help">справка,помощь,руководство,сброс,обучение</string>
+    <string name="settings_search_alias_content">контент,содержание,теги,категории,статьи</string>
+    <string name="settings_search_alias_data">данные,резервная,экспорт,импорт,восстановление,архив,размер,копия</string>
+    <string name="settings_search_alias_extensions">расширения,библиотека,пакет,встроенная,философия,экзамен,обмен</string>
+    <string name="settings_search_alias_about">версия,сборка,информация,приложение</string>
+    <string name="settings_search_alias_donation">поддержать,донат,поддержка,пожертвование</string>
+    <!-- 检索噪音词：用户会在实词前加的修饰（「软件颜色」里的「软件」），剥掉后仍按实词查 -->
+    <string name="settings_search_noise">приложение,программа,моё</string>
 </resources>

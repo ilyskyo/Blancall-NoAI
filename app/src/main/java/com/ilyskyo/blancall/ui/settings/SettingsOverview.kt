@@ -4,6 +4,8 @@
 package com.ilyskyo.blancall.ui.settings
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -28,14 +30,19 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -47,6 +54,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -87,7 +95,8 @@ import com.ilyskyo.blancall.ui.theme.isBlancallDark
  *    全列出来等于把二级页复制到一级，用户原话是「不能像现在这样一下子全放在里面」。
  * 3. **必须有搜索，且必须能模糊命中**：只要存在二级页，搜索就是必做项（Android 官方
  *    「层次较深的设置请加搜索」）。中文用户不会逐字敲全名（「主色」要能搜到「主题色」），
- *    所以匹配走「包含 → 子序列」两级，见 [settingsMatchScore]。
+ *    更不会用我们起的名字（「外貌」「颜色」要能搜到「外观」「主题色」）——
+ *    匹配走「标题 + 同义词别名」，见 `SettingsSearch.kt`。
  * 4. **chevron / 搜索图标全部自绘**：全站禁排版符号当图标，这里走 AppIconKind。
  *
  * 这一页**不引入任何新设置项**，它只是现有分区的索引 —— 展开态仍逐字保留原布局，
@@ -98,6 +107,13 @@ internal enum class SettingsGroup(
     val titleRes: Int,
     /** 该组包含的设置项标题（概览副行 + 全局搜索索引共用这一份清单） */
     val itemTitleRes: List<Int>,
+    /**
+     * 检索别名（同义词，逗号分隔）。**不是界面文案**：它只喂搜索，
+     * 让「外貌」「颜色」「夜间」这些用户嘴里的词也能落到对应的分区上。
+     * 放在资源里而不是 Kotlin 字面量，是因为它必须跟着界面语言走 ——
+     * 俄语用户在俄语界面里打的是俄语词。
+     */
+    val aliasRes: Int,
 ) {
     APPEARANCE(
         R.string.appearance,
@@ -113,10 +129,12 @@ internal enum class SettingsGroup(
             R.string.haptic_strength,
             R.string.home_subtitle,
         ),
+        R.string.settings_search_alias_appearance,
     ),
     THEME_COLOR(
         R.string.theme_color,
         listOf(R.string.theme_color_custom, R.string.material_you),
+        R.string.settings_search_alias_theme_color,
     ),
     FEATURES(
         R.string.features,
@@ -129,6 +147,41 @@ internal enum class SettingsGroup(
             R.string.clear_saved_ink,
             R.string.sentence_card_anim_title,
         ),
+        R.string.settings_search_alias_features,
+    ),
+    // 阅读外观曾经只能进「阅读模式」才改得到（2026-11-21 用户：设置页里也要能设置）。
+    // 这里放的是**全局默认值**：单篇文章改过之后以那篇的存档为准，
+    // 所以卡片末尾有一行「让所有文章改用这里的设置」。
+    READING(
+        R.string.reading_settings_title,
+        listOf(
+            R.string.settings_reading_font_size,
+            R.string.settings_reading_line_height,
+            R.string.reading_font,
+            R.string.reading_font_weight,
+            R.string.layout_section,
+            R.string.background_section,
+            R.string.recitation_mask,
+            R.string.mask_color_label,
+            R.string.settings_pdf_view,
+            R.string.reader_speed_title,
+            R.string.settings_reading_apply_all,
+        ),
+        R.string.settings_search_alias_reading,
+    ),
+    // 练习侧原先只有练习页里的 ⋮ 菜单与手写键盘上的切换，设置页完全看不到。
+    PRACTICE(
+        R.string.settings_practice_title,
+        listOf(
+            R.string.hint_length_toggle,
+            R.string.hint_content_toggle,
+            R.string.hint_punctuation_toggle,
+            R.string.sentence_cloze_toggle,
+            R.string.sentence_cloze_new_toggle,
+            R.string.settings_handwriting_default,
+            R.string.settings_practice_back_warn,
+        ),
+        R.string.settings_search_alias_practice,
     ),
     REVIEW(
         R.string.memory_plan,
@@ -137,7 +190,10 @@ internal enum class SettingsGroup(
             R.string.plan_name_standard,
             R.string.plan_name_deep,
             R.string.daily_goal,
+            R.string.settings_exam_date,
+            R.string.plan_settings_show_on_card,
         ),
+        R.string.settings_search_alias_plan,
     ),
     REMINDER(
         R.string.study_reminder,
@@ -148,14 +204,17 @@ internal enum class SettingsGroup(
             R.string.reminder_frequency,
             R.string.reminder_quiet_hours,
         ),
+        R.string.settings_search_alias_reminder,
     ),
     HELP(
         R.string.help_section,
         listOf(R.string.guided_tour, R.string.coach_reset, R.string.help_about),
+        R.string.settings_search_alias_help,
     ),
     CONTENT(
         R.string.content_management,
         listOf(R.string.article_tags),
+        R.string.settings_search_alias_content,
     ),
     DATA(
         R.string.data_section,
@@ -165,6 +224,7 @@ internal enum class SettingsGroup(
             R.string.import_backup,
             R.string.data_archive_action,
         ),
+        R.string.settings_search_alias_data,
     ),
     EXTENSIONS(
         R.string.extensions,
@@ -175,11 +235,16 @@ internal enum class SettingsGroup(
             R.string.content_pack_title,
             R.string.interchange_title,
         ),
+        R.string.settings_search_alias_extensions,
     ),
-    // 关于页承载品牌信息与版本号；标准版另有隐私政策入口，所以副行不是空的。
-    // 版本号仍放在行尾（见 SettingsEntryValue）。
-    ABOUT(R.string.about_section, listOf(R.string.privacy_policy)),
-    DONATION(R.string.donation_heading, emptyList()),
+    // 关于页承载品牌信息与版本号（标准版另有隐私政策入口）；收起态没有可点的子项，
+    // 所以 Pro 侧不带副行 —— 空列表时行高自然收窄，不会留一条空白辅助文本。
+    ABOUT(
+        R.string.about_section,
+        listOf(R.string.privacy_policy),
+        R.string.settings_search_alias_about,
+    ),
+    DONATION(R.string.donation_heading, emptyList(), R.string.settings_search_alias_donation),
 }
 
 /**
@@ -207,7 +272,7 @@ internal enum class SettingsEntry(
     ),
     READING(
         R.string.settings_entry_reading,
-        listOf(SettingsGroup.FEATURES),
+        listOf(SettingsGroup.FEATURES, SettingsGroup.READING, SettingsGroup.PRACTICE),
     ),
     CONTENT(
         R.string.settings_entry_content,
@@ -306,7 +371,10 @@ private fun SettingsEntryValue(entry: SettingsEntry, versionName: String) {
             val indent by AppPrefs.autoIndentEnabledFlow.collectAsState()
             val ink by AppPrefs.keepInkEnabledFlow.collectAsState()
             val tapExit by AppPrefs.sentenceTapExitEnabledFlow.collectAsState()
-            val on = (if (indent) 1 else 0) + (if (ink) 1 else 0) + (if (tapExit) 1 else 0)
+            val cloze by AppPrefs.sentenceClozeEnabledFlow.collectAsState()
+            val pen by AppPrefs.handwritingInputEnabledFlow.collectAsState()
+            val on = (if (indent) 1 else 0) + (if (ink) 1 else 0) + (if (tapExit) 1 else 0) +
+                (if (cloze) 1 else 0) + (if (pen) 1 else 0)
             SettingsValueText(stringResource(R.string.settings_count_on, on))
         }
 
@@ -373,6 +441,8 @@ internal fun SettingsCompactOverview(
     hintVisible: Boolean,
     onDismissHint: () -> Unit,
     onOpenEntry: (SettingsEntry) -> Unit,
+    /** 每个入口行的登场规格；null = 不参与「依次展开」（不是布局切换的那一次）。 */
+    revealDelay: (SettingsEntry) -> SettingsReveal? = { null },
 ) {
     val versionName = rememberVersionName()
 
@@ -380,10 +450,63 @@ internal fun SettingsCompactOverview(
         SettingsLayoutHint(visible = hintVisible, onDismiss = onDismissHint)
         SettingsSearchField(query = query, onQueryChange = onQueryChange)
         if (query.isBlank()) {
-            SettingsEntryIndexCard(versionName = versionName, onOpenEntry = onOpenEntry)
+            SettingsEntryIndexCard(
+                versionName = versionName,
+                onOpenEntry = onOpenEntry,
+                revealDelay = revealDelay,
+            )
         } else {
             SettingsSearchResults(query = query.trim(), onOpenEntry = onOpenEntry)
         }
+    }
+}
+
+/**
+ * 一次「逐块登场」的规格：等多久、要不要连高度一起长。
+ *
+ * `grow = false` 的场合（新树会恢复到一个非零滚动位置）：只做错峰淡入。
+ * 高度一变，ScrollState 就会把恢复的偏移夹到当前内容高度，锚点会被夹到 0。
+ */
+internal data class SettingsReveal(val delayMs: Long, val grow: Boolean)
+
+/**
+ * 一个入口行的进出容器。
+ *
+ * 用户 2026-11-18：「每个设置项都丝滑地收起、展开」。
+ * 行本身按最终尺寸测量一次，只有外层报出来的高度在长（`expandVertically` 裁切 + 报高度，
+ * 不会把缩小的约束传给子项）—— 所以六行依次长出来时，每帧都不会重排行内文字。
+ *
+ * `delayMs == null` 时退回静态 Column：不是布局切换的场合（首次进页、转屏重建）不该放动画。
+ */
+@Composable
+private fun SettingsEntryRowBlock(
+    reveal: SettingsReveal?,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    if (reveal == null) {
+        Column(Modifier.fillMaxWidth(), content = content)
+        return
+    }
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(reveal) {
+        if (reveal.delayMs > 0) delay(reveal.delayMs)
+        shown = true
+    }
+    AnimatedVisibility(
+        visible = shown,
+        enter = (if (reveal.grow) {
+            expandVertically(Motion.contentSize(), expandFrom = Alignment.Top)
+        } else {
+            EnterTransition.None
+        }) + fadeIn(MotionFade.alpha(MotionFade.swapEnter)),
+        exit = (if (reveal.grow) {
+            shrinkVertically(Motion.contentSize(), shrinkTowards = Alignment.Top)
+        } else {
+            ExitTransition.None
+        }) + fadeOut(MotionFade.alpha(MotionFade.exit)),
+        label = "settingsEntryRow",
+    ) {
+        Column(Modifier.fillMaxWidth(), content = content)
     }
 }
 
@@ -520,6 +643,9 @@ private fun LongPressGlyph(modifier: Modifier, tint: Color) {
 /**
  * 搜索框。
  *
+ * 两种布局共用的同一枚（2026-11-21 用户：完整布局也要有顶部搜索栏）：
+ * 紧凑布局里它筛入口，完整布局里它筛分区 —— 控件只认 query，不认布局。
+ *
  * 不用 M3 `OutlinedTextField`：它的描边由库内部的 container 自己画，圆角只能改 shape，
  * 但**高度被库锁在 56dp、圆角在视觉上被文字基线拉平** —— 用户 2026-11-14 的原话是
  * 「边框没有按照规范使用超椭圆曲线，圆角太小了」。这里改成自绘：
@@ -529,7 +655,9 @@ private fun LongPressGlyph(modifier: Modifier, tint: Color) {
  * - 整框可点（点空白也聚焦），焦点请求挂在 BasicTextField 上。
  */
 @Composable
-private fun SettingsSearchField(query: String, onQueryChange: (String) -> Unit) {
+internal fun SettingsSearchField(query: String, onQueryChange: (String) -> Unit) {
+    val clearLabel = stringResource(R.string.clear_search)
+    val keyboard = LocalSoftwareKeyboardController.current
     val interaction = remember { MutableInteractionSource() }
     val focused by interaction.collectIsFocusedAsState()
     val focusRequester = remember { FocusRequester() }
@@ -575,6 +703,9 @@ private fun SettingsSearchField(query: String, onQueryChange: (String) -> Unit) 
                 ),
                 cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                // 点了键盘上的「搜索」就收键盘：结果是本地即时筛的，没有第二个「执行」动作，
+                // 键盘留着只会挡住半屏结果
+                keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
                 interactionSource = interaction,
                 decorationBox = { inner ->
                     if (query.isEmpty()) {
@@ -591,8 +722,14 @@ private fun SettingsSearchField(query: String, onQueryChange: (String) -> Unit) 
         if (query.isNotEmpty()) {
             Box(
                 Modifier
-                    .size(28.dp)
-                    .clip(CircleShape)
+                    // 命中区 44dp（搜索框 52dp 内可容纳的上限），原来 28dp 只有一半；
+                    // 同时补名称与角色：AppIcon 未传 contentDescription 时，
+                    // 读屏会把这个 × 念成一个没有名字的按钮。
+                    .size(44.dp)
+                    .semantics(mergeDescendants = true) {
+                        contentDescription = clearLabel
+                        role = Role.Button
+                    }
                     .pressClick(tier = PressTier.Icon) { onQueryChange("") },
                 contentAlignment = Alignment.Center,
             ) {
@@ -606,21 +743,60 @@ private fun SettingsSearchField(query: String, onQueryChange: (String) -> Unit) 
     }
 }
 
+/**
+ * 完整布局的搜索：命中哪些**分区**。
+ *
+ * 紧凑布局的搜索落点是入口（点一条进二级页），完整布局没有二级页 ——
+ * 所有分区本来就摊在同一屏，所以这里的落点是「把没命中的分区藏起来」，
+ * 让命中项留在原位（空间记忆不丢）。两处用的是同一套 [settingsDocScore]，
+ * 同一句查询在两种布局里给出的命中范围必须一致，只是呈现方式不同。
+ *
+ * 分区名（含别名）命中即整块保留（用户搜「外貌」也要看到「外观」）；
+ * 否则看它下面的设置项标题。只认 [SettingsGroup.itemTitleRes] 这份清单 ——
+ * 它同时喂概览副行，不存在第二份索引。
+ *
+ * 这里**不认入口别名**：完整布局把分区当筛选单位，一句「备份」若把整个
+ * 「内容与数据」（内容 / 数据 / 拓展）都留下来，筛完几乎等于没筛。
+ */
+@Composable
+internal fun matchingGroups(query: String): Set<SettingsGroup> {
+    if (query.isBlank()) return emptySet()
+    val noise = searchNoiseWords()
+    val hits = mutableSetOf<SettingsGroup>()
+    SettingsGroup.entries.forEach { group ->
+        var matched = settingsDocScore(query, settingsGroupDoc(group), noise) > 0
+        if (!matched) {
+            for (res in group.itemTitleRes) {
+                if (settingsDocScore(query, settingsItemDoc(res), noise) > 0) {
+                    matched = true
+                    break
+                }
+            }
+        }
+        if (matched) hits += group
+    }
+    return hits
+}
+
 @Composable
 private fun SettingsEntryIndexCard(
     versionName: String,
     onOpenEntry: (SettingsEntry) -> Unit,
+    revealDelay: (SettingsEntry) -> SettingsReveal?,
 ) {
     SettingsOverviewCard {
         SettingsEntry.entries.forEachIndexed { index, entry ->
-            SettingsOverviewRow(
-                title = settingsEntryTitle(entry),
-                subtitle = settingsEntryItemLine(entry),
-                onClick = { onOpenEntry(entry) },
-                trailing = { SettingsEntryValue(entry, versionName) },
-            )
-            if (index != SettingsEntry.entries.lastIndex) {
-                SettingsOverviewDivider()
+            SettingsEntryRowBlock(reveal = revealDelay(entry)) {
+                SettingsOverviewRow(
+                    title = settingsEntryTitle(entry),
+                    subtitle = settingsEntryItemLine(entry),
+                    onClick = { onOpenEntry(entry) },
+                    trailing = { SettingsEntryValue(entry, versionName) },
+                )
+                // 分隔线跟着行一起长出来：它属于这一行，留在外面会在展开中途露出一条浮线
+                if (index != SettingsEntry.entries.lastIndex) {
+                    SettingsOverviewDivider()
+                }
             }
         }
     }
@@ -641,54 +817,63 @@ private data class SettingsSearchHit(
  * 带标题 + 辅助文本 + 所在层级。这里用「项标题 + 所属入口」实现面包屑，
  * 不做「直接跳到该项」—— 二级页是整组渲染的，跳项要额外做锚点测量，收益不抵复杂度。
  *
- * **模糊匹配**（用户 2026-11-14：「没有模糊搜索功能」）：
- * 纯 `contains` 只能命中连续子串，中文用户少打一个字（「主色」找「主题色」）就全空。
- * 评分见 [settingsMatchScore]：完全相等 > 前缀 > 包含 > 逐字子序列（允许跳字）。
+ * **同义词 + 模糊匹配**（用户 2026-11-14「没有模糊搜索功能」、2026-11-21
+ * 「外貌/颜色/学习提醒 都要能搜到」）：评分见 [settingsDocScore]，
+ * 标题与别名分开算，别名打一档折扣。
+ *
+ * **每个入口只出一条导航行**：入口名与它下面某个分区名同时命中时（「学习与提醒」vs
+ * 「学习提醒」），两行点进去是同一页，并列出来只是噪音 —— 留分高的那个名字当标题。
+ * 逐项命中（「提醒时间」「挡片颜色」）另算，它们是真正不同的设置项。
+ *
  * 结果按分数降序，同分保持「入口顺序 → 项顺序」，避免每次输入顺序抖动。
  */
 @Composable
 private fun SettingsSearchResults(query: String, onOpenEntry: (SettingsEntry) -> Unit) {
+    val noise = searchNoiseWords()
     val hits = mutableListOf<SettingsSearchHit>()
 
     SettingsEntry.entries.forEach { entry ->
         val entryTitle = settingsEntryTitle(entry)
-        val entryScore = settingsMatchScore(query, entryTitle)
-        if (entryScore > 0) {
+        val entryScore = settingsDocScore(query, settingsEntryDoc(entry), noise, entryLevel = true)
+        // 分区里分最高的那个：它比入口更具体，用户搜的词若正对着某个分区，就该停在那儿
+        var groupBestScore = 0
+        var groupBestTitle = entryTitle
+        entry.groups.forEach { group ->
+            val score = settingsDocScore(query, settingsGroupDoc(group), noise)
+            if (score > groupBestScore) {
+                groupBestScore = score
+                groupBestTitle = settingsGroupTitle(group)
+            }
+        }
+        val navScore = maxOf(entryScore, groupBestScore)
+        if (navScore > 0) {
+            val navTitle = if (entryScore >= groupBestScore) entryTitle else groupBestTitle
             hits += SettingsSearchHit(
                 entry = entry,
-                title = entryTitle,
-                subtitle = settingsEntryItemLine(entry),
-                score = entryScore + ENTRY_TITLE_BONUS,
+                title = navTitle,
+                // 标题就是入口名时，副行改成「包含哪几项」；否则写所属入口当面包屑
+                subtitle = if (navTitle == entryTitle) {
+                    settingsEntryItemLine(entry)
+                } else {
+                    entryTitle
+                },
+                score = navScore,
             )
         }
         entry.groups.forEach { group ->
             val groupTitle = settingsGroupTitle(group)
-            val groupScore = settingsMatchScore(query, groupTitle)
-            // 分区名与入口名常常一字不差（「外观」），此时上面那条已经报过，
-            // 再报一条会得到两行一模一样的「外观」，删掉低分的这条
-            if (groupScore > 0 && groupTitle != entryTitle) {
-                hits += SettingsSearchHit(
-                    entry = entry,
-                    title = groupTitle,
-                    subtitle = entryTitle,
-                    score = groupScore,
-                )
-            }
             group.itemTitleRes.forEach { itemRes ->
-                val itemTitle = stringResource(itemRes)
-                val itemScore = settingsMatchScore(query, itemTitle)
+                val itemScore = settingsDocScore(query, settingsItemDoc(itemRes), noise)
                 if (itemScore > 0) {
                     hits += SettingsSearchHit(
                         entry = entry,
-                        title = itemTitle,
+                        title = stringResource(itemRes),
                         subtitle = groupTitle,
                         score = itemScore,
                     )
                 }
             }
         }
-        // 合并入口（如「内容与数据」）的名字里可能含「数据」这种分区名之外的关键词，
-        // 上面已经按 entryTitle 算过一次；这里不再重复扫 groups 的标题。
     }
 
     if (hits.isEmpty()) {
@@ -722,57 +907,6 @@ private fun SettingsSearchResults(query: String, onOpenEntry: (SettingsEntry) ->
             }
         }
     }
-}
-
-/**
- * 模糊匹配打分。0 = 不匹配，分数越高越相关。
- *
- * 只做「逐字子序列」而不引入拼音库：中文输入法下用户敲的是汉字，
- * 「主色 → 主题色」这类跳字需求用子序列就能覆盖；上拼音首字母检索要背一整张拼音表，
- * 体积与维护成本都不值（真要做也该走系统 SearchManager，而不是在设置页塞一张表）。
- *
- * 多词查询用空格分隔，每个词都必须命中（AND 语义），取分数之和。
- */
-internal fun settingsMatchScore(query: String, text: String): Int {
-    val tokens = query.trim().lowercase().split(' ', '\u3000', '\t')
-        .filter { it.isNotEmpty() }
-    if (tokens.isEmpty()) return 1
-    val haystack = normalizeForSearch(text)
-    if (haystack.isEmpty()) return 0
-    var total = 0
-    for (token in tokens) {
-        val needle = normalizeForSearch(token)
-        if (needle.isEmpty()) continue
-        total += when {
-            haystack == needle -> SCORE_EXACT
-            haystack.startsWith(needle) -> SCORE_PREFIX
-            haystack.contains(needle) -> SCORE_CONTAINS
-            isSubsequence(needle, haystack) -> SCORE_SUBSEQUENCE
-            else -> return 0
-        }
-    }
-    return total
-}
-
-private fun normalizeForSearch(text: String): String =
-    buildString(text.length) {
-        for (ch in text) {
-            if (ch.isWhitespace() || ch == '·' || ch == '・') continue
-            append(ch.lowercaseChar())
-        }
-    }
-
-/** `needle` 的每个字按顺序出现在 `haystack` 里（允许中间跳字）。 */
-private fun isSubsequence(needle: String, haystack: String): Boolean {
-    if (needle.isEmpty()) return true
-    var i = 0
-    for (ch in haystack) {
-        if (ch == needle[i]) {
-            i++
-            if (i == needle.length) return true
-        }
-    }
-    return false
 }
 
 @Composable
@@ -848,11 +982,3 @@ private fun SettingsOverviewRow(
 // 副行里最多列几个标题：3 个刚好占满一行，再多就只剩省略号没有信息
 private const val PREVIEW_ITEM_COUNT = 3
 
-// 入口名命中的权重加成：搜「AI」时应当先看到「AI」这个入口，
-// 而不是散落在它下面的七个子项
-private const val ENTRY_TITLE_BONUS = 6
-
-private const val SCORE_EXACT = 100
-private const val SCORE_PREFIX = 80
-private const val SCORE_CONTAINS = 60
-private const val SCORE_SUBSEQUENCE = 30

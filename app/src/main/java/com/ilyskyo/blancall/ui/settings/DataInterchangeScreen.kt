@@ -121,8 +121,8 @@ fun DataInterchangeScreen(navController: NavController) {
         AmbientBackground()
         Column(
             Modifier
-                .fillMaxSize()
                 .widthIn(max = 760.dp)
+                .fillMaxSize()
                 .verticalScroll(rememberScrollState())
                 .padding(horizontal = 20.dp)
         ) {

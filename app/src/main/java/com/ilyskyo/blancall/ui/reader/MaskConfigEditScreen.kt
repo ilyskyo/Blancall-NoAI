@@ -169,7 +169,9 @@ fun MaskConfigEditScreen(
         bgMode == 1 || (bgMode == 0 && appBeige) -> Color(0xFF9A9184)
         else -> Color(0xFF9E9E9E)
     }
-    val accent = if (isDark) Color(0xFF7C9ED1) else MaterialTheme.colorScheme.primary
+    // 与阅读页同一条规则：强调色直接用主题主色（深色下 primaryDark 本身就是提亮版，
+    // 在纯黑上够亮）。旧版这里写死 #7C9ED1，换暖橙/翠绿主题后选中态仍是蓝的。
+    val accent = MaterialTheme.colorScheme.primary
     val fontFamily = remember(context, fontId, articlePrefs.fontWeight) {
         // 与阅读正文同字重，保证编辑器里的预览和进入阅读后一致
         ReaderFonts.resolveFontFamily(context, fontId, articlePrefs.fontWeight)

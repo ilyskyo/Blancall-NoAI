@@ -331,7 +331,8 @@ private fun SheetHeader(title: String, onCancel: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(44.dp),
+            // 44dp 是下限不是上限：标题 17sp/22sp 行高在字号放大后要能撑开
+            .heightIn(min = 44.dp),
         contentAlignment = Alignment.Center,
     ) {
         Text(
@@ -460,7 +461,9 @@ private fun ExportArticleRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(ArticleRowHeight)
+            // 两行文本（20sp + 18sp 行高）在 1.3× 应用字号下会超过 58dp，
+            // 写死 height 会让相邻两行重叠；min 保证默认字号下高度不变。
+            .heightIn(min = ArticleRowHeight)
             .pressFeedback(src, tier = PressTier.Plain)
             .toggleable(
                 value = selected,

@@ -131,8 +131,8 @@ fun PracticeHistoryScreen(
         AmbientBackground()
         Column(
             modifier = Modifier
-                .fillMaxSize()
                 .widthIn(max = 600.dp)
+                .fillMaxSize()
                 .padding(horizontal = 20.dp),
         ) {
             Row(

@@ -61,6 +61,11 @@
     <string name="settings_layout_full">完整版面</string>
     <string name="settings_layout_hint">長按標題可切換版面</string>
     <string name="settings_layout_hint_sub">版面會記住，下次打開還是這個樣子</string>
+    <string name="settings_layout_switched_full">已切換到完整版面 · 長按標題可切回</string>
+    <string name="settings_layout_switched_compact">已切換到精簡版面 · 長按標題可切回</string>
+    <string name="settings_layout_undo">復原</string>
+    <string name="settings_layout_state_compact">目前為精簡版面 · %1$d 個入口</string>
+    <string name="settings_layout_state_full">目前為完整版面 · %1$d 組</string>
     <string name="settings_hint_got_it">知道了</string>
     <string name="settings_search_hint">搜尋設定項目</string>
     <string name="settings_search_empty">沒有符合的設定項目</string>
@@ -73,6 +78,24 @@
     <string name="settings_entry_about">關於與支持</string>
     <string name="settings_group_more">另 %1$d 項</string>
     <string name="settings_item_theme_mode">深淺模式</string>
+    <string name="settings_reading_font_size">字級</string>
+    <string name="settings_reading_line_height">行距</string>
+    <string name="settings_reading_mask_desc">把正文裡的詞語或複句遮住，靠回憶讀下去</string>
+    <string name="settings_reading_mask_granularity">遮擋粒度</string>
+    <string name="settings_pdf_view">PDF 預覽</string>
+    <string name="settings_reading_apply_all">讓所有文章改用這裡的設定</string>
+    <string name="settings_reading_apply_all_desc">單獨調整過的文章也會被覆蓋</string>
+    <string name="settings_reading_apply_all_confirm_title">套用到所有文章？</string>
+    <string name="settings_reading_apply_all_confirm_msg">所有文章的字級、行距、字體、背景與遮擋都會改成這裡的值；每篇自己的自訂遮擋設定會保留。</string>
+    <string name="settings_reading_applied">已套用到所有文章</string>
+    <string name="settings_reading_scope_hint">這裡是所有文章的預設值。某篇在閱讀模式裡單獨調過，就以那篇為準。</string>
+    <string name="settings_practice_title">練習</string>
+    <string name="settings_handwriting_default">預設手寫作答</string>
+    <string name="settings_handwriting_default_desc">進入練習直接用筆，不必每次切換輸入方式</string>
+    <string name="settings_practice_back_warn">練習中途離開時提醒</string>
+    <string name="settings_practice_back_warn_desc">有還沒提交的作答時，先問一句再走</string>
+    <string name="settings_exam_date">考試日期</string>
+    <string name="settings_exam_unset">未設定</string>
     <string name="add_card">添加卡片</string>
     <string name="edit_card_config">編輯卡片設定</string>
     <string name="delete_card">刪除卡片</string>
@@ -1389,7 +1412,7 @@
     <string name="handwriting_symbol_bar">啟用符號列</string>
     <string name="handwriting_symbol_bar_desc">手寫板下方的一鍵符號列；關掉後書寫區更高</string>
     <string name="handwriting_symbols">符號列內容</string>
-    <string name="handwriting_symbols_desc">勾選常用符號，末尾可補自己常用的字元</string>
+    <string name="handwriting_symbols_desc">勾選或新增常用符號，多到一行放不下時可左右滑動</string>
     <string name="handwriting_symbols_count">中文 %1$d · 英文 %2$d</string>
     <string name="handwriting_auto_commit_weak">低相似度也直接上屏</string>
     <string name="handwriting_auto_commit_weak_desc">不再為不確定的字停下選字；疑似連寫多字與生僻字仍會攔截</string>
@@ -1397,8 +1420,12 @@
     <string name="handwriting_symbols_cjk">中文</string>
     <string name="handwriting_symbols_latin">英文</string>
     <string name="handwriting_symbols_add">補充字元</string>
-    <string name="handwriting_symbols_add_hint">輸入預設裡沒有的字元</string>
+    <string name="handwriting_symbols_add_hint">輸入一個符號，如 ° 或 ≤</string>
     <string name="handwriting_symbols_reset">還原預設</string>
+    <string name="handwriting_symbols_total">共 %1$d 個</string>
+    <string name="handwriting_symbols_add_action">新增</string>
+    <string name="handwriting_symbols_added">已新增 · 點按移除</string>
+    <string name="handwriting_symbols_only_cjk_latin">符號列只用於中文和英文的標點與符號：一次只能加一個符號，漢字、英文字母與整段文字都加不進來。</string>
     <string name="reminder_freq_daily">每天</string>
     <string name="reminder_freq_five">每週5天</string>
     <string name="reminder_freq_three">每週3天</string>
@@ -1624,6 +1651,13 @@
     <string name="help_171">資料頁 · 學習任務流</string>
     <string name="help_172">在「資料」頁捲到最頂端，繼續往下拉；圓環拉滿、手機震動一下再鬆手 → 打開學習任務流（按時間排出正在計劃中的文章）</string>
     <string name="help_173">任務流裡每篇都能暫停、恢復或調整下次複習時間；滑到底再上拉，或點左上角返回，回到資料頁</string>
+    <string name="help_174">手寫作答</string>
+    <string name="help_175">作答區切到「手寫」後，寫出的字直接落進目前的空；寫錯了可以撤回，劃一筆就是刪掉。</string>
+    <string name="help_176">符號列</string>
+    <string name="help_177">手寫區下方那一行就是符號列：點一個符號即插入，不用切回鍵盤。</string>
+    <string name="help_178">符號多到一行放不下時，在那行裡左右滑動就能看到後面的。</string>
+    <string name="help_179">內容在「設定」裡的「符號列內容」設定：中文、英文各一套；勾選常用符號，或自己補一個。</string>
+    <string name="help_180">符號列只支援中文和英文的標點與符號：補充字元一次只能加一個符號，漢字、英文字母與整段文字都加不進來。</string>
     <string name="help_std_welcome_title">歡迎使用 Blancall</string>
     <string name="help_std_welcome_sub">先花幾分鐘了解基本用法，即可開始背誦</string>
     <string name="help_std_start">開始使用 Blancall</string>
@@ -1859,4 +1893,23 @@
     <plurals name="hint_length_badge">
         <item quantity="other">%1$d 字</item>
     </plurals>
+    <string name="backup_importing_title">正在還原</string>
+    <string name="backup_importing_body">正在寫入備份並重新載入學習資料，請勿關閉應用程式。</string>
+    <string name="a11y_reveal_paragraph">顯示本段</string>
+    <!-- 搜尋別名：只餵設定頁的檢索，不在介面上顯示（SettingsSearch.kt）。 -->
+    <string name="settings_search_alias_appearance">外貌,樣子,長相,皮膚,換膚,介面,樣式,主題,深淺,深色,淺色,夜間,暗黑,字體,字號,語言,玻璃,觸感,震動,首頁</string>
+    <string name="settings_search_alias_theme_color">顏色,配色,主色,強調色,色調,取色,自訂,主題顏色,色板,換膚</string>
+    <string name="settings_search_alias_features">特性,功能,首行縮排,縮排,符號欄,符號,手寫,筆跡,墨跡,動畫,翻頁,自動確認</string>
+    <string name="settings_search_alias_reading">閱讀,閱讀字體,字號,字體,行距,行高,版面,背景,遮擋,擋片,擋片顏色,pdf,速度,字重,排版</string>
+    <string name="settings_search_alias_practice">練習,提示,提示長度,挖空,填空,手寫,警告,返回,預設</string>
+    <string name="settings_search_alias_plan">記憶,方案,計畫,複習,間隔,考試,考試日期,目標,時長,進度</string>
+    <string name="settings_search_alias_reminder">提醒,通知,推送,時間,星期,頻率,勿擾,安靜,鬧鐘</string>
+    <string name="settings_search_alias_help">說明,幫助,教學,引導,使用指引,重新播放,重設</string>
+    <string name="settings_search_alias_content">內容,管理,標籤,分類,文章</string>
+    <string name="settings_search_alias_data">資料,備份,匯出,匯入,還原,歸檔,儲存,大小</string>
+    <string name="settings_search_alias_extensions">擴充,擴展,書庫,素材庫,內容包,內建,哲學,西哲,高考,互換</string>
+    <string name="settings_search_alias_about">關於,版本,品牌,資訊</string>
+    <string name="settings_search_alias_donation">贊賞,打賞,支持,捐贈,贊助</string>
+    <!-- 检索噪音词：用户会在实词前加的修饰（「软件颜色」里的「软件」），剥掉后仍按实词查 -->
+    <string name="settings_search_noise">app,軟體,應用,我的,這個,那個</string>
 </resources>
